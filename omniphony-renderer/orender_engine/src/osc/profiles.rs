@@ -186,6 +186,71 @@ fn resolve_profile_layout(
     }
 }
 
+/// Adopt the live state a departing host handed off, when resuming from standby.
+///
+/// `enter_standby` writes this instance's unsaved live state to the sidecar so
+/// the successor (the mpv-embedded renderer taking the RX port) starts from it.
+/// The return leg had no counterpart: this process stays alive across the yield,
+/// so nothing ever re-read the config, and `resume` only re-bound the listener.
+/// Everything changed in Studio while mpv held the port was therefore dropped
+/// the moment we took the port back — and, worse, silently overwritten by our
+/// stale pre-yield state on the next save.
+///
+/// The handoff is symmetric: whichever side departs leaves its state behind,
+/// and whichever side takes the port over reads it.
+///
+/// The read is unconditional — the saved config every time, plus the sidecar if
+/// one is there. The departing host may have left unsaved edits (sidecar) or
+/// saved over `config.yaml`, which clears the dirty flag and so writes no
+/// sidecar at all; and it may have done neither. Rather than detect which, this
+/// simply re-reads: after standing by, the file is authoritative and our
+/// in-memory state is not evidence of anything.
+///
+/// An earlier revision gated the config leg on the file's mtime having moved.
+/// That worked, but it made correctness depend on filesystem timestamp
+/// granularity and on nothing else writing within the same tick — a whole class
+/// of "did we notice?" bugs, for the sake of skipping a rebuild at the one
+/// moment the instance is already re-acquiring its audio output. Not worth the
+/// ambiguity.
+///
+/// `load_or_default_with_live` is consume-once, so this both reads and clears
+/// the sidecar. Reuses the profile-switch application path: a config arriving
+/// from outside the process is the same problem as a profile being switched in
+/// — re-seed the live params, stage the layout, rebuild the topology in the
+/// background while audio keeps playing on the previous one.
+pub(crate) fn adopt_handoff_live_state(
+    control: &Arc<RendererControl>,
+    socket: &Arc<UdpSocket>,
+    clients: &Arc<OscClientRegistry>,
+    gaintable_cache: &Arc<GaintableCache>,
+) {
+    let Some(path) = control.config_path.lock().as_ref().cloned() else {
+        return;
+    };
+    let (config, restored) = renderer::config::Config::load_or_default_with_live(&path);
+    apply_switched_profile(&config, control, socket, clients, gaintable_cache);
+    if restored {
+        // Sidecar state only ever lived in that file, so it is unsaved by
+        // definition — the save indicator must show it as pending, exactly as
+        // the engine does when it restores a sidecar at startup.
+        control.mark_dirty();
+    } else {
+        // Adopted straight from config.yaml, which the departing host saved.
+        // Marking it dirty here would invent a phantom unsaved diff against the
+        // very file it came from.
+        control.mark_clean();
+    }
+    // The save flag alone changes nothing on the wire: the state bundle is
+    // re-broadcast off the live-state generation. Without this the adoption
+    // would be applied to the audio but never reach Studio, which would keep
+    // displaying — and then save — the values we just replaced.
+    control.bump_live_state();
+    log::info!(
+        "standby resume: adopted the live state handed off by the previous host ({})",
+        if restored { "sidecar" } else { "saved config" }
+    );
+}
+
 /// Apply the freshly switched-in `render:` section to the running engine:
 /// stage the profile's layout, re-seed the live params through the shared
 /// construction seeds, and kick the background topology rebuild. Audio keeps
