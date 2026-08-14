@@ -1804,12 +1804,14 @@ fn interp_survives_speaker_cascade_width_switch() {
     let out = r.render_frame(&pcm, 1, &event, Vec::new(), false).unwrap();
     assert_eq!(out.samples.len(), 40 * 12);
     // Switch to the 13-wide cascade, render, and back — must not panic and
-    // must keep producing signal.
+    // must keep producing signal. A mode change is deliberately not instant:
+    // the old path keeps rendering while it fades out (see `OutputModeFade`),
+    // so pump frames until the new width appears.
     set_mode(&mut r, crate::live_params::OutputMode::Binaural);
-    let out = r.render_frame(&pcm, 1, &[], Vec::new(), false).unwrap();
+    let out = render_until_width(&mut r, &pcm, 40 * 2);
     assert_eq!(out.samples.len(), 40 * 2, "cascade output must be stereo");
     set_mode(&mut r, crate::live_params::OutputMode::SpeakerArray);
-    let out = r.render_frame(&pcm, 1, &[], Vec::new(), false).unwrap();
+    let out = render_until_width(&mut r, &pcm, 40 * 12);
     assert_eq!(out.samples.len(), 40 * 12);
     assert!(
         out.samples.iter().any(|s| s.abs() > 1e-6),
@@ -1819,3 +1821,246 @@ fn interp_survives_speaker_cascade_width_switch() {
 
 // TODO: Add integration test with real spatial metadata
 // For now, testing is done via real spatial audio content decoding
+
+/// Render until the output-mode cross-fade has settled at `expect_samples`.
+///
+/// A live mode change is deferred: the outgoing path keeps rendering while it
+/// ramps to silence, so the new channel width only appears a few blocks later
+/// (see `OutputModeFade`). Every frame in between is still self-consistent —
+/// that is the invariant the fade protects — so this just pumps until the width
+/// changes, and fails loudly rather than looping forever.
+fn render_until_width(
+    r: &mut SpatialRenderer,
+    pcm: &[f32],
+    expect_samples: usize,
+) -> RenderedFrame {
+    for _ in 0..64 {
+        let out = r.render_frame(pcm, 1, &[], Vec::new(), false).unwrap();
+        assert_eq!(
+            out.samples.len(),
+            out.n_channels * (pcm.len() / 1),
+            "every frame must describe its own geometry, mid-fade included"
+        );
+        if out.samples.len() == expect_samples {
+            return out;
+        }
+    }
+    panic!("output-mode cross-fade never settled at {expect_samples} samples");
+}
+
+/// A rendered frame must describe its own geometry, so a live output-mode flip
+/// cannot make the caller mis-read it.
+///
+/// The engine used to pair `rendered.samples` with a freshly-read
+/// `output_channel_count()`. The OSC listener flips that mode on another
+/// thread, so a switch to speakers landing after a binaural render published
+/// "12 channels" for 2-channel data; the host then copied `n_frames * 12`
+/// floats out of a buffer holding a sixth of that, reading adjacent heap and
+/// playing it as PCM. Only on the way back to speakers, because that is the
+/// direction where the count grows.
+#[test]
+fn rendered_frame_reports_the_geometry_it_produced() {
+    let mut renderer = SpatialRenderer::new(
+        SpeakerLayout::preset("7.1.4").unwrap(),
+        48_000,
+        1,
+        1,
+        0.0,
+        2.0,
+        VbapTableMode::Cartesian {
+            x_size: 21,
+            y_size: 21,
+            z_size: 9,
+            z_neg_size: 9,
+        },
+        false,
+        false,
+        DistanceModel::Linear,
+        false,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        false,
+        [1.0, 2.0, 0.5],
+        2.0,
+        0.5,
+        0.0,
+        0.0,
+        false,
+        false,
+        false,
+        1.0,
+        1.0,
+        PreferredEvaluationMode::PrecomputedCartesian,
+        LiveEvaluationMode::PrecomputedCartesian,
+        21,
+        21,
+        9,
+        9,
+    )
+    .unwrap();
+
+    let frames = 40;
+    let pcm: Vec<f32> = (0..frames)
+        .map(|i| (i * 7 % 13) as f32 / 13.0 - 0.5)
+        .collect();
+    let event = vec![SpatialChannelEvent {
+        channel_idx: 0,
+        is_bed: false,
+        gain_db: Some(0),
+        ramp_length: Some(frames as u32),
+        size: Some([0.0, 0.0, 0.0]),
+        position: Some([0.3, -0.2, 0.4]),
+        sample_pos: Some(0),
+    }];
+
+    let speakers = renderer.num_speakers();
+    assert!(
+        speakers > 2,
+        "7.1.4 must have more channels than a stereo pair"
+    );
+
+    let spk = renderer
+        .render_frame(&pcm, 1, &event, Vec::new(), false)
+        .unwrap();
+    assert_eq!(
+        spk.n_channels, speakers,
+        "speaker render reports its own width"
+    );
+    assert_eq!(spk.samples.len(), frames * spk.n_channels);
+
+    renderer.control.live.write().binaural.output_mode = crate::live_params::OutputMode::Binaural;
+
+    // The switch is deferred by the cross-fade, so the width changes a few
+    // blocks later. `render_until_width` asserts the geometry invariant on every
+    // frame it pumps, mid-fade ones included.
+    let bin = render_until_width(&mut renderer, &pcm, frames * 2);
+    assert_eq!(bin.n_channels, 2, "binaural render is a stereo ear pair");
+    assert_eq!(bin.samples.len(), frames * bin.n_channels);
+
+    // The regression: flipping back to speakers after the render must not
+    // retroactively change what this frame says about itself.
+    renderer.control.live.write().binaural.output_mode =
+        crate::live_params::OutputMode::SpeakerArray;
+    assert_eq!(
+        bin.n_channels, 2,
+        "a completed binaural frame must keep reporting 2 channels even though \
+         the live mode now says speakers — this is exactly the mismatch that \
+         made the host read past the end of the buffer"
+    );
+    assert_eq!(bin.samples.len(), frames * bin.n_channels);
+}
+
+/// A mode change must be ramped, not stepped.
+///
+/// The binaural and speaker paths are independent DSP chains; swapping them
+/// mid-sample steps the waveform and clicks. The switch therefore fades the
+/// outgoing path to silence, changes mode at the bottom, and fades the incoming
+/// one back up. This pins both halves: the last block of the old width must end
+/// near silence, and the first block of the new width must start there.
+#[test]
+fn an_output_mode_change_is_ramped_not_stepped() {
+    let mut r = SpatialRenderer::new(
+        SpeakerLayout::preset("7.1.4").unwrap(),
+        48_000,
+        1,
+        1,
+        0.0,
+        2.0,
+        VbapTableMode::Cartesian {
+            x_size: 21,
+            y_size: 21,
+            z_size: 9,
+            z_neg_size: 9,
+        },
+        false,
+        false,
+        DistanceModel::Linear,
+        false,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        false,
+        [1.0, 2.0, 0.5],
+        2.0,
+        0.5,
+        0.0,
+        0.0,
+        false,
+        false,
+        false,
+        1.0,
+        1.0,
+        PreferredEvaluationMode::PrecomputedCartesian,
+        LiveEvaluationMode::PrecomputedCartesian,
+        21,
+        21,
+        9,
+        9,
+    )
+    .unwrap();
+
+    // Steady input, so any envelope in the output is the fade and not the
+    // programme.
+    let frames = 40;
+    let pcm: Vec<f32> = vec![0.5; frames];
+    let event = vec![SpatialChannelEvent {
+        channel_idx: 0,
+        is_bed: false,
+        gain_db: Some(0),
+        ramp_length: Some(frames as u32),
+        size: Some([0.0, 0.0, 0.0]),
+        position: Some([0.3, -0.2, 0.4]),
+        sample_pos: Some(0),
+    }];
+
+    let speakers = r.num_speakers();
+    // Settle on the speaker path and confirm it is actually producing signal.
+    let mut last = r.render_frame(&pcm, 1, &event, Vec::new(), false).unwrap();
+    for _ in 0..4 {
+        last = r.render_frame(&pcm, 1, &event, Vec::new(), false).unwrap();
+    }
+    let steady_peak = last.samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        steady_peak > 1e-3,
+        "speaker path must produce signal to fade"
+    );
+
+    r.control.live.write().binaural.output_mode = crate::live_params::OutputMode::Binaural;
+
+    // Pump until the width flips, keeping the final old-width block.
+    let mut last_old = None;
+    let mut first_new = None;
+    for _ in 0..64 {
+        let out = r.render_frame(&pcm, 1, &event, Vec::new(), false).unwrap();
+        if out.n_channels == speakers {
+            last_old = Some(out);
+        } else {
+            first_new = Some(out);
+            break;
+        }
+    }
+    let last_old = last_old.expect("expected blocks on the outgoing width");
+    let first_new = first_new.expect("the cross-fade never reached the new width");
+
+    let tail_peak = last_old.samples[last_old.samples.len() - speakers..]
+        .iter()
+        .fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        tail_peak < steady_peak * 0.2,
+        "the outgoing path must ramp to near silence before the mode changes \
+         (tail {tail_peak:.5} vs steady {steady_peak:.5})"
+    );
+
+    let head_peak = first_new.samples[..2]
+        .iter()
+        .fold(0.0f32, |m, s| m.max(s.abs()));
+    let new_peak = first_new.samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        head_peak <= new_peak * 0.5,
+        "the incoming path must start from silence, not at full level \
+         (head {head_peak:.5} vs block peak {new_peak:.5})"
+    );
+}
