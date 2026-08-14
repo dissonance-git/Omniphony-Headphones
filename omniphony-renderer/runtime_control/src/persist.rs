@@ -35,8 +35,7 @@ pub fn save_live_config(
     save_live_config_to_path(control, host, &path, &path)?;
     control.mark_clean();
     // A deliberate save supersedes any pending live-handoff overlay.
-    let _ = std::fs::remove_file(renderer::config::live_sidecar_path(&path));
-    renderer::config::clear_live_overlay_cache();
+    renderer::config::discard_live_sidecar(&path);
 
     Ok(SaveLiveConfigResult {
         path,
@@ -55,8 +54,24 @@ pub fn save_live_config_to_path(
     base_path: &std::path::Path,
     out_path: &std::path::Path,
 ) -> Result<()> {
-    let live = control.live.read();
     let mut config = renderer::config::Config::load_or_default(base_path);
+    store_live_into_config(control, host, &mut config);
+    config.save(out_path)?;
+
+    Ok(())
+}
+
+/// Serialize the current live state into `config.render` (creating the render
+/// section if needed) without touching disk. The write half of
+/// [`save_live_config_to_path`], shared with the OSC profile operations, which
+/// commit the live state into the outgoing profile before switching
+/// (docs/config-profiles.md).
+pub fn store_live_into_config(
+    control: &Arc<RendererControl>,
+    host: Option<&dyn HostControlHandler>,
+    config: &mut renderer::config::Config,
+) {
+    let live = control.live.read();
     let render = config.render.get_or_insert_with(Default::default);
     let requested_bridge_path = control.bridge_path();
     render.bridge_path = requested_bridge_path;
@@ -323,8 +338,4 @@ pub fn save_live_config_to_path(
     if let Some(h) = host {
         h.amend_saved_config(render);
     }
-
-    config.save(out_path)?;
-
-    Ok(())
 }

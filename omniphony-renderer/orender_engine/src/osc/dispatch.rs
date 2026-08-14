@@ -560,6 +560,14 @@ pub(crate) fn handle_control_message(
         return;
     }
 
+    // Named config profiles: switch / create / delete / rename
+    // (docs/config-profiles.md). Handled before the process commands so the
+    // profile addresses never fall through to the host.
+    if super::profiles::handle_profile_message(msg, control, host, socket, clients, gaintable_cache)
+    {
+        return;
+    }
+
     if let Some(command) = parse_process_command(msg) {
         match command {
             RuntimeCommand::SaveConfig => save_live_config(control, host, socket, clients),
@@ -737,8 +745,7 @@ fn persist_render_field_to_path(
         return;
     }
     // A persisted change supersedes any pending live-handoff overlay.
-    let _ = std::fs::remove_file(renderer::config::live_sidecar_path(path));
-    renderer::config::clear_live_overlay_cache();
+    renderer::config::discard_live_sidecar(path);
 }
 
 /// Persist the head-tracking recenter reference to the on-disk config so the
