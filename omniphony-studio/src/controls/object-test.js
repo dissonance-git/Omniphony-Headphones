@@ -1253,8 +1253,15 @@ export function renderObjectTestUI() {
     snapNote.style.display = snapOn && !axes ? 'block' : 'none';
     if (snapOn && !axes) snapNote.textContent = t('objectTest.snapNoGrid');
   }
-  const toggle = el('objectTestEnableToggle');
-  if (toggle) toggle.checked = enabled;
+  const play = el('objectTestPlayBtn');
+  if (play) {
+    play.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    // The label is the action the press will take, not the current state —
+    // that is what a screen reader announces and what the tooltip should say.
+    const label = t(enabled ? 'objectTest.stop' : 'objectTest.play');
+    play.title = label;
+    play.setAttribute('aria-label', label);
+  }
   const box = el('objectTestLevelBox');
   if (box) box.textContent = `${levelDb()} dBFS`;
   const slider = el('objectTestLevelSlider');
@@ -1381,10 +1388,17 @@ export function setupObjectTestListeners() {
     }
   } catch (_) { /* keep the default */ }
 
-  const toggle = el('objectTestEnableToggle');
-  if (toggle) {
-    toggle.addEventListener('change', () => {
-      enabled = toggle.checked;
+  const play = el('objectTestPlayBtn');
+  if (play) {
+    play.addEventListener('click', () => {
+      enabled = !enabled;
+      // State the orbit on every start, not only when the panel first appeared.
+      // It is transient renderer state that Studio owns, and the renderer may
+      // not have existed when it was last sent — at boot the panel is restored
+      // before the connection is up, and a renderer restarted underneath an open
+      // Studio comes back with no orbit at all. The symptom was a source that
+      // sat still until the radius was nudged, which is what re-sent it.
+      if (enabled) sendRotation();
       send();
       renderObjectTestUI();
       pushSource();
