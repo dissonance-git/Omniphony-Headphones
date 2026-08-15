@@ -25,14 +25,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { app } from '../state.js';
 import { t, onLocaleChange, i18nState } from '../i18n.js';
 import { setIdleFeedRequest } from './test-idle-feed.js';
-import {
-  updateObjectTestMarker,
-  refreshObjectTestMarkerProjection,
-  relabelObjectTestMarker,
-  clearObjectTestTrail
-} from '../scene/object-test-marker.js';
+import { updateSource, removeSource, setSelectedSource, updateSourceLevel } from '../sources.js';
+import { OBJECT_TEST_SOURCE_ID } from '../object-test-id.js';
+
+export { OBJECT_TEST_SOURCE_ID };
+
 
 const LEVEL_KEY = 'objectTest.levelDb.v1';
+const FEATURE_KEY = 'objectTest.feature.v1';
+const SNAP_KEY = 'objectTest.snap.v1';
 const ISOLATION_KEY = 'objectTest.isolation.v1';
 const POSITION_KEY = 'objectTest.position.v1';
 /**
@@ -101,6 +102,13 @@ const FACES = [
   },
 ];
 
+/** Set from storage at setup, applied once the scene can take it. */
+let bootFeatureOn = false;
+/** Muted from the object list's M/S buttons. Distinct from not playing. */
+let testMuted = false;
+/** Snap placed positions to the renderer's Cartesian grid. */
+let snapOn = false;
+
 /** Current source position, ADM Cartesian. Front-centre at ear level. */
 let position = [0, 1, 0];
 /**
@@ -112,39 +120,78 @@ let enabled = false;
 /** Guards against redrawing faces when only the marker moved. */
 let builtRatioKey = null;
 /**
- * Whether the panel is open. The 3D marker follows this rather than `enabled`:
- * the source is worth seeing in the room while you are placing it, not only
- * once it is making noise.
+ * Whether the injected object exists at all. Separate from `enabled`, which is
+ * whether it is making noise: the object is worth having in the room — visible,
+ * selectable, placeable — before anything is heard.
  */
-let panelOpen = false;
+let featureOn = false;
 
 /**
  * Where the renderer says the source actually is, or null when it has not said.
- *
- * Only the renderer knows: it owns the orbit phase. The 2D faces deliberately
- * keep showing the *placed* position instead — those markers are the handle you
- * drag, and a handle that runs away from the pointer is not a handle.
+ * Only the renderer knows: it owns the orbit phase.
  */
 let reportedPosition = null;
 
-/** The renderer reported the source's live position. */
-export function setObjectTestReportedPosition(p) {
+/**
+ * The renderer reported the source's live position and level.
+ *
+ * The level goes through the same `updateSourceLevel` every other object's
+ * meter uses, so the row's gauge, its decay and its peak hold are the shared
+ * ones. Studio could not compute this itself: the level control is a target
+ * the generator is scaled towards and clamped at, so what is produced is a
+ * little under it — a meter fed from the request would be a label.
+ */
+export function setObjectTestReportedPosition(p, meter) {
   if (!Array.isArray(p) || p.length !== 3 || !p.every(Number.isFinite)) return;
   reportedPosition = p;
-  syncMarker();
+  pushSource();
+  if (featureOn && meter) {
+    updateSourceLevel(OBJECT_TEST_SOURCE_ID, {
+      peakDbfs: Number(meter.peakDbfs ?? -100),
+      rmsDbfs: Number(meter.rmsDbfs ?? -100),
+    });
+  }
 }
 
-/** Mirror the current state onto the 3D scene marker. */
-function syncMarker() {
-  updateObjectTestMarker({
-    // The scene shows where the source *is*; the faces show where it was put.
-    // While a test runs those differ by the orbit, and the 3D view is the one
-    // that can afford to move.
-    position,
-    reported: enabled ? reportedPosition : null,
-    visible: panelOpen || enabled,
-    playing: enabled,
-    orbit: orbitPath(128),
+/**
+ * Mute the injected source.
+ *
+ * Routed here rather than to `control_object_mute`, which addresses objects by
+ * *number* — this one has a name, so that command would send NaN and the M
+ * button would do nothing at all, which is what it did. Muting simply stops
+ * sending the signal while remembering that it was playing, so unmuting
+ * resumes rather than requiring the play switch again.
+ */
+export function setObjectTestMuted(muted) {
+  const next = Boolean(muted);
+  if (next === testMuted) return;
+  testMuted = next;
+  send();
+}
+
+/**
+ * Publish the injected object into the source registry, so everything that
+ * draws, lists, meters and selects an object handles this one too.
+ *
+ * Nothing here draws anything. That is the point of making it a real source:
+ * the sphere, the outline, the trail, the label, the list row and the level
+ * meter are the ones every other object gets, and they follow the user's
+ * display settings without this module knowing they exist.
+ *
+ * The scene shows where the source *is* — the renderer's reported position
+ * while it plays, the placed one otherwise. The 2D faces keep showing the
+ * placed position regardless: those markers are the handle you drag, and a
+ * handle that runs away from the pointer is not a handle.
+ */
+function pushSource() {
+  if (!featureOn) return;
+  const at = enabled && reportedPosition ? reportedPosition : position;
+  updateSource(OBJECT_TEST_SOURCE_ID, {
+    x: at[0],
+    y: at[1],
+    z: at[2],
+    coordMode: 'cartesian',
+    name: t('objectTest.markerLabel'),
   });
 }
 
@@ -192,7 +239,9 @@ function roomRatio() {
 /** Push the current state to the renderer. */
 function send() {
   invoke('control_object_test', {
-    on: enabled,
+    // Muted counts as off to the renderer: there is no separate mute for a
+    // source it does not otherwise know about.
+    on: enabled && !testMuted,
     x: position[0],
     y: position[1],
     z: position[2],
@@ -200,6 +249,75 @@ function send() {
     size: 0,
     isolation: isolation(),
   }).catch(() => { /* renderer gone */ });
+}
+
+// ── Snap to the renderer's Cartesian grid ───────────────────────────────────
+//
+// When the render backend is precomputed on a Cartesian grid, a position
+// between two nodes is not a position between two answers: with position
+// interpolation off the lookup is nearest-cell, so everything inside a cell
+// renders identically. Snapping puts the source on the node it would be
+// rounded to anyway, which turns "somewhere near here" into "this cell".
+//
+// **The published sizes are INTERVAL counts, not node counts.** `snapshot.rs`
+// sends `live.evaluation.cartesian.*`, which the renderer turns into an
+// evaluator config by adding one (`live_params.rs`: `x_size.max(1) + 1`) before
+// handing it to `evenly_spaced_axis`. So a published 62 means 63 nodes at a
+// step of 2/62 — and, because 62 is even, a node exactly at zero.
+//
+// That is not a coincidence, and it is why reading this wrong matters. The
+// bridge picks the default to mirror the OAMD position quantisation: Atmos
+// encodes x and y on 6 bits at a scale of 1/62 and the bridge maps them with
+// `(x - 0.5) * 2`, so the decodable positions are exactly `code/31 - 1` for
+// code 0..62 — 63 values, centred on zero. z is a sign bit plus 4 bits at 1/15,
+// which is why its two halves join seamlessly at a step of 1/15. Every position
+// an Atmos stream can express is a node of this grid. Snapping to a grid built
+// from the wrong count would miss all of them.
+//
+// z is still not one axis: its negative half is `z_neg_size` nodes spaced
+// 1/z_neg_size and stopping short of zero (that node belongs to the positive
+// half), its positive half is `z_size + 1` nodes from zero. Hence an explicit
+// list of nodes rather than a step.
+
+/** The grid the renderer is actually sampling on, or null when there is none. */
+function gridAxes() {
+  const g = app.vbapCartesianState || {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : 0);
+  // Intervals, as published.
+  const xI = n(g.xSize);
+  const yI = n(g.ySize);
+  const zI = n(g.zSize);
+  const zNegNodes = Math.max(0, n(g.zNegSize));
+  if (xI < 1 || yI < 1 || zI < 1) return null;
+
+  const evenly = (count, min, max) => {
+    if (count <= 1) return [min];
+    const step = (max - min) / (count - 1);
+    return Array.from({ length: count }, (_, i) => min + step * i);
+  };
+  const zAxis = [];
+  for (let i = 0; i < zNegNodes; i += 1) zAxis.push(-1 + i / zNegNodes);
+  zAxis.push(...evenly(zI + 1, 0, 1));
+  return [evenly(xI + 1, -1, 1), evenly(yI + 1, -1, 1), zAxis];
+}
+
+/** Nearest node on one axis. */
+function nearest(nodes, v) {
+  let best = nodes[0];
+  let bestD = Math.abs(v - best);
+  for (const n of nodes) {
+    const d = Math.abs(v - n);
+    if (d < bestD) { bestD = d; best = n; }
+  }
+  return best;
+}
+
+/** Pull a position onto the grid, or return it untouched when there is none. */
+function snapToGrid(p) {
+  if (!snapOn) return p;
+  const axes = gridAxes();
+  if (!axes) return p;
+  return [nearest(axes[0], p[0]), nearest(axes[1], p[1]), nearest(axes[2], p[2])];
 }
 
 // ── Radius: marked at the room's own distances ──────────────────────────────
@@ -350,10 +468,11 @@ function orbitPath(samples = 96) {
 export function stopObjectTest({ force = false } = {}) {
   if (!enabled && !force) return;
   enabled = false;
+  testMuted = false;
   reportedPosition = null;
   send();
   renderObjectTestUI();
-  syncMarker();
+  pushSource();
 }
 
 // ── Face drawing ─────────────────────────────────────────────────────────────
@@ -834,12 +953,16 @@ function updateMarkers() {
 // ── State ────────────────────────────────────────────────────────────────────
 
 function setPosition(next) {
-  const changed = next.some((v, i) => v !== position[i]);
-  position = next.map(clamp1);
+  // Placement snaps; the orbit does not. Rounding a continuous sweep onto a
+  // grid would turn smooth motion into a series of jumps, which is the one
+  // thing this whole feature is built to avoid.
+  const snapped = snapToGrid(next.map(clamp1));
+  const changed = snapped.some((v, i) => v !== position[i]);
+  position = snapped;
   if (!changed) return;
   save(POSITION_KEY, JSON.stringify(position));
   updateMarkers();
-  syncMarker();
+  pushSource();
   renderCoords();
   // While running, every move goes straight out: the renderer ramps to it, so
   // this is a slide rather than a restart, and holding back would only add lag.
@@ -885,11 +1008,26 @@ function applyRotation() {
   save(ROTATION_KEY, JSON.stringify(rotation));
   renderRotationUI();
   updateMarkers();
-  syncMarker();
+  pushSource();
   sendRotation();
 }
 
 export function renderObjectTestUI() {
+  const feature = el('objectTestFeatureToggle');
+  if (feature) feature.checked = featureOn;
+  const snap = el('objectTestSnapToggle');
+  const axes = gridAxes();
+  if (snap) {
+    snap.checked = snapOn;
+    // Offered but inert without a grid: the control stays visible so its state
+    // is not silently forgotten, and the note says why nothing is happening.
+    snap.disabled = !axes;
+  }
+  const snapNote = el('objectTestSnapNote');
+  if (snapNote) {
+    snapNote.style.display = snapOn && !axes ? 'block' : 'none';
+    if (snapOn && !axes) snapNote.textContent = t('objectTest.snapNoGrid');
+  }
   const toggle = el('objectTestEnableToggle');
   if (toggle) toggle.checked = enabled;
   const box = el('objectTestLevelBox');
@@ -903,42 +1041,67 @@ export function renderObjectTestUI() {
 }
 
 /**
- * Called when the panel opens or closes, and when the room proportions change.
- * Opening arms the idle feed so the chain is warm before the switch is flipped;
- * closing stops the test, because a panel the user cannot see must not be
- * leaving noise in the room.
+ * Turn object injection on or off.
+ *
+ * On: the object joins the source registry, so it appears at the end of the
+ * objects list and can be selected like any other; the idle feed is armed so a
+ * test started from silence is heard at once; and it is selected, since making
+ * something appear that the user then has to hunt for is a poor trade.
+ *
+ * Off: the test stops and the object is removed. An invented source must not
+ * outlive the switch that invented it — least of all in a list where every
+ * other entry came from the stream.
  */
-export function onObjectTestPanelToggled(open) {
-  panelOpen = Boolean(open);
-  setIdleFeedRequest('object-test', panelOpen);
-  if (panelOpen) {
-    buildFaces();
-    renderObjectTestUI();
+export function setObjectTestFeatureOn(on) {
+  const next = Boolean(on);
+  if (next === featureOn) return;
+  featureOn = next;
+  save(FEATURE_KEY, featureOn ? '1' : '0');
+  setIdleFeedRequest('object-test', featureOn);
+  if (featureOn) {
+    pushSource();
     // The renderer starts with no orbit; a restored one has to be stated.
     sendRotation();
+    setSelectedSource(OBJECT_TEST_SOURCE_ID);
   } else {
-    if (enabled) {
-      // stopObjectTest() re-syncs the marker, which then hides with the panel.
-      stopObjectTest();
-    }
-    // Drop the wake with the panel: reopening should start from a clean room,
-    // not from the path of a session the user has already left behind.
-    clearObjectTestTrail();
+    if (enabled) stopObjectTest();
+    reportedPosition = null;
+    removeSource(OBJECT_TEST_SOURCE_ID);
+    if (app.selectedSourceId === OBJECT_TEST_SOURCE_ID) setSelectedSource(null);
   }
-  syncMarker();
+  renderObjectTestUI();
+  renderObjectTestEditor();
+}
+
+export function isObjectTestFeatureOn() {
+  return featureOn;
+}
+
+/**
+ * Show the injection editor exactly when its object is the selected one.
+ *
+ * It shares the pinned slot with the channel editor, so the two must not both
+ * claim it: this one takes it when the injected object is selected, and the
+ * channel editor already stands down for any id it does not recognise as a bed
+ * channel — which this id is not.
+ */
+export function renderObjectTestEditor() {
+  const section = el('objectTestEditSection');
+  if (!section) return;
+  const showing = featureOn && app.selectedSourceId === OBJECT_TEST_SOURCE_ID;
+  section.style.display = showing ? '' : 'none';
+  if (showing) {
+    buildFaces();
+    renderObjectTestUI();
+  }
 }
 
 /** Room proportions changed: the faces' aspect ratios are now wrong. */
 export function onRoomRatioChanged() {
-  // The ADM position is unchanged, but where it lands in the room is not — so
-  // the 3D marker re-projects whether or not the panel is open.
-  refreshObjectTestMarkerProjection();
-  if (!app.objectTestSectionOpen) {
-    builtRatioKey = null; // rebuild lazily on next open
-    return;
-  }
+  // The faces are drawn at the room's proportions, so they are stale; the
+  // object itself re-projects on its own, being an ordinary source now.
   builtRatioKey = null;
-  buildFaces();
+  if (el('objectTestEditSection')?.style.display !== 'none') buildFaces();
 }
 
 export function setupObjectTestListeners() {
@@ -968,9 +1131,15 @@ export function setupObjectTestListeners() {
       enabled = toggle.checked;
       send();
       renderObjectTestUI();
-      syncMarker();
+      pushSource();
     });
   }
+
+  // Restore the switch, but do not act on it here: the source registry and the
+  // 3D scene are not ready this early in boot. `objectTestBoot()` does it once
+  // they are.
+  bootFeatureOn = load(FEATURE_KEY, '0') === '1';
+  snapOn = load(SNAP_KEY, '0') === '1';
 
   const slider = el('objectTestLevelSlider');
   if (slider) {
@@ -986,6 +1155,23 @@ export function setupObjectTestListeners() {
     iso.addEventListener('change', () => {
       save(ISOLATION_KEY, iso.value);
       if (enabled) send();
+    });
+  }
+
+  const feature = el('objectTestFeatureToggle');
+  if (feature) {
+    feature.addEventListener('change', () => setObjectTestFeatureOn(feature.checked));
+  }
+
+  const snap = el('objectTestSnapToggle');
+  if (snap) {
+    snap.addEventListener('change', () => {
+      snapOn = snap.checked;
+      save(SNAP_KEY, snapOn ? '1' : '0');
+      // Turning it on pulls the source onto the grid at once, rather than
+      // waiting for the next drag to reveal what it does.
+      if (snapOn) setPosition(position.slice());
+      renderObjectTestUI();
     });
   }
 
@@ -1021,19 +1207,26 @@ export function setupObjectTestListeners() {
     });
   }
 
-  // The scene label is drawn into a canvas texture, so it does not follow
-  // `data-i18n` like the panel's markup does and has to be redrawn by hand.
+  // The faces' captions are built in JS, so they do not follow `data-i18n`;
+  // neither does the object's name in the list, which is pushed as source data.
   onLocaleChange(() => {
-    relabelObjectTestMarker();
-    // The faces' end captions ("left → right") are built in JS too.
-    if (panelOpen) {
-      builtRatioKey = null;
-      buildFaces();
-    }
+    builtRatioKey = null;
+    if (featureOn) pushSource();
+    renderObjectTestEditor();
   });
 
   // Closing the window must not leave a source droning in the room.
   window.addEventListener('beforeunload', () => stopObjectTest({ force: true }));
 
   renderObjectTestUI();
+}
+
+/**
+ * Apply the remembered switch state, once the scene and the source registry
+ * exist. Called from the boot sequence rather than from `setup`, which runs
+ * before either is ready.
+ */
+export function objectTestBoot() {
+  if (bootFeatureOn) setObjectTestFeatureOn(true);
+  renderObjectTestEditor();
 }
