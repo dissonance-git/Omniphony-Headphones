@@ -222,33 +222,36 @@ impl AsyncStaticObjects {
                 };
 
                 let mut planar = vec![0.0f32; quantum_samples];
-                let mut objects = Vec::with_capacity(worker_descriptors.len());
 
                 while !stop_worker.load(Ordering::Acquire) {
                     if input_worker.available() < quantum_samples {
                         thread::sleep(Duration::from_micros(250));
                         continue;
                     }
-                    objects.clear();
                     if input_worker.pop_slice(&mut planar) != quantum_samples {
                         continue;
                     }
 
-                    for (index, descriptor) in worker_descriptors.iter().enumerate() {
-                        let start = index * frames_per_quantum;
-                        let end = start + frames_per_quantum;
-                        objects.push(WindowsStaticObject {
-                            role: descriptor.role,
-                            windows_position: descriptor.position,
-                            mono_pcm: &planar[start..end],
-                        });
-                    }
+                    let rendered = {
+                        // These borrowed views must not outlive this quantum;
+                        // the allocating renderer runs on this dedicated worker.
+                        let mut objects = Vec::with_capacity(worker_descriptors.len());
+                        for (index, descriptor) in worker_descriptors.iter().enumerate() {
+                            let start = index * frames_per_quantum;
+                            let end = start + frames_per_quantum;
+                            objects.push(WindowsStaticObject {
+                                role: descriptor.role,
+                                windows_position: descriptor.position,
+                                mono_pcm: &planar[start..end],
+                            });
+                        }
 
-                    let rendered = match pipeline.process(&objects) {
-                        Ok(rendered) => rendered,
-                        Err(_) => {
-                            failed_worker.store(true, Ordering::Release);
-                            return;
+                        match pipeline.process(&objects) {
+                            Ok(rendered) => rendered,
+                            Err(_) => {
+                                failed_worker.store(true, Ordering::Release);
+                                return;
+                            }
                         }
                     };
                     blocks_worker.fetch_add(1, Ordering::Relaxed);
