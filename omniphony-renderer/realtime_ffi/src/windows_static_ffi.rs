@@ -229,11 +229,11 @@ impl AsyncStaticObjects {
                         thread::sleep(Duration::from_micros(250));
                         continue;
                     }
+                    objects.clear();
                     if input_worker.pop_slice(&mut planar) != quantum_samples {
                         continue;
                     }
 
-                    objects.clear();
                     for (index, descriptor) in worker_descriptors.iter().enumerate() {
                         let start = index * frames_per_quantum;
                         let end = start + frames_per_quantum;
