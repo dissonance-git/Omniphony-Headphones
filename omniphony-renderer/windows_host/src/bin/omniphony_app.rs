@@ -5,10 +5,6 @@
 mod supervisor;
 
 #[cfg(target_os = "windows")]
-#[path = "../music_early_reflections.rs"]
-mod music_early_reflections;
-
-#[cfg(target_os = "windows")]
 #[path = "../music_support.rs"]
 mod music_support;
 
