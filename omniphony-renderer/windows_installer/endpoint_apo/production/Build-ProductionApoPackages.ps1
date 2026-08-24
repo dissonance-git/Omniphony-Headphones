@@ -36,7 +36,9 @@ function Find-WindowsKitTool([string]$Name) {
     $kitsRoot = 'C:\Program Files (x86)\Windows Kits\10'
     if (-not (Test-Path -LiteralPath $kitsRoot)) { return '' }
     return Get-ChildItem -LiteralPath $kitsRoot -Recurse -Filter $Name -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match '\\x64\\' } |
+        # Microsoft ships Windows Kit command-line tools under either x64 or
+        # x86; tool architecture does not constrain the package architecture.
+        Where-Object { $_.FullName -match '\\(x64|x86)\\' } |
         Sort-Object FullName -Descending |
         Select-Object -First 1 -ExpandProperty FullName
 }
@@ -105,7 +107,7 @@ if ($LASTEXITCODE -ne 0) { throw "extension INF generation failed with exit code
 if (-not (Test-Path -LiteralPath $extensionInf)) { throw 'extension INF generator produced no file' }
 
 $infverif = Find-WindowsKitTool 'InfVerif.exe'
-if (-not $infverif) { throw 'x64 InfVerif.exe was not found. Install a current Windows 11 WDK.' }
+if (-not $infverif) { throw 'InfVerif.exe was not found. Install a current Windows 11 WDK.' }
 Invoke-NativeChecked $infverif @('/w', '/v', $componentInf) 'InfVerif component package'
 Invoke-NativeChecked $infverif @('/w', '/v', $extensionInf) 'InfVerif extension package'
 
@@ -137,7 +139,7 @@ if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
 
 if (-not $SkipCatalogs) {
     $inf2cat = Find-WindowsKitTool 'Inf2Cat.exe'
-    if (-not $inf2cat) { throw 'x64 Inf2Cat.exe was not found. Install a current Windows 11 WDK.' }
+    if (-not $inf2cat) { throw 'Inf2Cat.exe was not found. Install a current Windows 11 WDK.' }
 
     # These are independent PnP packages and therefore receive independent catalogs.
     Invoke-NativeChecked $inf2cat @("/driver:$componentRoot", "/os:$Inf2CatOs") 'Inf2Cat component package'

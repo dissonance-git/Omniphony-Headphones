@@ -108,7 +108,17 @@ jobs:
       - name: Verify AudioDG packaging contracts
         shell: pwsh
         run: |
-          $mt = (Get-Command mt.exe -ErrorAction Stop).Source
+          $mt = (Get-Command mt.exe -ErrorAction SilentlyContinue).Source
+          if (-not $mt) {
+            $kitsRoot = 'C:\Program Files (x86)\Windows Kits\10'
+            $mt = Get-ChildItem "$kitsRoot\bin" -Recurse -Filter 'mt.exe' -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\mt\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 |
+              ForEach-Object FullName
+          }
+          if (-not $mt) { throw 'x64 mt.exe not found in Windows Kits' }
+          Write-Host "mt.exe=$mt"
           foreach ($name in @('OmniphonyAPO.dll', 'OmniphonyStreamAPO.dll')) {
             $dll = (Resolve-Path "build/endpoint_apo/Release/$name").Path
             $probe = Join-Path $env:RUNNER_TEMP "$name.manifest.xml"
