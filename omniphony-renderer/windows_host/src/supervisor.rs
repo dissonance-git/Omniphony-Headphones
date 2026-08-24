@@ -37,6 +37,13 @@ const ID_TOGGLE: usize = 2002;
 const ID_RESTART: usize = 2003;
 const ID_AUTOSTART: usize = 2004;
 const ID_EXIT: usize = 2005;
+const ID_EQ: usize = 2006;
+const ID_NOIRE_X_ENHANCEMENT: usize = 2007;
+const ID_OUTPUT_TRIM: usize = 2008;
+
+const EQ_PRESET_FILE_NAME: &str = "eq-preset.txt";
+const ENHANCEMENT_FILE_NAME: &str = "noire-x-enhancement.txt";
+const OUTPUT_TRIM_FILE_NAME: &str = "output-trim.txt";
 
 const RESTART_DELAY: Duration = Duration::from_secs(2);
 const AUTOSTART_VALUE: &str = "Omniphony";
@@ -129,6 +136,57 @@ fn settings_root() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
         .join("Omniphony")
+}
+
+fn audio_settings_root() -> PathBuf {
+    std::env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+        .join("Omniphony")
+}
+
+fn audio_setting_path(name: &str) -> PathBuf {
+    audio_settings_root().join(name)
+}
+
+fn setting_is_enabled(name: &str, default_enabled: bool) -> bool {
+    let path = audio_setting_path(name);
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return default_enabled;
+    };
+    !matches!(
+        text.trim().to_ascii_lowercase().as_str(),
+        "0" | "0db" | "off" | "false" | "disabled" | "none" | "flat"
+    )
+}
+
+fn write_audio_setting(name: &str, value: &str) -> anyhow::Result<()> {
+    let root = audio_settings_root();
+    create_dir_all(&root).context("failed to create Omniphony audio settings directory")?;
+    let path = root.join(name);
+    std::fs::write(&path, format!("{value}\n"))
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn eq_enabled() -> bool {
+    setting_is_enabled(EQ_PRESET_FILE_NAME, true)
+}
+
+fn enhancement_enabled() -> bool {
+    setting_is_enabled(ENHANCEMENT_FILE_NAME, true)
+}
+
+fn output_trim_enabled() -> bool {
+    setting_is_enabled(OUTPUT_TRIM_FILE_NAME, true)
+}
+
+fn toggle_audio_setting(name: &str, enabled: bool, on_value: &str) {
+    let value = if enabled { on_value } else { "off" };
+    if let Err(err) = write_audio_setting(name, value) {
+        append_log(&format!("could not change {name}: {err:#}"));
+    } else {
+        append_log(&format!("audio preference {name} -> {value}"));
+    }
 }
 
 fn append_log(message: &str) {
@@ -436,14 +494,34 @@ fn show_tray_menu(hwnd: HWND) {
     append_menu_item(menu, MF_STRING | MF_GRAYED, ID_STATUS, &status);
     append_menu_item(
         menu,
-        MF_STRING,
+        MF_STRING | if enabled { MF_CHECKED } else { 0 },
         ID_TOGGLE,
-        if enabled {
-            "Turn Omniphony off"
-        } else {
-            "Turn Omniphony on"
-        },
+        "Omniphony enabled",
     );
+    unsafe {
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+    }
+    append_menu_item(
+        menu,
+        MF_STRING | if eq_enabled() { MF_CHECKED } else { 0 },
+        ID_EQ,
+        "Headphone EQ: Noire X",
+    );
+    append_menu_item(
+        menu,
+        MF_STRING | if enhancement_enabled() { MF_CHECKED } else { 0 },
+        ID_NOIRE_X_ENHANCEMENT,
+        "Noire X Enhancement",
+    );
+    append_menu_item(
+        menu,
+        MF_STRING | if output_trim_enabled() { MF_CHECKED } else { 0 },
+        ID_OUTPUT_TRIM,
+        "Output trim: +1.5 dB",
+    );
+    unsafe {
+        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
+    }
     append_menu_item(menu, MF_STRING, ID_RESTART, "Restart audio engine");
     append_menu_item(
         menu,
@@ -524,6 +602,19 @@ unsafe extern "system" fn window_proc(
                         .expect("Omniphony supervisor state poisoned")
                         .enabled;
                     restart_worker(hwnd, !enabled);
+                }
+                ID_EQ => {
+                    toggle_audio_setting(EQ_PRESET_FILE_NAME, !eq_enabled(), "on");
+                }
+                ID_NOIRE_X_ENHANCEMENT => {
+                    toggle_audio_setting(
+                        ENHANCEMENT_FILE_NAME,
+                        !enhancement_enabled(),
+                        "on",
+                    );
+                }
+                ID_OUTPUT_TRIM => {
+                    toggle_audio_setting(OUTPUT_TRIM_FILE_NAME, !output_trim_enabled(), "+1.5");
                 }
                 ID_RESTART => {
                     let enabled = state()
