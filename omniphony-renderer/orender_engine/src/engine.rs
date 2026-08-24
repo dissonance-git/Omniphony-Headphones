@@ -46,7 +46,7 @@ pub struct RenderedAudio {
 
 /// A decode→render session: bridge plugin + spatial renderer + per-stream state.
 pub struct Engine {
-    bridge: LoadedBridge,
+    bridge: Option<LoadedBridge>,
     renderer: SpatialRenderer,
     sample_rate: u32,
     coordinate_format: RCoordinateFormat,
@@ -236,6 +236,27 @@ impl Engine {
     /// before the first [`process`](Self::process) call.
     pub fn new(bridge: LoadedBridge, renderer: SpatialRenderer, sample_rate: u32) -> Self {
         let coordinate_format = bridge.bridge.coordinate_format();
+        Self::new_inner(Some(bridge), renderer, sample_rate, coordinate_format)
+    }
+
+    /// Build the render half of the engine for callers that already own decoded
+    /// semantic frames. Current uses this crate-private seam so in-process PCM
+    /// does not masquerade as a decoder plugin. Compressed-media hosts continue
+    /// to use [`Engine::new`] / [`Engine::process`] unchanged.
+    pub(crate) fn new_decoded(
+        renderer: SpatialRenderer,
+        sample_rate: u32,
+        coordinate_format: RCoordinateFormat,
+    ) -> Self {
+        Self::new_inner(None, renderer, sample_rate, coordinate_format)
+    }
+
+    fn new_inner(
+        bridge: Option<LoadedBridge>,
+        renderer: SpatialRenderer,
+        sample_rate: u32,
+        coordinate_format: RCoordinateFormat,
+    ) -> Self {
         let engine = Self {
             bridge,
             renderer,
@@ -578,7 +599,10 @@ impl Engine {
     /// Whether the current presentation carries dynamic objects. A live fact
     /// about the stream (it may flip mid-stream); hosts must not latch it.
     pub fn has_objects(&self) -> bool {
-        self.bridge.bridge.has_objects()
+        self.bridge
+            .as_ref()
+            .is_some_and(|bridge| bridge.bridge.has_objects())
+            || self.has_objects
     }
 
     /// Dynamic object count of the last rendered frame (decoded `channel_count`
@@ -670,7 +694,9 @@ impl Engine {
     /// per-stream spatial state. Live parameters (gains, layout, OSC-applied
     /// settings) are preserved — a seek must not lose live adjustments.
     pub fn reset(&mut self) {
-        self.bridge.bridge.reset();
+        if let Some(bridge) = self.bridge.as_mut() {
+            bridge.bridge.reset();
+        }
         self.renderer.reset_runtime_state();
         self.reset_segment_state();
         // Object frames are delta-encoded; after a seek the (static) virtual-bed
@@ -798,8 +824,10 @@ impl Engine {
             }
             live.drc_mode.clone()
         };
-        self.bridge.bridge.set_drc_mode(live_mode.as_str().into());
-        self.applied_drc_mode = live_mode;
+        if let Some(bridge) = self.bridge.as_mut() {
+            bridge.bridge.set_drc_mode(live_mode.as_str().into());
+            self.applied_drc_mode = live_mode;
+        }
     }
 
     /// Push one raw compressed packet and render any frames it produces.
@@ -819,6 +847,8 @@ impl Engine {
         let decode_started = std::time::Instant::now();
         let result = self
             .bridge
+            .as_mut()
+            .ok_or_else(|| anyhow!("decoded-frame engine has no packet decoder"))?
             .bridge
             .push_packet(data.into(), transport, data_type);
         let decode_time_ms = decode_started.elapsed().as_secs_f32() * 1000.0;
@@ -862,6 +892,22 @@ impl Engine {
     /// Convenience wrapper for hosts that always feed raw access units.
     pub fn process_raw(&mut self, data: &[u8]) -> Result<Vec<RenderedAudio>> {
         self.process(data, RInputTransport::Raw, 0)
+    }
+
+    /// Render semantic decoder output without routing it back through a decoder
+    /// bridge. Crate-private by design: public compressed-media hosts still use
+    /// `process`, while Current can enter at the representation it already owns.
+    pub(crate) fn process_decoded_frames(
+        &mut self,
+        frames: &[RDecodedFrame],
+    ) -> Result<Vec<RenderedAudio>> {
+        let mut out = Vec::with_capacity(frames.len());
+        for frame in frames {
+            if let Some(chunk) = self.render_frame(frame, 0.0)? {
+                out.push(chunk);
+            }
+        }
+        Ok(out)
     }
 
     fn render_frame(
