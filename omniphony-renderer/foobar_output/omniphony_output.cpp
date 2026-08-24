@@ -183,6 +183,10 @@ public:
         } else if (init != RPC_E_CHANGED_MODE) {
             Check(init);
         }
+        // Foobar creates the selected output object before it necessarily has a
+        // decoded stream spec. Advertise source-session ownership here so the
+        // first decoder block cannot pre-binauralize and then enter Current.
+        omniphony_source_session_set_output_active(true);
     }
 
     ~OmniphonyOutput() {
@@ -284,7 +288,12 @@ protected:
             throw exception_output_unsupported_stream_format();
         }
 
-        closeEndpoint();
+        // Preserve source packets decoded after output construction but before
+        // this first physical-open call. Reopens do close/clear the old session.
+        if (client_.Get() != nullptr || render_.Get() != nullptr ||
+            device_.Get() != nullptr || event_ != nullptr) {
+            closeEndpoint();
+        }
 
         ComPtr<IMMDeviceEnumerator> enumerator;
         Check(CoCreateInstance(
