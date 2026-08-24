@@ -237,7 +237,7 @@ A physical DAC being powered off, unplugged, or temporarily absent must not be t
 
 Omniphony persists the verified endpoint identity. Recovery can repair project-owned global APO registration, reassert a known endpoint when appropriate, restart the Windows audio graph, and require the exact endpoint to become ACTIVE before FX mutation continues.
 
-Normal power cycling of the same endpoint should preserve installation state. A genuinely new endpoint identity after a driver or topology change may require reattachment.
+Normal power cycling of the same endpoint preserves installation state. The current tray exposes a manual Windows Audio graph reset after surprise removal; automatic hotplug recovery remains future hardening. A genuinely new endpoint identity after a driver or topology change may require reattachment.
 
 ## Fixed-latency safety lane
 

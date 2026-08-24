@@ -27,7 +27,7 @@ attach Omniphony to the selected Windows render endpoint
         ↓
 headless system-wide rendering
         ↓
-preference-only tray icon
+preference/manual-recovery tray icon
 ```
 
 Normal use has:
@@ -315,13 +315,13 @@ A physical endpoint may temporarily become inactive when a USB DAC is powered of
 
 Omniphony persists the verified endpoint identity and uses it for recovery. Installation and recovery must never deregister a previously working global APO merely because endpoint discovery temporarily returns no active device. The endpoint must become ACTIVE before Omniphony mutates endpoint FX state or declares the path healthy.
 
-Normal power cycling is therefore endpoint availability, not product installation state. A genuinely new Windows endpoint identity after a driver or topology change may require reattachment.
+Normal power cycling is therefore endpoint availability, not product installation state. The current tray can request a finite manual Windows Audio graph reset after a surprise removal, while automatic hotplug recovery remains a product-hardening task. A genuinely new Windows endpoint identity after a driver or topology change may require reattachment.
 
 ## Tray contract
 
 The notification-area icon is the normal UI surface for preferences.
 
-The tray writes small preference state only. It does not carry the audio stream, and exiting it does not stop Current.
+The tray writes small preference state and exposes a finite manual Windows Audio graph reset. It does not carry the audio stream, and exiting it does not stop Current.
 
 ## Failure and uninstall law
 

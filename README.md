@@ -277,7 +277,7 @@ Omniphony does not treat already-binaural stereo as raw objects, and it does not
 | Windows stereo ingress | **Implemented:** protected stereo Current path |
 | Windows authored 7.1 ingress | **Implemented and physically verified:** shared 7.1 client → stream SFX → stereo endpoint |
 | Authored 7.1.4 processing | **Implemented and regression-tested** in the stream APO/native-bed path |
-| Endpoint continuity / rollback | **Implemented:** persistent endpoint identity, recovery, and stereo rollback floor |
+| Endpoint continuity / rollback | **Implemented for install/upgrade:** persistent endpoint identity, manual graph reset, and stereo rollback floor; automatic hotplug recovery remains Phase 9 |
 | Headless Windows installer | **Implemented:** one installer, no virtual cable or resident audio host |
 | Spatial provider capability probe | **Implemented in isolation:** `ISpatialAudioClient`, 17-role mask, object format, deterministic registration/snapshot tooling; real Windows enumeration/selection proof pending |
 | Static spatial stream lifecycle | **Implemented behind a closed provider gate:** static object lifecycle + documented `VT_BLOB` activation marshalling |
@@ -392,7 +392,7 @@ Normal use has:
 - no loopback host;
 - no console;
 - no resident audio-host application;
-- a preference-only tray icon;
+- a small preference/manual-recovery tray icon;
 - rendering that continues if the tray UI is closed.
 
 The current unsigned user-mode APO deployment uses Windows' unprotected AudioDG compatibility mode and records previous machine state for rollback and uninstall.
