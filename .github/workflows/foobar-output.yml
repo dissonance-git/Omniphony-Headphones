@@ -8,6 +8,7 @@ on:
       - '.github/workflows/foobar-output.yml'
       - 'omniphony-renderer/foobar_output/**'
       - 'omniphony-renderer/realtime_ffi/**'
+      - 'omniphony-renderer/source_ffi/**'
       - 'omniphony-renderer/renderer/**'
       - 'omniphony-renderer/orender_engine/**'
       - 'omniphony-renderer/reference_bridge/**'
@@ -43,7 +44,7 @@ jobs:
             choco install 7zip -y --no-progress
           }
 
-      - name: Verify visible naming contract
+      - name: Verify visible naming and source-session contracts
         shell: pwsh
         run: |
           $source = Get-Content 'omniphony-renderer/foobar_output/omniphony_output.cpp' -Raw
@@ -52,6 +53,21 @@ jobs:
           }
           if ($source -notmatch 'constexpr char name\[\] = "Omniphony";') {
             throw 'Foobar output device name is not exactly Omniphony'
+          }
+          $session = Get-Content 'omniphony-renderer/foobar_output/omniphony_source_session.h' -Raw
+          foreach ($symbol in @(
+            'omniphony_foobar_source_session_abi_major',
+            'omniphony_foobar_source_session_abi_minor',
+            'omniphony_foobar_source_session_output_active',
+            'omniphony_foobar_source_session_reset',
+            'omniphony_foobar_source_session_publish_v1'
+          )) {
+            if ($session -notmatch [regex]::Escape($symbol)) {
+              throw "Missing source-session ABI symbol declaration: $symbol"
+            }
+          }
+          if ($source -notmatch 'omniphony_source_session_try_consume') {
+            throw 'Output callback does not consume the source-session bypass'
           }
 
       - name: Build diagnostic package
@@ -71,4 +87,3 @@ jobs:
             dist/foobar-output/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
-
