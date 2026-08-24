@@ -1,0 +1,74 @@
+name: Foobar Output Omniphony
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/foobar-output.yml'
+      - 'omniphony-renderer/foobar_output/**'
+      - 'omniphony-renderer/realtime_ffi/**'
+      - 'omniphony-renderer/renderer/**'
+      - 'omniphony-renderer/orender_engine/**'
+      - 'omniphony-renderer/reference_bridge/**'
+      - 'omniphony-renderer/bridge_api/**'
+      - 'omniphony-renderer/Cargo.toml'
+      - 'omniphony-renderer/Cargo.lock'
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: 1.88.0
+
+jobs:
+  build:
+    name: Build x64 Output Omniphony diagnostic
+    runs-on: windows-2022
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Ensure 7-Zip
+        shell: pwsh
+        run: |
+          if (-not (Get-Command 7z -ErrorAction SilentlyContinue)) {
+            choco install 7zip -y --no-progress
+          }
+
+      - name: Verify visible naming contract
+        shell: pwsh
+        run: |
+          $source = Get-Content 'omniphony-renderer/foobar_output/omniphony_output.cpp' -Raw
+          if ($source -notmatch 'g_get_name\(\) \{ return "Output"; \}') {
+            throw 'Foobar output entry name is not exactly Output'
+          }
+          if ($source -notmatch 'constexpr char name\[\] = "Omniphony";') {
+            throw 'Foobar output device name is not exactly Omniphony'
+          }
+
+      - name: Build diagnostic package
+        shell: pwsh
+        run: |
+          ./omniphony-renderer/foobar_output/Build-FoobarOutput.ps1 `
+            -WorkRoot "$env:RUNNER_TEMP\omniphony-foobar-output" `
+            -OutputRoot "$env:GITHUB_WORKSPACE\dist\foobar-output"
+
+      - name: Upload diagnostic package
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-omniphony-${{ github.sha }}
+          path: |
+            dist/foobar-output/foo_out_omniphony.fb2k-component
+            dist/foobar-output/README.txt
+            dist/foobar-output/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
