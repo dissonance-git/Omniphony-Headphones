@@ -6,6 +6,7 @@
 //! allocating renderer never runs on the audio callback thread.
 
 mod height_preference;
+mod listening_finish;
 mod module_lifetime;
 mod native_bed;
 mod native_bed_ffi;
@@ -15,6 +16,7 @@ mod windows_static_ffi;
 pub mod windows_spatial_contract;
 
 use height_preference::HeightPreference;
+use listening_finish::ListeningFinish;
 use noire_x_profile::NoireXPersonalEq;
 use orender_engine::current_music_support::CurrentMusicSupportRenderer;
 use renderer::music_field::{MUSIC_FIELD_CHANNELS, MusicFieldProcessor};
@@ -230,6 +232,7 @@ struct CurrentPipeline {
     dry_fifo: VecDeque<f32>,
     foundation_fifo: VecDeque<f32>,
     headphone_eq: NoireXPersonalEq,
+    listening_finish: ListeningFinish,
     peak_guard: StereoLookaheadPeakGuard,
 }
 
@@ -244,6 +247,7 @@ impl CurrentPipeline {
             dry_fifo: VecDeque::new(),
             foundation_fifo: VecDeque::new(),
             headphone_eq: NoireXPersonalEq::new(sample_rate_hz),
+            listening_finish: ListeningFinish::new(sample_rate_hz),
             peak_guard: StereoLookaheadPeakGuard::new(sample_rate_hz),
         })
     }
@@ -292,6 +296,7 @@ impl CurrentPipeline {
             }
 
             self.headphone_eq.process_interleaved(&mut mixed);
+            self.listening_finish.process_interleaved(&mut mixed);
             out.extend(self.peak_guard.process_interleaved(&mixed));
         }
         Ok(out)
