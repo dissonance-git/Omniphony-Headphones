@@ -77,10 +77,22 @@ Run '7z' @('x', $sdkArchive, "-o$sdkRoot", '-y')
 
 rustup toolchain install $RustToolchain --profile minimal
 if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
+
+# The output owns two mutually exclusive renderer entries: ordinary stereo
+# Current and the recovered-source FullSphere session. Validate the source ABI
+# before packaging either side of that switch.
+Run 'cargo' @("+$RustToolchain", 'test', '-p', 'source_ffi', '--lib') $RendererRoot
+Run 'cargo' @("+$RustToolchain", 'test', '-p', 'source_ffi', '--test', 'abi_layout') $RendererRoot
+Run 'cargo' @("+$RustToolchain", 'test', '-p', 'source_ffi', '--test', 'runtime_spatial_mode') $RendererRoot
 Run 'cargo' @("+$RustToolchain", 'build', '--release', '-p', 'realtime_ffi') $RendererRoot
+Run 'cargo' @("+$RustToolchain", 'build', '--profile', 'release-deploy', '-p', 'source_ffi') $RendererRoot
 $realtime = Join-Path $RendererRoot 'target\release\omniphony_realtime.dll'
+$source = Join-Path $RendererRoot 'target\release-deploy\omniphony_source.dll'
 if (-not (Test-Path -LiteralPath $realtime -PathType Leaf)) {
     throw "Realtime DLL missing: $realtime"
+}
+if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+    throw "Source DLL missing: $source"
 }
 
 $componentOut = Join-Path $WorkRoot 'component-out'
@@ -103,7 +115,7 @@ $component = Join-Path $componentOut 'foo_out_omniphony.dll'
 if (-not (Test-Path -LiteralPath $component -PathType Leaf)) {
     throw "Foobar output DLL missing: $component"
 }
-foreach ($image in @($component, $realtime)) {
+foreach ($image in @($component, $realtime, $source)) {
     $machine = Get-PEMachine $image
     if ($machine -ne 0x8664) {
         throw ("x64 machine mismatch 0x{0:X4}: {1}" -f $machine, $image)
@@ -114,6 +126,7 @@ $stage = Join-Path $WorkRoot 'package'
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item -LiteralPath $component -Destination (Join-Path $stage 'foo_out_omniphony.dll')
 Copy-Item -LiteralPath $realtime -Destination (Join-Path $stage 'omniphony_realtime.dll')
+Copy-Item -LiteralPath $source -Destination (Join-Path $stage 'omniphony_source.dll')
 $package = Join-Path $OutputRoot 'foo_out_omniphony.fb2k-component'
 Push-Location $stage
 try { Run '7z' @('a', '-tzip', '-mx=9', $package, '*') }
@@ -127,12 +140,17 @@ Foobar SDK: $SdkDate
 Foobar SDK SHA-256: $SdkSha256
 Package SHA-256: $hash
 
-This package is not listening-approved until the source-aware bypass and
-physical shared-RAW validation gates pass.
+The package contains both ordinary-stereo Current and the recovered-source
+FullSphere renderer used by the process-local VGM/SPC source-session ABI.
+Source-session substitution is fail-closed: the protected stereo reaching the
+output must match the decoder control block before rendered source audio can
+replace it.
+
+This package is not listening-approved until the physical shared-RAW,
+source-session lifecycle, seek/track-change, and fallback gates pass.
 "@ | Set-Content -LiteralPath (Join-Path $OutputRoot 'README.txt') -Encoding UTF8
 "$hash  foo_out_omniphony.fb2k-component" |
     Set-Content -LiteralPath (Join-Path $OutputRoot 'SHA256SUMS.txt') -Encoding ASCII
 
 Write-Host "FOOBAR_OUTPUT_PACKAGE $package"
 Write-Host "FOOBAR_OUTPUT_SHA256 $hash"
-
