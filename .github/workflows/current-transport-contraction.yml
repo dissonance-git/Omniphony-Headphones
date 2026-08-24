@@ -60,4 +60,10 @@ jobs:
         run: cargo test -p realtime_ffi --lib
 
       - name: Authored-bed worker regression suite
-        run: cargo test --manifest-path bed_ffi/Cargo.toml --lib
+        run: |
+          # bed_ffi lives below this workspace root but is intentionally not a
+          # member. Cargo otherwise refuses to run its manifest because it
+          # "believes it's in a workspace". Mark it excluded only in this CI
+          # checkout; no repository workspace metadata is changed by the branch.
+          sed -i '/^resolver = "2"$/a exclude = ["bed_ffi"]' Cargo.toml
+          cargo test --manifest-path bed_ffi/Cargo.toml --lib
