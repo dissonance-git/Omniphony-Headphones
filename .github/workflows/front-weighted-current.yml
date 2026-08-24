@@ -1,0 +1,59 @@
+name: Front-weighted Current experiment
+
+on:
+  push:
+    branches: [helix/front-weighted-current]
+    paths:
+      - '.github/workflows/front-weighted-current.yml'
+      - '.github/scripts/front_weighted_current.py'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.88.0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: helix/front-weighted-current
+          fetch-depth: 0
+
+      - name: Apply front-weighted candidate
+        run: |
+          python3 .github/scripts/front_weighted_current.py
+          rustfmt --edition 2024 omniphony-renderer/renderer/src/music_field.rs
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup override set "$RUST_TOOLCHAIN"
+          rustup component add rustfmt
+        working-directory: omniphony-renderer
+
+      - name: Renderer regressions
+        run: cargo test -p renderer --lib
+        working-directory: omniphony-renderer
+
+      - name: Engine regressions
+        run: cargo test -p orender_engine --lib --tests
+        working-directory: omniphony-renderer
+
+      - name: Realtime regressions
+        run: cargo test -p realtime_ffi --lib
+        working-directory: omniphony-renderer
+
+      - name: Commit listening candidate
+        if: success()
+        run: |
+          git config user.name dissonance
+          git config user.email ustreamusa@aim.com
+          git add omniphony-renderer/renderer/src/music_field.rs
+          git commit -m 'tune(current): weight music support toward the front'
+          git push origin HEAD:helix/front-weighted-current
