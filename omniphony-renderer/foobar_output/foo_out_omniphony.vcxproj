@@ -50,10 +50,13 @@
     </ClCompile>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="omniphony_output.cpp" />
+    <ClCompile Include="omniphony_source_session.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h" />
+    <ClInclude Include="omniphony_source_session.h" />
     <ClInclude Include="..\realtime_ffi\include\omniphony_realtime.h" />
+    <ClInclude Include="..\source_ffi\include\omniphony_source.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(FoobarSdkRoot)\pfc\pfc.vcxproj">
