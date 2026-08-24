@@ -115,8 +115,8 @@ jobs:
       - name: Check causal source render DLL
         run: cargo check -p source_ffi
 
-      - name: Test HRTF early-reflection challenger
-        run: cargo test -p windows_host --bin omniphony_app music_early_reflections::tests
+      - name: Test canonical HRTF early-reflection field
+        run: cargo test -p orender_engine music_early_reflections::tests
 
       - name: Test realtime continuity guards
         run: cargo test -p windows_host --bin omniphony_app music_engine::tests
