@@ -23,7 +23,10 @@ use renderer::music_field::{MUSIC_FIELD_CHANNELS, MusicFieldProcessor};
 use renderer::music_foundation::MusicFoundationProcessor;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
+use std::env;
+use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -47,6 +50,28 @@ const OUTPUT_MAKEUP_GAIN: f32 = 1.380_384_3;
 const OUTPUT_CEILING: f32 = 0.891_250_9;
 const OUTPUT_LOOKAHEAD_MS: usize = 5;
 const OUTPUT_RELEASE_MS: f32 = 160.0;
+const CURRENT_ENABLED_FILE_NAME: &str = "current-enabled.txt";
+
+fn enabled_setting_text(text: &str) -> bool {
+    !matches!(
+        text.trim().to_ascii_lowercase().as_str(),
+        "0" | "off" | "false" | "disabled" | "none"
+    )
+}
+
+/// Resolve the user-facing stereo Current switch once at the mode/control
+/// boundary. The realtime callback never touches the filesystem. Missing state
+/// preserves historical behavior: Current is enabled by default.
+fn stereo_current_enabled() -> bool {
+    let root = env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+        .join("Omniphony")
+        .join(CURRENT_ENABLED_FILE_NAME);
+    fs::read_to_string(root)
+        .map(|text| enabled_setting_text(&text))
+        .unwrap_or(true)
+}
 
 #[repr(C)]
 pub struct OmniphonyRealtimeConfig {
@@ -617,6 +642,14 @@ pub unsafe extern "C" fn omniphony_realtime_set_mode(
                 if processor.channels != 2 {
                     return -2;
                 }
+                // Both installed stereo APO placements converge here, while
+                // authored multichannel uses the separate native-bed ABI. This
+                // makes the tray's "Stereo Current" switch exact without ever
+                // disabling authored surround/object source truth.
+                if !stereo_current_enabled() {
+                    processor.mode = ProcessorMode::Identity;
+                    return 0;
+                }
                 match AsyncCurrent::new(processor.sample_rate_hz) {
                     Ok(current) => {
                         processor.mode = ProcessorMode::Current(current);
@@ -769,6 +802,16 @@ mod tests {
     #[test]
     fn ffi_guard_contains_panics_at_the_host_boundary() {
         assert_eq!(ffi_guard(-127, || panic!("ffi boundary probe")), -127);
+    }
+
+    #[test]
+    fn current_enabled_setting_parser_is_conservative() {
+        for off in ["0", "off", "FALSE", " disabled ", "none"] {
+            assert!(!enabled_setting_text(off), "{off:?} should disable stereo Current");
+        }
+        for on in ["1", "on", "true", "current", "enabled", ""] {
+            assert!(enabled_setting_text(on), "{on:?} should preserve stereo Current");
+        }
     }
 
     #[test]
