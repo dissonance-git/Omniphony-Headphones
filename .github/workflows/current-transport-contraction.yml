@@ -1,0 +1,47 @@
+name: Current transport contraction
+
+on:
+  push:
+    branches: [helix/current-transport-contraction]
+    paths:
+      - 'omniphony-renderer/orender_engine/src/music_support.rs'
+      - '.github/workflows/current-transport-contraction.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.88.0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  current-ingress-null:
+    name: Current ingress null equivalence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: omniphony-renderer
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup override set "$RUST_TOOLCHAIN"
+
+      - name: Compile Current ingress challenger
+        run: >-
+          cargo test -p orender_engine
+          music_support::tests::direct_current_ingress_matches_streaming_reference_bridge
+          --no-run
+
+      - name: Null legacy WAV ingress against direct PCM ingress
+        run: >-
+          cargo test -p orender_engine
+          music_support::tests::direct_current_ingress_matches_streaming_reference_bridge
+          -- --exact --nocapture
