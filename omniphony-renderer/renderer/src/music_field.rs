@@ -47,14 +47,23 @@ const PRESENCE_SUPPORT_SCALE: f32 = 0.83;
 /// This is not an extra wet copy: horizontal + elevated lane amplitude is
 /// algebraically unchanged before binaural rendering.
 ///
-/// The native Windows listening pass deliberately increases only the two bands
-/// carrying the strongest elevation cues. Research repeatedly places useful
-/// vertical spectral structure through roughly 2-10 kHz, so the 320-1200 Hz
-/// musical-body transfer is retained while 1.2-5 kHz and >5 kHz move modestly
-/// higher. Front remains stronger than rear to raise the perceived ceiling
-/// without hollowing the lateral/rear wrap.
-const FRONT_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.22, 0.54, 0.44];
+/// Physical listening found that the previous top-forward weighting could leave
+/// the lower front hemisphere hollow while the rear/top shell was convincing.
+/// Keep useful height, but reclaim enough presence/high-band support for the
+/// horizontal front to remain a load-bearing part of the sphere.
+const FRONT_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.18, 0.44, 0.36];
 const REAR_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.12, 0.32, 0.28];
+
+/// Front weighting is a transfer, not a gain or copied wet path. Existing rear
+/// support is moved sample-for-sample into the matching front lane, preserving
+/// the algebraic front+rear sum before binaural rendering. The fixed base makes
+/// the front stronger for all earned shell material. Stable frontal-anchor
+/// evidence adds a bounded extra bias so primary musical structure receives a
+/// firmer front frame without inventing an authored center channel.
+const REAR_TO_FRONT_BASE_TRANSFER: [f32; 3] = [0.14, 0.22, 0.16];
+const REAR_TO_FRONT_ANCHOR_BONUS: [f32; 3] = [0.04, 0.06, 0.04];
+const TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER: [f32; 3] = [0.08, 0.14, 0.10];
+const TOP_REAR_TO_TOP_FRONT_ANCHOR_BONUS: [f32; 3] = [0.02, 0.03, 0.02];
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MusicFieldSnapshot {
@@ -125,6 +134,13 @@ fn transfer_to_elevation(horizontal: &mut f32, elevated: &mut f32, fraction: f32
     let transfer = *horizontal * fraction.clamp(0.0, 0.60);
     *horizontal -= transfer;
     *elevated += transfer;
+}
+
+#[inline]
+fn transfer_forward(rear: &mut f32, front: &mut f32, fraction: f32) {
+    let transfer = *rear * fraction.clamp(0.0, 0.40);
+    *rear -= transfer;
+    *front += transfer;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -301,7 +317,8 @@ impl MusicFieldProcessor {
 
                 // Move exact existing support upward. No delay, decorrelation or
                 // second copy is created. The 22-direction HRTF renderer receives
-                // more genuine elevated excitation, particularly in 1.2-10+ kHz.
+                // genuine elevated excitation while horizontal front remains
+                // perceptually load-bearing.
                 let front_transfer =
                     (height * FRONT_COHERENT_HEIGHT_TRANSFER[band - 1]).clamp(0.0, 0.60);
                 let rear_transfer =
@@ -310,6 +327,21 @@ impl MusicFieldProcessor {
                 transfer_to_elevation(&mut band_front_r, &mut band_top_front_r, front_transfer);
                 transfer_to_elevation(&mut band_rear_l, &mut band_top_rear_l, rear_transfer);
                 transfer_to_elevation(&mut band_rear_r, &mut band_top_rear_r, rear_transfer);
+
+                // Counter the strong rear hemisphere with a stronger front shell.
+                // Anchor confidence is already smoothed/persistent evidence, so it
+                // can add a small front bias without reacting to a single frame.
+                let anchor = control.anchor.clamp(0.0, 1.0);
+                let horizontal_forward = (REAR_TO_FRONT_BASE_TRANSFER[band - 1]
+                    + anchor * REAR_TO_FRONT_ANCHOR_BONUS[band - 1])
+                    .clamp(0.0, 0.40);
+                let elevated_forward = (TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER[band - 1]
+                    + anchor * TOP_REAR_TO_TOP_FRONT_ANCHOR_BONUS[band - 1])
+                    .clamp(0.0, 0.40);
+                transfer_forward(&mut band_rear_l, &mut band_front_l, horizontal_forward);
+                transfer_forward(&mut band_rear_r, &mut band_front_r, horizontal_forward);
+                transfer_forward(&mut band_top_rear_l, &mut band_top_front_l, elevated_forward);
+                transfer_forward(&mut band_top_rear_r, &mut band_top_front_r, elevated_forward);
 
                 front_l += band_front_l;
                 front_r += band_front_r;
@@ -509,12 +541,34 @@ mod tests {
     }
 
     #[test]
-    fn native_height_polish_targets_mid_and_high_without_lifting_body_band() {
-        assert_eq!(FRONT_COHERENT_HEIGHT_TRANSFER[0], 0.22);
-        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[1] > 0.46);
-        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[2] > 0.38);
+    fn forward_transfer_moves_existing_support_without_adding_a_copy() {
+        for rear in [0.75_f32, -0.75, 0.125, -0.125] {
+            let mut r = rear;
+            let mut f = 0.20_f32;
+            let before = r + f;
+            transfer_forward(&mut r, &mut f, 0.28);
+            assert!((r + f - before).abs() < 1.0e-6);
+            assert!(r.abs() < rear.abs());
+        }
+    }
+
+    #[test]
+    fn front_weighting_keeps_horizontal_front_load_bearing() {
+        assert_eq!(FRONT_COHERENT_HEIGHT_TRANSFER[0], 0.18);
+        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[1] <= 0.44);
+        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[2] <= 0.36);
         assert!(REAR_COHERENT_HEIGHT_TRANSFER[1] < FRONT_COHERENT_HEIGHT_TRANSFER[1]);
         assert!(REAR_COHERENT_HEIGHT_TRANSFER[2] < FRONT_COHERENT_HEIGHT_TRANSFER[2]);
+    }
+
+    #[test]
+    fn stable_anchor_can_strengthen_front_beyond_the_previous_fixed_candidate() {
+        let band = 1usize;
+        let anchored = REAR_TO_FRONT_BASE_TRANSFER[band] + REAR_TO_FRONT_ANCHOR_BONUS[band];
+        assert!(REAR_TO_FRONT_BASE_TRANSFER[band] > 0.16);
+        assert!(anchored > 0.24);
+        assert!(anchored <= 0.40);
+        assert!(TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER[band] > 0.10);
     }
 
     #[test]
