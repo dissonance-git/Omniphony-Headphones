@@ -20,7 +20,7 @@ jobs:
   current-ingress-null:
     name: Current ingress regression gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: omniphony-renderer
@@ -55,3 +55,9 @@ jobs:
 
       - name: Full orender engine regression suite
         run: cargo test -p orender_engine --lib --tests
+
+      - name: Realtime worker regression suite
+        run: cargo test -p realtime_ffi --lib
+
+      - name: Authored-bed worker regression suite
+        run: cargo test -p bed_ffi --lib
