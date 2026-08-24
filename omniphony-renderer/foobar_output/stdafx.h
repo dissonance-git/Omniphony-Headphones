@@ -11,7 +11,7 @@
 #include <mmsystem.h>
 #include <objidl.h>
 
-#include <foobar2000/helpers/foobar2000+atl.h>
+#include <foobar2000/SDK/foobar2000.h>
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <ks.h>
