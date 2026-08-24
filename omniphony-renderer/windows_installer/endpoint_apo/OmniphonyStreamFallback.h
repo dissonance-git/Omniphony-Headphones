@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <ks.h>
 #include <ksmedia.h>
 
 #include <algorithm>

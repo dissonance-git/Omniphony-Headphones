@@ -83,7 +83,7 @@ try {
         try {
             $sectionExt = [string](Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_DriverInfSectionExt' -ErrorAction Stop).Data
         } catch {
-            Write-Warning "Could not read DEVPKEY_Device_DriverInfSectionExt for $instanceId: $($_.Exception.Message)"
+            Write-Warning "Could not read DEVPKEY_Device_DriverInfSectionExt for ${instanceId}: $($_.Exception.Message)"
         }
         $candidate | Add-Member -NotePropertyName DriverInfSectionExt -NotePropertyValue $sectionExt -Force
     }
