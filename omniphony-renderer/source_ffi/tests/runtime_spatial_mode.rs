@@ -62,10 +62,11 @@ fn native_to_fullsphere_switch_changes_presentation_without_recreating_processor
     };
     let input = test_signal();
 
-    // Every comparison starts at the public stream-reset boundary. Constructor
-    // startup and a reset renderer are distinct lifecycle states; mixing those
-    // states here made the mode round-trip assertion test startup rather than
-    // NativeRouting -> FullSphere -> NativeRouting.
+    // Materialize the renderer's lazy channel/cascade state once, then put every
+    // compared render behind the same public stream-reset boundary. Comparing
+    // first-ever lazy startup with a reset renderer tests construction, not the
+    // NativeRouting -> FullSphere -> NativeRouting round trip owned here.
+    let _warmup = render(processor, &input, &evidence);
     assert_eq!(unsafe { omniphony_source_reset(processor) }, 0);
     let native = render(processor, &input, &evidence);
 
