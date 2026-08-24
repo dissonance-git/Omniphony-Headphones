@@ -668,7 +668,25 @@ pub unsafe extern "C" fn omniphony_realtime_latency_frames(
 pub unsafe extern "C" fn omniphony_realtime_reset(
     processor: *mut OmniphonyRealtimeProcessor,
 ) -> i32 {
-    if processor.is_null() { -1 } else { 0 }
+    ffi_guard(-127, || {
+        if processor.is_null() {
+            return -1;
+        }
+        // Reset is a logical stream boundary. Replacing Current atomically at
+        // this control boundary gives the new stream fresh rings, delayed-dry
+        // alignment, renderer/EQ/limiter history, counters, and worker startup.
+        // Dropping the old instance remains non-blocking: it signals its worker
+        // and detaches the JoinHandle by design.
+        let processor = unsafe { &mut *processor };
+        if matches!(processor.mode, ProcessorMode::Current(_)) {
+            let replacement = match AsyncCurrent::new(processor.sample_rate_hz) {
+                Ok(current) => current,
+                Err(_) => return -2,
+            };
+            processor.mode = ProcessorMode::Current(replacement);
+        }
+        0
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -756,6 +774,25 @@ mod tests {
             assert!(omniphony_realtime_create(std::ptr::null()).is_null());
             assert!(omniphony_realtime_create(&bad_rate).is_null());
             assert!(omniphony_realtime_create(&bad_channels).is_null());
+        }
+    }
+
+    #[test]
+    fn current_reset_replaces_stream_lifetime_state_without_changing_mode() {
+        let cfg = config();
+        unsafe {
+            let processor = omniphony_realtime_create(&cfg);
+            assert!(!processor.is_null());
+            assert_eq!(omniphony_realtime_set_mode(processor, MODE_CURRENT), 0);
+            assert_eq!(omniphony_realtime_mode(processor), MODE_CURRENT);
+            assert!(omniphony_realtime_latency_frames(processor) > 0);
+
+            assert_eq!(omniphony_realtime_reset(processor), 0);
+            assert_eq!(omniphony_realtime_mode(processor), MODE_CURRENT);
+            assert_eq!(omniphony_realtime_processed_blocks(processor), 0);
+            assert_eq!(omniphony_realtime_rendered_frames(processor), 0);
+            assert!(omniphony_realtime_latency_frames(processor) > 0);
+            omniphony_realtime_destroy(processor);
         }
     }
 
