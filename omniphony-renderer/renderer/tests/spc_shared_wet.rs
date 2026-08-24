@@ -19,13 +19,14 @@ fn echo_half(source_id: u64, persistent_part_id: u64, left_gain: f32, right_gain
 #[test]
 fn linked_spc_echo_halves_keep_opposite_authored_sides() {
     let field_id = 0x5344_5350_4543_4809;
+    let policy = SourcePresentationPolicy::default();
     let left = present_source(
         echo_half(field_id ^ 0x4c, field_id, -1.0, 0.0),
-        SourcePresentationPolicy::default(),
+        policy,
     );
     let right = present_source(
         echo_half(field_id ^ 0x52, field_id, 0.0, 64.0 / 127.0),
-        SourcePresentationPolicy::default(),
+        policy,
     );
 
     // Signed S-DSP polarity is source truth, but side comes from gain magnitude.
@@ -38,8 +39,11 @@ fn linked_spc_echo_halves_keep_opposite_authored_sides() {
     assert!((left.azimuth_deg.abs() - right.azimuth_deg.abs()).abs() < 1.0e-5);
     assert!((left.elevation_deg - right.elevation_deg).abs() < 1.0e-5);
     assert!((left.distance - right.distance).abs() < 1.0e-5);
-    assert_eq!(left.size, [1.0, 1.0, 1.0]);
-    assert_eq!(right.size, [1.0, 1.0, 1.0]);
+    // Both halves share the one configured wet-field extent. The default has
+    // deliberately not been an isotropic [1, 1, 1] field since shared-wet
+    // policy became independently tunable.
+    assert_eq!(left.size, policy.shared_wet.extent);
+    assert_eq!(right.size, policy.shared_wet.extent);
 }
 
 #[test]
