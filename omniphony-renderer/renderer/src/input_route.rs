@@ -5,9 +5,9 @@
 //! most one spatialization pass.
 //!
 //! The router must never infer spatial structure from material that already
-//! carries authored geometry, and it must never HRTF-render material that is
-//! already binaural. Ordinary stereo is the only representation that enters
-//! the stereo-evidence path.
+//! carries authored geometry or an authored spatial field, and it must never
+//! HRTF-render material that is already binaural. Ordinary stereo is the only
+//! representation that enters the stereo-evidence path.
 
 /// Representation presented to Omniphony by the host/decoder.
 ///
@@ -22,6 +22,8 @@ pub enum InputRepresentation {
     AuthoredMultichannel,
     /// Authored object/scene geometry supplied by the media pipeline.
     AuthoredObjects,
+    /// Authored sound field such as Ambisonics / HOA.
+    AuthoredField,
     /// Causal/source-native lanes recovered by a trusted upstream source model.
     RecoveredSources,
     /// Final two-channel binaural signal that has already been spatialized.
@@ -32,14 +34,14 @@ pub enum InputRepresentation {
 ///
 /// Keeping this as an enum instead of a bag of booleans makes illegal
 /// combinations unrepresentable: there is no route that can simultaneously
-/// run stereo inference and claim authored geometry, and no binaural route can
-/// accidentally invoke the HRTF renderer.
+/// run stereo inference and claim authored spatial truth, and no binaural route
+/// can accidentally invoke the HRTF renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderRoute {
     /// Preserve the finished stereo master and derive only justified residual
     /// spatial support before one binaural render of that support.
     StereoCurrent,
-    /// Render discrete authored channels directly from their supplied geometry.
+    /// Render authored channels, objects, or fields from supplied spatial truth.
     AuthoredSpatial,
     /// Render trusted recovered sources through source-aware presentation.
     RecoveredSourceScene,
@@ -68,10 +70,10 @@ impl RenderRoute {
         matches!(self, Self::StereoCurrent | Self::BinauralPassthrough)
     }
 
-    /// Whether position/channel geometry is authored upstream and therefore
-    /// must pass through without stereo reinterpretation.
+    /// Whether spatial truth is authored upstream and therefore must pass
+    /// through without stereo reinterpretation.
     #[inline]
-    pub const fn uses_authored_geometry(self) -> bool {
+    pub const fn uses_authored_spatial_truth(self) -> bool {
         matches!(self, Self::AuthoredSpatial)
     }
 
@@ -87,16 +89,16 @@ impl RenderRoute {
 
 /// Resolve host/decoder representation to one renderer route.
 ///
-/// Multichannel and object media intentionally converge on the same authored
-/// spatial path. Their transport representation may differ; their authority
-/// law does not.
+/// Multichannel, object, and field media intentionally converge on the same
+/// authored-spatial path. Their transport representation may differ; their
+/// authority law does not.
 #[inline]
 pub const fn route_for_input(input: InputRepresentation) -> RenderRoute {
     match input {
         InputRepresentation::Stereo => RenderRoute::StereoCurrent,
-        InputRepresentation::AuthoredMultichannel | InputRepresentation::AuthoredObjects => {
-            RenderRoute::AuthoredSpatial
-        }
+        InputRepresentation::AuthoredMultichannel
+        | InputRepresentation::AuthoredObjects
+        | InputRepresentation::AuthoredField => RenderRoute::AuthoredSpatial,
         InputRepresentation::RecoveredSources => RenderRoute::RecoveredSourceScene,
         InputRepresentation::Binaural => RenderRoute::BinauralPassthrough,
     }
@@ -118,6 +120,7 @@ mod tests {
         for input in [
             InputRepresentation::AuthoredMultichannel,
             InputRepresentation::AuthoredObjects,
+            InputRepresentation::AuthoredField,
             InputRepresentation::RecoveredSources,
             InputRepresentation::Binaural,
         ] {
@@ -126,14 +129,15 @@ mod tests {
     }
 
     #[test]
-    fn authored_spatial_media_keeps_geometry_and_gets_one_render() {
+    fn authored_spatial_media_keeps_source_truth_and_gets_one_render() {
         for input in [
             InputRepresentation::AuthoredMultichannel,
             InputRepresentation::AuthoredObjects,
+            InputRepresentation::AuthoredField,
         ] {
             let route = route_for_input(input);
             assert_eq!(route, RenderRoute::AuthoredSpatial);
-            assert!(route.uses_authored_geometry());
+            assert!(route.uses_authored_spatial_truth());
             assert!(route.runs_acoustic_renderer());
             assert!(!route.preserves_input_master());
             assert_eq!(route.spatialization_passes(), 1);
@@ -165,6 +169,7 @@ mod tests {
             InputRepresentation::Stereo,
             InputRepresentation::AuthoredMultichannel,
             InputRepresentation::AuthoredObjects,
+            InputRepresentation::AuthoredField,
             InputRepresentation::RecoveredSources,
             InputRepresentation::Binaural,
         ] {
