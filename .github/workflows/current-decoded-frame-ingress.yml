@@ -27,6 +27,13 @@ jobs:
       - name: Apply contraction
         run: |
           python3 .github/scripts/current_decoded_frame_ingress.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('omniphony-renderer/orender_engine/src/music_support.rs')
+          s = p.read_text()
+          s = s.replace('#[cfg(test)]\nuse crate::bridge_loader::LoadedBridge;\n', 'use crate::bridge_loader::LoadedBridge;\n', 1)
+          p.write_text(s)
+          PY
           rustfmt --edition 2024 omniphony-renderer/orender_engine/src/engine.rs omniphony-renderer/orender_engine/src/music_support.rs
 
       - name: Install pinned Rust toolchain
