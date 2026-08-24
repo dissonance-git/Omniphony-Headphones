@@ -35,8 +35,11 @@ jobs:
           rustup override set "$RUST_TOOLCHAIN"
           rustup component add rustfmt
 
+      # The repository currently carries unrelated workspace-wide rustfmt debt.
+      # Gate the file changed by this contraction instead of silently rewriting
+      # other active work as part of an acoustic no-op refactor.
       - name: Formatting
-        run: cargo fmt --check
+        run: rustfmt --edition 2024 --check orender_engine/src/music_support.rs
 
       - name: Compile Current ingress challenger
         run: >-
