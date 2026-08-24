@@ -175,7 +175,12 @@ function Toggle-Current {
             return
         }
         Update-TrayState
-        Show-TrayMessage (if ($next) { 'Stereo Current enabled.' } else { 'Stereo Current bypassed. Authored surround remains source-faithful.' })
+        $message = if ($next) {
+            'Stereo Current enabled.'
+        } else {
+            'Stereo Current bypassed. Authored surround remains source-faithful.'
+        }
+        Show-TrayMessage $message
     } catch {
         Show-TrayMessage "Could not change Stereo Current: $($_.Exception.Message)"
     }
