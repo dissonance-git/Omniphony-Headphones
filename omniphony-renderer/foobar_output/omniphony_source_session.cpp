@@ -204,21 +204,24 @@ public:
     }
 
     void setOutputActive(bool active) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
+        active_.store(active, std::memory_order_release);
+        std::lock_guard<std::mutex> renderLock(renderMutex_);
+        std::lock_guard<std::mutex> queueLock(queueMutex_);
         clearQueueUnlocked();
         backend_.close();
         currentEpoch_ = 0;
-        active_.store(active, std::memory_order_release);
     }
 
     void flushOutput() noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> renderLock(renderMutex_);
+        std::lock_guard<std::mutex> queueLock(queueMutex_);
         clearQueueUnlocked();
         backend_.reset();
     }
 
     std::int32_t reset(std::uint64_t epoch) noexcept {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> renderLock(renderMutex_);
+        std::lock_guard<std::mutex> queueLock(queueMutex_);
         clearQueueUnlocked();
         currentEpoch_ = epoch;
         backend_.reset();
@@ -263,12 +266,19 @@ public:
             return -13;
         }
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        // HRTF/source rendering is producer-side work. It is serialized against
+        // reset/reconfiguration, but deliberately does not hold queueMutex_ so
+        // the audio output callback can consume already-ready packets while the
+        // decoder prepares the next one.
+        std::lock_guard<std::mutex> renderLock(renderMutex_);
         if (!active_.load(std::memory_order_acquire)) {
             return -10;
         }
         if (currentEpoch_ != epoch || !backend_.matches(*config)) {
-            clearQueueUnlocked();
+            {
+                std::lock_guard<std::mutex> queueLock(queueMutex_);
+                clearQueueUnlocked();
+            }
             backend_.reset();
             currentEpoch_ = epoch;
         }
@@ -281,6 +291,10 @@ public:
             return status;
         }
 
+        std::lock_guard<std::mutex> queueLock(queueMutex_);
+        if (!active_.load(std::memory_order_acquire)) {
+            return -10;
+        }
         if (queuedFrames_ > kMaxQueuedFrames - frames) {
             clearQueueUnlocked();
             backend_.reset();
@@ -301,13 +315,12 @@ public:
             return false;
         }
 
-        std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
+        std::unique_lock<std::mutex> lock(queueMutex_, std::try_to_lock);
         if (!lock.owns_lock() || packets_.empty()) {
             return false;
         }
         if (queuedFrames_ < frames) {
             clearQueueUnlocked();
-            backend_.reset();
             return false;
         }
 
@@ -322,7 +335,6 @@ public:
             }
             if (packet.sampleRate != sampleRate || packet.readFrame > packet.frames) {
                 clearQueueUnlocked();
-                backend_.reset();
                 return false;
             }
             const std::size_t available = packet.frames - packet.readFrame;
@@ -333,7 +345,6 @@ public:
                 if (!sample_matches(packet.reference[expectedBase], deliveredStereo[deliveredBase]) ||
                     !sample_matches(packet.reference[expectedBase + 1u], deliveredStereo[deliveredBase + 1u])) {
                     clearQueueUnlocked();
-                    backend_.reset();
                     return false;
                 }
             }
@@ -342,7 +353,6 @@ public:
         }
         if (remaining != 0) {
             clearQueueUnlocked();
-            backend_.reset();
             return false;
         }
 
@@ -375,7 +385,8 @@ private:
     }
 
     std::atomic<bool> active_{false};
-    std::mutex mutex_;
+    std::mutex renderMutex_;
+    std::mutex queueMutex_;
     std::deque<RenderedPacket> packets_;
     std::size_t queuedFrames_ = 0;
     std::uint64_t currentEpoch_ = 0;
