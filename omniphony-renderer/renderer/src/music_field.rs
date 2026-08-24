@@ -47,14 +47,22 @@ const PRESENCE_SUPPORT_SCALE: f32 = 0.83;
 /// This is not an extra wet copy: horizontal + elevated lane amplitude is
 /// algebraically unchanged before binaural rendering.
 ///
-/// The native Windows listening pass deliberately increases only the two bands
-/// carrying the strongest elevation cues. Research repeatedly places useful
-/// vertical spectral structure through roughly 2-10 kHz, so the 320-1200 Hz
-/// musical-body transfer is retained while 1.2-5 kHz and >5 kHz move modestly
-/// higher. Front remains stronger than rear to raise the perceived ceiling
-/// without hollowing the lateral/rear wrap.
-const FRONT_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.22, 0.54, 0.44];
+/// Current keeps height, but the horizontal front must remain load-bearing.
+/// Physical listening found the previous front transfer could leave the lower
+/// front hemisphere perceptually hollow while the side/rear/top shell remained
+/// convincing. Reclaim a modest amount of the presence/high-band front support
+/// from elevation instead of adding a second copy.
+const FRONT_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.18, 0.44, 0.36];
 const REAR_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.12, 0.32, 0.28];
+
+/// Forward shell weighting. These are transfers, not gains: an existing piece
+/// of rear support is moved to the matching front lane sample-for-sample. The
+/// protected stereo master remains the center/vocal authority; stereo does not
+/// synthesize a fake authored C channel. The result should feel like a front arc
+/// wrapping around the master rather than a bubble whose center of mass sits
+/// behind the listener.
+const REAR_TO_FRONT_TRANSFER: [f32; 3] = [0.10, 0.16, 0.12];
+const TOP_REAR_TO_TOP_FRONT_TRANSFER: [f32; 3] = [0.06, 0.10, 0.08];
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MusicFieldSnapshot {
@@ -116,7 +124,11 @@ fn slew_with_rates(current: f32, target: f32, rise: f32, fall: f32) -> f32 {
 }
 
 fn slew_signed_with_rates(current: f32, target: f32, rise: f32, fall: f32) -> f32 {
-    let coefficient = if target.abs() > current.abs() { rise } else { fall };
+    let coefficient = if target.abs() > current.abs() {
+        rise
+    } else {
+        fall
+    };
     (current + coefficient * (target - current)).clamp(-1.0, 1.0)
 }
 
@@ -125,6 +137,13 @@ fn transfer_to_elevation(horizontal: &mut f32, elevated: &mut f32, fraction: f32
     let transfer = *horizontal * fraction.clamp(0.0, 0.60);
     *horizontal -= transfer;
     *elevated += transfer;
+}
+
+#[inline]
+fn transfer_forward(rear: &mut f32, front: &mut f32, fraction: f32) {
+    let transfer = *rear * fraction.clamp(0.0, 0.40);
+    *rear -= transfer;
+    *front += transfer;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,7 +156,10 @@ impl OnePoleLowPass {
     fn new(sample_rate_hz: u32, cutoff_hz: f32) -> Self {
         let dt = 1.0 / sample_rate_hz.max(1) as f32;
         let rc = 1.0 / (2.0 * PI * cutoff_hz.max(1.0));
-        Self { alpha: dt / (rc + dt), state: 0.0 }
+        Self {
+            alpha: dt / (rc + dt),
+            state: 0.0,
+        }
     }
 
     fn process(&mut self, sample: f32) -> f32 {
@@ -208,7 +230,9 @@ impl MusicFieldProcessor {
         }
     }
 
-    pub fn snapshot(&self) -> MusicFieldSnapshot { self.snapshot }
+    pub fn snapshot(&self) -> MusicFieldSnapshot {
+        self.snapshot
+    }
 
     pub fn process_interleaved_stereo(&mut self, input: &[f32]) -> Vec<f32> {
         if input.len() < 2 || input.len() % 2 != 0 {
@@ -269,7 +293,11 @@ impl MusicFieldProcessor {
                 // Duplicating bright correlated mid directly into top-front can
                 // comb against that master after the cascaded room. Above 5 kHz
                 // require height to come from relational/lateral/diffuse evidence.
-                let front_height_mid = if band == 3 { 0.0 } else { mid * control.broad * 0.08 };
+                let front_height_mid = if band == 3 {
+                    0.0
+                } else {
+                    mid * control.broad * 0.08
+                };
                 let mut band_top_front_l = height
                     * (0.62 * broad_l + 0.22 * lateral_l + 0.08 * diffuse_l + front_height_mid);
                 let mut band_top_front_r = height
@@ -311,6 +339,18 @@ impl MusicFieldProcessor {
                 transfer_to_elevation(&mut band_rear_l, &mut band_top_rear_l, rear_transfer);
                 transfer_to_elevation(&mut band_rear_r, &mut band_top_rear_r, rear_transfer);
 
+                // Shift the shell's center of mass forward without creating
+                // another spatial copy. Horizontal and elevated rear support
+                // each keep most of their energy, so envelopment survives while
+                // the front hemisphere becomes a stronger frame around the
+                // protected center/master.
+                let forward = REAR_TO_FRONT_TRANSFER[band - 1];
+                let top_forward = TOP_REAR_TO_TOP_FRONT_TRANSFER[band - 1];
+                transfer_forward(&mut band_rear_l, &mut band_front_l, forward);
+                transfer_forward(&mut band_rear_r, &mut band_front_r, forward);
+                transfer_forward(&mut band_top_rear_l, &mut band_top_front_l, top_forward);
+                transfer_forward(&mut band_top_rear_r, &mut band_top_front_r, top_forward);
+
                 front_l += band_front_l;
                 front_r += band_front_r;
                 side_l += band_side_l;
@@ -326,10 +366,23 @@ impl MusicFieldProcessor {
             // Canonical 8.1.4.4. Stereo inference earns horizontal wrap and
             // upper support only; center/LFE/back-center/lower stay EMPTY.
             out.extend_from_slice(&[
-                front_l, front_r, 0.0, 0.0,
-                side_l, side_r, rear_l, rear_r, 0.0,
-                top_front_l, top_front_r, top_rear_l, top_rear_r,
-                0.0, 0.0, 0.0, 0.0,
+                front_l,
+                front_r,
+                0.0,
+                0.0,
+                side_l,
+                side_r,
+                rear_l,
+                rear_r,
+                0.0,
+                top_front_l,
+                top_front_r,
+                top_rear_l,
+                top_rear_r,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
             ]);
         }
         out
@@ -365,11 +418,16 @@ impl MusicFieldProcessor {
 
         let elapsed_ms = frames as f32 * 1000.0 / self.sample_rate_hz.max(1) as f32;
         let mut accum = [BandAccum::default(); 3];
-        let params = StereoInferenceParams { focus: 0.05, object_separation: 0.15 };
+        let params = StereoInferenceParams {
+            focus: 0.05,
+            object_separation: 0.15,
+        };
 
         for bin in 1..=FFT_SIZE / 2 {
             let frequency_hz = bin as f32 * self.sample_rate_hz as f32 / FFT_SIZE as f32;
-            if frequency_hz < CROSSOVER_HZ[0] { continue; }
+            if frequency_hz < CROSSOVER_HZ[0] {
+                continue;
+            }
             let band = if frequency_hz < CROSSOVER_HZ[1] {
                 0
             } else if frequency_hz < CROSSOVER_HZ[2] {
@@ -408,7 +466,9 @@ impl MusicFieldProcessor {
             let movable = (1.0 - 0.92 * anchor).clamp(0.0, 1.0);
 
             let lateral = if matches!(candidate.kind, SceneEvidenceKind::LateralObjectCandidate) {
-                candidate.reassignment_safety.max(0.62 * candidate.object_support)
+                candidate
+                    .reassignment_safety
+                    .max(0.62 * candidate.object_support)
             } else {
                 0.28 * candidate.reassignment_safety
             } * movable;
@@ -445,7 +505,8 @@ impl MusicFieldProcessor {
                 let broad = ((a.broad / a.weight) * 1.65).clamp(0.0, 1.0);
                 let lateral = ((a.lateral / a.weight) * 2.00).clamp(0.0, 1.0);
                 let diffuse = ((a.diffuse / a.weight) * 1.70).clamp(0.0, 1.0);
-                let shell_evidence = (0.45 * broad + 0.25 * lateral + 0.65 * diffuse).clamp(0.0, 1.0);
+                let shell_evidence =
+                    (0.45 * broad + 0.25 * lateral + 0.65 * diffuse).clamp(0.0, 1.0);
                 let height = (HEIGHT_PRIOR[index] * (0.35 + 0.65 * shell_evidence)).clamp(0.0, 1.0);
                 BandControl {
                     anchor: (a.anchor / a.weight).clamp(0.0, 1.0),
@@ -455,7 +516,9 @@ impl MusicFieldProcessor {
                     height,
                     pan: if a.pan_weight > 1.0e-9 {
                         (a.pan_num / a.pan_weight).clamp(-1.0, 1.0)
-                    } else { 0.0 },
+                    } else {
+                        0.0
+                    },
                     side_fraction: (a.side_fraction / a.weight).clamp(0.0, 1.0),
                 }
             } else {
@@ -509,12 +572,30 @@ mod tests {
     }
 
     #[test]
-    fn native_height_polish_targets_mid_and_high_without_lifting_body_band() {
-        assert_eq!(FRONT_COHERENT_HEIGHT_TRANSFER[0], 0.22);
-        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[1] > 0.46);
-        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[2] > 0.38);
+    fn native_height_polish_keeps_horizontal_front_load_bearing() {
+        assert_eq!(FRONT_COHERENT_HEIGHT_TRANSFER[0], 0.18);
+        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[1] >= 0.40);
+        assert!(FRONT_COHERENT_HEIGHT_TRANSFER[2] >= 0.32);
         assert!(REAR_COHERENT_HEIGHT_TRANSFER[1] < FRONT_COHERENT_HEIGHT_TRANSFER[1]);
         assert!(REAR_COHERENT_HEIGHT_TRANSFER[2] < FRONT_COHERENT_HEIGHT_TRANSFER[2]);
+    }
+
+    #[test]
+    fn front_weighting_moves_existing_support_without_adding_a_copy() {
+        for rear in [0.75_f32, -0.75, 0.125, -0.125] {
+            let mut r = rear;
+            let mut f = 0.20_f32;
+            let before = r + f;
+            transfer_forward(&mut r, &mut f, 0.16);
+            assert!((r + f - before).abs() < 1.0e-6);
+            assert!(r.abs() < rear.abs());
+        }
+        for value in REAR_TO_FRONT_TRANSFER
+            .into_iter()
+            .chain(TOP_REAR_TO_TOP_FRONT_TRANSFER)
+        {
+            assert!((0.0..=0.20).contains(&value));
+        }
     }
 
     #[test]
@@ -603,7 +684,10 @@ mod tests {
         let mut lfe_energy = 0.0;
         for chunk in input.chunks(2048) {
             let out = processor.process_interleaved_stereo(chunk);
-            for (frame, direct) in out.chunks_exact(MUSIC_FIELD_CHANNELS).zip(chunk.chunks_exact(2)) {
+            for (frame, direct) in out
+                .chunks_exact(MUSIC_FIELD_CHANNELS)
+                .zip(chunk.chunks_exact(2))
+            {
                 support_energy += frame.iter().map(|x| x * x).sum::<f32>();
                 direct_energy += direct[0] * direct[0] + direct[1] * direct[1];
                 lfe_energy += frame[3] * frame[3];
