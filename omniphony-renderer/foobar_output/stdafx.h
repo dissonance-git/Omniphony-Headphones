@@ -7,11 +7,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include <foobar2000/helpers/foobar2000+atl.h>
-
 #include <windows.h>
 #include <mmsystem.h>
 #include <objidl.h>
+
+#include <foobar2000/helpers/foobar2000+atl.h>
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <ks.h>
