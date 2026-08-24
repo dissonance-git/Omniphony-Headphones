@@ -5,8 +5,11 @@ Add-Type -AssemblyName System.Drawing
 
 $programData = if ([string]::IsNullOrWhiteSpace($env:ProgramData)) { 'C:\ProgramData' } else { $env:ProgramData }
 $stateRoot = Join-Path $programData 'Omniphony'
+$currentPath = Join-Path $stateRoot 'current-enabled.txt'
 $eqPresetPath = Join-Path $stateRoot 'eq-preset.txt'
 $legacyEqPath = Join-Path $stateRoot 'personal-eq.txt'
+$enhancementPath = Join-Path $stateRoot 'noire-x-enhancement.txt'
+$outputTrimPath = Join-Path $stateRoot 'output-trim.txt'
 $stopPath = Join-Path $stateRoot 'tray.stop'
 
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
@@ -19,23 +22,38 @@ if (-not $createdNew) {
     exit 0
 }
 
-function Get-EqPreset {
-    $text = $null
+function Get-OnOffSetting([string]$Path, [bool]$DefaultOn = $true) {
     try {
-        if (Test-Path -LiteralPath $eqPresetPath) {
-            $text = ([IO.File]::ReadAllText($eqPresetPath)).Trim().ToLowerInvariant()
-        } elseif (Test-Path -LiteralPath $legacyEqPath) {
-            $text = ([IO.File]::ReadAllText($legacyEqPath)).Trim().ToLowerInvariant()
+        if (Test-Path -LiteralPath $Path) {
+            $text = ([IO.File]::ReadAllText($Path)).Trim().ToLowerInvariant()
+            if ($text -in @('0', '0db', 'off', 'false', 'disabled', 'none', 'flat')) { return $false }
+            return $true
         }
     } catch { }
-
-    if ($text -in @('0', 'off', 'false', 'disabled', 'none')) { return 'off' }
-    return 'on'
+    return $DefaultOn
 }
 
-function Set-EqPreset([string]$Preset) {
-    [IO.File]::WriteAllText($eqPresetPath, "$Preset`r`n", [Text.Encoding]::ASCII)
+function Set-OnOffSetting([string]$Path, [bool]$Enabled, [string]$OnValue = 'on') {
+    $value = if ($Enabled) { $OnValue } else { 'off' }
+    [IO.File]::WriteAllText($Path, "$value`r`n", [Text.Encoding]::ASCII)
 }
+
+function Get-CurrentEnabled { return Get-OnOffSetting $currentPath $true }
+
+function Get-EqEnabled {
+    try {
+        if (Test-Path -LiteralPath $eqPresetPath) {
+            return Get-OnOffSetting $eqPresetPath $true
+        }
+        if (Test-Path -LiteralPath $legacyEqPath) {
+            return Get-OnOffSetting $legacyEqPath $true
+        }
+    } catch { }
+    return $true
+}
+
+function Get-EnhancementEnabled { return Get-OnOffSetting $enhancementPath $true }
+function Get-OutputTrimEnabled { return Get-OnOffSetting $outputTrimPath $true }
 
 function Show-TrayMessage([string]$Text) {
     $notify.BalloonTipTitle = 'Omniphony'
@@ -43,7 +61,7 @@ function Show-TrayMessage([string]$Text) {
     $notify.ShowBalloonTip(2500)
 }
 
-function Restart-WindowsAudioService {
+function Restart-WindowsAudioService([bool]$ShowSuccess = $true) {
     try {
         $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $restartCommand = @'
@@ -74,9 +92,11 @@ Start-Service -Name 'Audiosrv' -ErrorAction Stop
         if ($process.ExitCode -ne 0) {
             throw "Windows Audio restart exited with code $($process.ExitCode)."
         }
-        Show-TrayMessage 'Windows Audio service restarted.'
+        if ($ShowSuccess) { Show-TrayMessage 'Windows Audio service restarted.' }
+        return $true
     } catch {
         Show-TrayMessage "Could not restart Windows Audio: $($_.Exception.Message)"
+        return $false
     }
 }
 
@@ -90,8 +110,17 @@ $statusItem.Text = 'Omniphony'
 $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
 
+$currentItem = New-Object System.Windows.Forms.ToolStripMenuItem
+[void]$menu.Items.Add($currentItem)
+
 $eqItem = New-Object System.Windows.Forms.ToolStripMenuItem
 [void]$menu.Items.Add($eqItem)
+
+$enhancementItem = New-Object System.Windows.Forms.ToolStripMenuItem
+[void]$menu.Items.Add($enhancementItem)
+
+$outputTrimItem = New-Object System.Windows.Forms.ToolStripMenuItem
+[void]$menu.Items.Add($outputTrimItem)
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
@@ -107,25 +136,83 @@ $exitItem.Text = 'Exit tray'
 $notify.ContextMenuStrip = $menu
 
 function Update-TrayState {
-    $preset = Get-EqPreset
-    $enabled = $preset -eq 'on'
-    $eqItem.Checked = $enabled
-    $eqItem.Text = if ($enabled) { 'EQ: On' } else { 'EQ: Off' }
-    $notify.Text = if ($enabled) { 'Omniphony | EQ: On' } else { 'Omniphony | EQ: Off' }
+    $current = Get-CurrentEnabled
+    $eq = Get-EqEnabled
+    $enhancement = Get-EnhancementEnabled
+    $trim = Get-OutputTrimEnabled
+
+    $currentItem.Checked = $current
+    $currentItem.Text = if ($current) { 'Stereo Current: On' } else { 'Stereo Current: Off (identity)' }
+
+    $eqItem.Checked = $eq
+    $eqItem.Text = if ($eq) { 'Headphone EQ: Noire X' } else { 'Headphone EQ: Off' }
+
+    $enhancementItem.Checked = $enhancement
+    $enhancementItem.Text = if ($enhancement) { 'Noire X Enhancement: On' } else { 'Noire X Enhancement: Off' }
+
+    $outputTrimItem.Checked = $trim
+    $outputTrimItem.Text = if ($trim) { 'Output trim: +1.5 dB' } else { 'Output trim: 0 dB' }
+
+    $currentText = if ($current) { 'Current On' } else { 'Current Off' }
+    $eqText = if ($eq) { 'EQ On' } else { 'EQ Off' }
+    $enhanceText = if ($enhancement) { 'NX On' } else { 'NX Off' }
+    $trimText = if ($trim) { '+1.5dB' } else { '0dB' }
+    $statusItem.Text = "Omniphony | $currentText | $eqText | $enhanceText | $trimText"
+    $notify.Text = "Omniphony | $currentText | $enhanceText | $trimText"
+}
+
+function Toggle-Current {
+    try {
+        $previous = Get-CurrentEnabled
+        $next = -not $previous
+        Set-OnOffSetting $currentPath $next 'on'
+        Update-TrayState
+        # Current-vs-identity is chosen when the APO graph locks. A graph reset
+        # makes the switch exact and gives identity zero Omniphony latency.
+        if (-not (Restart-WindowsAudioService $false)) {
+            Set-OnOffSetting $currentPath $previous 'on'
+            Update-TrayState
+            return
+        }
+        Update-TrayState
+        Show-TrayMessage (if ($next) { 'Stereo Current enabled.' } else { 'Stereo Current bypassed. Authored surround remains source-faithful.' })
+    } catch {
+        Show-TrayMessage "Could not change Stereo Current: $($_.Exception.Message)"
+    }
 }
 
 function Toggle-Eq {
     try {
-        $next = if ((Get-EqPreset) -eq 'on') { 'off' } else { 'on' }
-        Set-EqPreset $next
+        Set-OnOffSetting $eqPresetPath (-not (Get-EqEnabled)) 'on'
         Update-TrayState
     } catch {
         Show-TrayMessage "Could not change the EQ setting: $($_.Exception.Message)"
     }
 }
 
+function Toggle-Enhancement {
+    try {
+        Set-OnOffSetting $enhancementPath (-not (Get-EnhancementEnabled)) 'on'
+        Update-TrayState
+    } catch {
+        Show-TrayMessage "Could not change Noire X Enhancement: $($_.Exception.Message)"
+    }
+}
+
+function Toggle-OutputTrim {
+    try {
+        Set-OnOffSetting $outputTrimPath (-not (Get-OutputTrimEnabled)) '+1.5'
+        Update-TrayState
+    } catch {
+        Show-TrayMessage "Could not change output trim: $($_.Exception.Message)"
+    }
+}
+
+$currentItem.Add_Click({ Toggle-Current })
 $eqItem.Add_Click({ Toggle-Eq })
-$restartAudioItem.Add_Click({ Restart-WindowsAudioService })
+$enhancementItem.Add_Click({ Toggle-Enhancement })
+$outputTrimItem.Add_Click({ Toggle-OutputTrim })
+$restartAudioItem.Add_Click({ [void](Restart-WindowsAudioService $true) })
 
 $exitItem.Add_Click({
     $notify.Visible = $false
