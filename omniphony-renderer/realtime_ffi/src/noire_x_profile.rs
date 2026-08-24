@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const TUNED_GLOBAL_PREAMP_DB: f64 = -2.5;
+const TUNED_GLOBAL_PREAMP_DB: f64 = -4.0;
 const RIGHT_PREAMP_DB: f64 = -0.4;
 const RIGHT_DELAY_MS: f64 = 0.02;
 const SETTING_POLL_MS: u64 = 500;
@@ -103,7 +103,7 @@ impl FilterSpec {
 // notches are now shallow and the top octave is allowed to breathe.
 const TUNED_SHARED_FILTERS: [FilterSpec; 12] = [
     FilterSpec::high_pass(11.0, 0.65),
-    FilterSpec::low_shelf(32.0, 4.0, 0.55),
+    FilterSpec::low_shelf(32.0, 5.5, 0.55),
     FilterSpec::peaking(60.0, 1.0, 0.70),
     FilterSpec::peaking(150.0, 0.2, 0.80),
     FilterSpec::peaking(260.0, -0.4, 0.85),
@@ -422,9 +422,44 @@ mod tests {
     }
 
     #[test]
-    fn tuned_preamp_keeps_useful_headroom_without_old_level_penalty() {
-        assert!(TUNED_GLOBAL_PREAMP_DB <= -2.0);
-        assert!(TUNED_GLOBAL_PREAMP_DB >= -3.0);
+    fn tuned_preamp_reserves_headroom_for_the_deep_sub_shelf() {
+        assert!(TUNED_GLOBAL_PREAMP_DB <= -3.5);
+        assert!(TUNED_GLOBAL_PREAMP_DB >= -4.5);
+    }
+
+    #[test]
+    fn tuned_profile_prefers_deep_sub_over_midbass_and_midrange() {
+        fn left_rms_at(frequency_hz: f64) -> f64 {
+            let sample_rate = 48_000u32;
+            let frames = sample_rate as usize;
+            let mut samples = Vec::with_capacity(frames * 2);
+            for frame in 0..frames {
+                let sample =
+                    (2.0 * PI * frequency_hz * frame as f64 / sample_rate as f64).sin() as f32
+                        * 0.1;
+                samples.extend_from_slice(&[sample, sample]);
+            }
+
+            let mut profile = NoireXPersonalEq::new(sample_rate);
+            profile.preset = EqPreset::On;
+            let (gain, shared) = build_eq_preset(EqPreset::On, sample_rate);
+            profile.global_gain = gain;
+            profile.shared = shared;
+            profile.process_interleaved(&mut samples);
+
+            let start = frames / 2;
+            let energy: f64 = samples[(start * 2)..]
+                .chunks_exact(2)
+                .map(|frame| (frame[0] as f64).powi(2))
+                .sum();
+            (energy / (frames - start) as f64).sqrt()
+        }
+
+        let deep = left_rms_at(25.0);
+        let midbass = left_rms_at(60.0);
+        let midrange = left_rms_at(1_000.0);
+        assert!(deep > midbass * 1.10, "deep={deep} midbass={midbass}");
+        assert!(deep > midrange * 1.40, "deep={deep} midrange={midrange}");
     }
 
     #[test]

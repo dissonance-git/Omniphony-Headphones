@@ -14,6 +14,8 @@
 
 use std::f32::consts::PI;
 
+const FOUNDATION_LOW_SHELF_HZ: f32 = 60.0;
+
 #[derive(Debug, Clone, Copy)]
 pub struct MusicFoundationTuning {
     /// Broad low-frequency pressure / mass.
@@ -36,8 +38,10 @@ impl Default for MusicFoundationTuning {
         // non-spatial rather than trying to recover impact with fake LFE or
         // extra room energy. The stronger 110 Hz term is deliberately narrow
         // enough to add kick impact without turning the whole bass range up.
+        // Keep the pressure shelf below that term so deeper extension does not
+        // become an 80-150 Hz cloud around the protected master.
         Self {
-            low_shelf_db: 2.80,
+            low_shelf_db: 3.40,
             punch_db: 1.60,
             body_db: 1.20,
             density_db: 0.50,
@@ -167,7 +171,11 @@ struct ChannelFoundation {
 impl ChannelFoundation {
     fn new(sample_rate_hz: u32, tuning: MusicFoundationTuning) -> Self {
         Self {
-            pressure: Biquad::low_shelf(sample_rate_hz, 85.0, tuning.low_shelf_db),
+            pressure: Biquad::low_shelf(
+                sample_rate_hz,
+                FOUNDATION_LOW_SHELF_HZ,
+                tuning.low_shelf_db,
+            ),
             punch: Biquad::peaking(sample_rate_hz, 110.0, 0.80, tuning.punch_db),
             body: Biquad::peaking(sample_rate_hz, 240.0, 0.80, tuning.body_db),
             density: Biquad::peaking(sample_rate_hz, 800.0, 0.70, tuning.density_db),
@@ -260,6 +268,30 @@ mod tests {
         for frame in delta[start..].chunks_exact(2) {
             assert!((frame[0] - frame[1]).abs() < 1.0e-6);
         }
+    }
+
+    #[test]
+    fn default_foundation_favors_deep_pressure_over_midbass_fog() {
+        let deep = sine(25.0, 48_000);
+        let upper_bass = sine(90.0, 48_000);
+        let mut deep_processor = MusicFoundationProcessor::new(48_000);
+        let mut upper_processor = MusicFoundationProcessor::new(48_000);
+        let deep_delta = deep_processor.process_interleaved_delta(&deep);
+        let upper_delta = upper_processor.process_interleaved_delta(&upper_bass);
+        let deep_shaped: Vec<f32> = deep
+            .iter()
+            .zip(deep_delta.iter())
+            .map(|(source, delta)| source + delta)
+            .collect();
+        let upper_shaped: Vec<f32> = upper_bass
+            .iter()
+            .zip(upper_delta.iter())
+            .map(|(source, delta)| source + delta)
+            .collect();
+        let start = 8_192 * 2;
+        let deep_gain = rms(&deep_shaped[start..]) / rms(&deep[start..]);
+        let upper_gain = rms(&upper_shaped[start..]) / rms(&upper_bass[start..]);
+        assert!(deep_gain > upper_gain * 1.10, "deep={deep_gain} upper={upper_gain}");
     }
 
     #[test]

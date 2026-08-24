@@ -73,6 +73,31 @@ Side, rear and lower evidence-source poses are unchanged. Bass/foundation tuning
 
 This candidate is **not yet a listening result**. It remains provisional until physical listening.
 
+## 2026-08-23 · deep-sub pressure candidate
+
+A later observation reopens only the low-frequency balance:
+
+- deep bass should feel more bottomless;
+- additional 80-240 Hz weight would be counterproductive if it reads as mud;
+- proven kick, body, stereo motion, room behavior and spatial geometry should remain protected.
+
+The candidate shifts existing low-frequency ownership downward rather than adding
+a parallel bass path:
+
+```text
+renderer foundation shelf   85 Hz / +2.8 dB -> 60 Hz / +3.4 dB
+renderer 110 Hz punch       unchanged at +1.6 dB
+renderer 240 Hz body        unchanged at +1.2 dB
+Noire X 32 Hz shelf         +4.0 dB -> +5.5 dB
+Noire X profile preamp      -2.5 dB -> -4.0 dB
+```
+
+The renderer shift is calculated to add roughly 0.5 dB at 20-25 Hz while
+reducing roughly 0.5-0.7 dB around 80-110 Hz. The Noire X change adds a further
+bounded deep-sub preference tilt while reserving filter headroom. This is a
+candidate, not a retained listening result; loudness-matched physical listening
+and peak-guard activity remain required before promotion.
+
 ## Current model inherited from the comparison
 
 The Current model retains:
