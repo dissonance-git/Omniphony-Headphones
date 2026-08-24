@@ -8,7 +8,7 @@ use abi_stable::{
 };
 use anyhow::{Context, bail};
 use bridge_api::{
-    FormatBridge, FormatBridgeBox, FormatBridge_TO, RChannelLabel, RCoordinateFormat,
+    FormatBridge, FormatBridge_TO, FormatBridgeBox, RChannelLabel, RCoordinateFormat,
     RDecodedFrame, RInputTransport, RPushResult, RVbapCartesianDefaults, RVbapTableMode,
 };
 use renderer::config::Config;
@@ -297,6 +297,7 @@ impl MusicSupportRenderer {
 
 /// Construct the legacy Current support engine around the linked reference WAV
 /// bridge. Retained as the differential oracle while the direct ingress ships.
+#[cfg(test)]
 pub(crate) fn build_embedded_engine(
     config_yaml: &str,
     layout_yaml: &str,
@@ -407,6 +408,7 @@ fn build_embedded_engine_with_bridge(
     Ok(engine)
 }
 
+#[cfg(test)]
 pub(crate) fn seed_engine(engine: &mut Engine, header: &[u8], label: &str) -> anyhow::Result<()> {
     let output = engine
         .process(header, RInputTransport::Raw, 0)
@@ -451,6 +453,7 @@ fn add_stereo_support(
     Ok(primary)
 }
 
+#[cfg(test)]
 pub(crate) fn streaming_f32_wav_header(channels: u16, sample_rate_hz: u32) -> Vec<u8> {
     let block_align = channels.saturating_mul(4);
     let byte_rate = sample_rate_hz.saturating_mul(u32::from(block_align));
@@ -471,6 +474,7 @@ pub(crate) fn streaming_f32_wav_header(channels: u16, sample_rate_hz: u32) -> Ve
     wav
 }
 
+#[cfg(test)]
 pub(crate) fn f32_as_le_bytes(samples: &[f32], out: &mut Vec<u8>) {
     out.clear();
     out.reserve(samples.len() * 4);
@@ -540,7 +544,11 @@ mod tests {
         ingress.queue(&input).unwrap();
         let direct_out = direct.process(&[], RInputTransport::Raw, 0).unwrap();
 
-        assert_eq!(legacy_out.len(), direct_out.len(), "decoded block count changed");
+        assert_eq!(
+            legacy_out.len(),
+            direct_out.len(),
+            "decoded block count changed"
+        );
         let mut sum_sq = 0.0f64;
         let mut max_abs = 0.0f32;
         let mut samples = 0usize;
