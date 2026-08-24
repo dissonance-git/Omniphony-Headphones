@@ -15,7 +15,6 @@ use renderer::config::Config;
 use renderer::music_field::MUSIC_FIELD_CHANNELS;
 use renderer::speaker_layout::SpeakerLayout;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 const CURRENT_PCM_BLOCK_FRAMES: usize = 2048;
 const CURRENT_PCM_FULL_SCALE: f32 = 8_388_607.0;
@@ -67,57 +66,23 @@ pub(crate) fn current_model_config(base: &str) -> String {
     )
 }
 
-/// Shared-memory ingress used only inside the retained Current worker.
+/// Narrow in-process PCM adapter for the retained generic Engine.
 ///
-/// The old path converted every 17-lane f32 block to little-endian bytes, pushed
-/// those bytes through a streaming RIFF/WAVE parser, quantized them into the
-/// bridge's 24-bit-in-i32 PCM convention, then converted them back to f32 in the
-/// engine. This ingress presents the same decoded frames directly while keeping
-/// the established 24-bit clamp/quantization law and 2048-frame boundaries.
-///
-/// The mutex is not on the Windows audio callback: Current already runs on its
-/// dedicated worker. It is a narrow ownership adapter around Engine's bridge
-/// abstraction and can disappear with the later Engine→SpatialRenderer
-/// contraction.
-#[derive(Clone, Default)]
-struct CurrentPcmIngress {
-    pending: Arc<Mutex<Vec<f32>>>,
-}
-
-impl CurrentPcmIngress {
-    fn queue(&self, samples: &[f32]) -> anyhow::Result<()> {
-        if !samples.len().is_multiple_of(MUSIC_FIELD_CHANNELS) {
-            bail!(
-                "Current model PCM width mismatch: {} samples are not divisible by {} lanes",
-                samples.len(),
-                MUSIC_FIELD_CHANNELS
-            );
-        }
-        let mut pending = self
-            .pending
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if !pending.is_empty() {
-            bail!("previous Current model PCM block was not consumed");
-        }
-        pending.extend_from_slice(samples);
-        Ok(())
-    }
-}
-
+/// Current's producer and this bridge live in the same process and on the same
+/// dedicated worker thread. The input bytes therefore borrow the producer's f32
+/// storage directly: no RIFF/WAVE container, shared queue, mutex, PCM scratch
+/// copy, or bridge-side buffering exists on the production path. The adapter
+/// only performs the two semantics the old reference WAV bridge contributed:
+/// 24-bit-compatible float quantization and canonical 17-channel labels.
 struct CurrentPcmBridge {
-    ingress: CurrentPcmIngress,
     sample_rate_hz: u32,
-    scratch: Vec<f32>,
     frames_emitted: u64,
 }
 
 impl CurrentPcmBridge {
-    fn new(ingress: CurrentPcmIngress, sample_rate_hz: u32) -> Self {
+    fn new(sample_rate_hz: u32) -> Self {
         Self {
-            ingress,
             sample_rate_hz,
-            scratch: Vec::new(),
             frames_emitted: 0,
         }
     }
@@ -137,40 +102,39 @@ impl CurrentPcmBridge {
 impl FormatBridge for CurrentPcmBridge {
     fn push_packet(
         &mut self,
-        _data: RSlice<'_, u8>,
+        data: RSlice<'_, u8>,
         _transport: RInputTransport,
         _data_type: u8,
     ) -> RPushResult {
-        {
-            let mut pending = self
-                .ingress
-                .pending
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            std::mem::swap(&mut self.scratch, &mut *pending);
-        }
-
+        let bytes = data.as_slice();
         let mut result = RPushResult {
             frames: RVec::new(),
             error_message: RString::new(),
             did_reset: false,
         };
-        if self.scratch.is_empty() {
-            return result;
-        }
-        if !self.scratch.len().is_multiple_of(MUSIC_FIELD_CHANNELS) {
-            result.error_message = RString::from("direct Current PCM width mismatch");
-            self.scratch.clear();
+        if bytes.is_empty() {
             return result;
         }
 
-        let total_frames = self.scratch.len() / MUSIC_FIELD_CHANNELS;
+        let bytes_per_frame = MUSIC_FIELD_CHANNELS * std::mem::size_of::<f32>();
+        if !bytes.len().is_multiple_of(bytes_per_frame) {
+            result.error_message = RString::from("direct Current PCM width mismatch");
+            return result;
+        }
+
+        let total_frames = bytes.len() / bytes_per_frame;
         for frame_start in (0..total_frames).step_by(CURRENT_PCM_BLOCK_FRAMES) {
             let n_frames = (total_frames - frame_start).min(CURRENT_PCM_BLOCK_FRAMES);
-            let sample_start = frame_start * MUSIC_FIELD_CHANNELS;
-            let sample_end = sample_start + n_frames * MUSIC_FIELD_CHANNELS;
-            let mut pcm = RVec::with_capacity(sample_end - sample_start);
-            for &sample in &self.scratch[sample_start..sample_end] {
+            let byte_start = frame_start * bytes_per_frame;
+            let byte_end = byte_start + n_frames * bytes_per_frame;
+            let mut pcm = RVec::with_capacity(n_frames * MUSIC_FIELD_CHANNELS);
+            for sample_bytes in bytes[byte_start..byte_end].chunks_exact(4) {
+                let sample = f32::from_ne_bytes([
+                    sample_bytes[0],
+                    sample_bytes[1],
+                    sample_bytes[2],
+                    sample_bytes[3],
+                ]);
                 pcm.push(Self::quantize(sample));
             }
             result.frames.push(RDecodedFrame {
@@ -187,17 +151,10 @@ impl FormatBridge for CurrentPcmBridge {
             });
         }
         self.frames_emitted += total_frames as u64;
-        self.scratch.clear();
         result
     }
 
     fn reset(&mut self) {
-        self.scratch.clear();
-        self.ingress
-            .pending
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
         self.frames_emitted = 0;
     }
 
@@ -241,19 +198,31 @@ impl FormatBridge for CurrentPcmBridge {
     }
 }
 
-fn current_pcm_bridge(ingress: CurrentPcmIngress, sample_rate_hz: u32) -> LoadedBridge {
+fn current_pcm_bridge(sample_rate_hz: u32) -> LoadedBridge {
     // Keep a valid ABI root-module owner alongside the in-process bridge object;
     // no reference-bridge decoder instance is created or used for Current PCM.
     let lib = reference_bridge::linked_library();
     let bridge: FormatBridgeBox =
-        FormatBridge_TO::from_value(CurrentPcmBridge::new(ingress, sample_rate_hz), TD_Opaque);
+        FormatBridge_TO::from_value(CurrentPcmBridge::new(sample_rate_hz), TD_Opaque);
     LoadedBridge { lib, bridge }
+}
+
+/// Borrow an f32 slice as its native byte representation without copying.
+///
+/// Current's supported Windows/x86 targets and CI are little-endian, which is
+/// also the legacy WAV bridge's byte order. The bridge reconstructs each f32
+/// with `from_ne_bytes`, so this operation is a representation view only.
+#[inline]
+fn f32_as_native_bytes(samples: &[f32]) -> &[u8] {
+    let byte_len = std::mem::size_of_val(samples);
+    // SAFETY: every byte of an initialized f32 is valid to read as u8, the
+    // returned slice has exactly the source lifetime, and no mutation occurs.
+    unsafe { std::slice::from_raw_parts(samples.as_ptr().cast::<u8>(), byte_len) }
 }
 
 pub(crate) struct MusicSupportRenderer {
     primary: Engine,
     early_reflections: HrtfEarlyReflectionField,
-    pcm_ingress: CurrentPcmIngress,
 }
 
 impl MusicSupportRenderer {
@@ -267,28 +236,32 @@ impl MusicSupportRenderer {
         // this constructor is also used by the native endpoint realtime worker,
         // which must not depend on a writable interactive-user profile.
         let current_config = current_model_config(FIELD_CONFIG);
-        let pcm_ingress = CurrentPcmIngress::default();
         let primary = build_embedded_engine_with_bridge(
             &current_config,
             GRID_LAYOUT,
             sample_rate_hz,
             "Current model support",
-            current_pcm_bridge(pcm_ingress.clone(), sample_rate_hz),
+            current_pcm_bridge(sample_rate_hz),
         )?;
         let early_reflections = HrtfEarlyReflectionField::new(sample_rate_hz);
 
         Ok(Self {
             primary,
             early_reflections,
-            pcm_ingress,
         })
     }
 
     pub(crate) fn process(&mut self, field_input: &[f32]) -> anyhow::Result<Vec<RenderedAudio>> {
-        self.pcm_ingress.queue(field_input)?;
+        if !field_input.len().is_multiple_of(MUSIC_FIELD_CHANNELS) {
+            bail!(
+                "Current model PCM width mismatch: {} samples are not divisible by {} lanes",
+                field_input.len(),
+                MUSIC_FIELD_CHANNELS
+            );
+        }
         let primary = self
             .primary
-            .process(&[], RInputTransport::Raw, 0)
+            .process(f32_as_native_bytes(field_input), RInputTransport::Raw, 0)
             .context("Current model music support render failed")?;
         let early = self.early_reflections.process(field_input)?;
         add_stereo_support(primary, &early)
@@ -527,13 +500,12 @@ mod tests {
         let header = streaming_f32_wav_header(MUSIC_FIELD_CHANNELS as u16, SAMPLE_RATE);
         seed_engine(&mut legacy, &header, "legacy Current ingress").unwrap();
 
-        let ingress = CurrentPcmIngress::default();
         let mut direct = build_embedded_engine_with_bridge(
             &current_config,
             GRID_LAYOUT,
             SAMPLE_RATE,
             "direct Current ingress",
-            current_pcm_bridge(ingress.clone(), SAMPLE_RATE),
+            current_pcm_bridge(SAMPLE_RATE),
         )
         .unwrap();
 
@@ -541,8 +513,9 @@ mod tests {
         let mut bytes = Vec::new();
         f32_as_le_bytes(&input, &mut bytes);
         let legacy_out = legacy.process(&bytes, RInputTransport::Raw, 0).unwrap();
-        ingress.queue(&input).unwrap();
-        let direct_out = direct.process(&[], RInputTransport::Raw, 0).unwrap();
+        let direct_out = direct
+            .process(f32_as_native_bytes(&input), RInputTransport::Raw, 0)
+            .unwrap();
 
         assert_eq!(
             legacy_out.len(),
