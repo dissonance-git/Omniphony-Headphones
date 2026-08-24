@@ -69,6 +69,20 @@ fn native_to_fullsphere_switch_changes_presentation_without_recreating_processor
     assert_eq!(unsafe { omniphony_source_reset(processor) }, 0);
     let native = render(processor, &input, &evidence);
 
+    assert_eq!(unsafe { omniphony_source_reset(processor) }, 0);
+    let native_after_plain_reset = render(processor, &input, &evidence);
+    let plain_reset_delta = (native
+        .iter()
+        .zip(&native_after_plain_reset)
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f32>()
+        / native.len() as f32)
+        .sqrt();
+    assert!(
+        plain_reset_delta < 1.0e-6,
+        "a plain reset must recover NativeRouting before testing any mode change; delta_rms={plain_reset_delta}"
+    );
+
     assert_eq!(
         unsafe { omniphony_source_set_spatial_mode(processor, SOURCE_SPATIAL_FULL_SPHERE) },
         0

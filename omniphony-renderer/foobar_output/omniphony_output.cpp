@@ -172,7 +172,7 @@ private:
     ResetFn reset_ = nullptr;
 };
 
-class OmniphonyOutput final : public output_impl {
+class OmniphonyOutput : public output_impl {
 public:
     OmniphonyOutput(const GUID&, double bufferLength, bool, t_uint32)
         : bufferLengthSeconds_(std::clamp(bufferLength, 0.01, 2.0)) {
