@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "../realtime_ffi/include/omniphony_realtime.h"
+#include "omniphony_source_session.h"
 
 namespace {
 
@@ -254,10 +255,12 @@ protected:
     }
 
     t_size get_latency_samples() override {
-        if (!client_) return current_.latencyFrames();
+        if (!client_) return lastWriteUsedSourceSession_ ? 0 : current_.latencyFrames();
         UINT32 padding = 0;
         Check(client_->GetCurrentPadding(&padding));
-        return static_cast<t_size>(padding) + current_.latencyFrames();
+        const std::size_t renderLatency =
+            lastWriteUsedSourceSession_ ? 0u : current_.latencyFrames();
+        return static_cast<t_size>(padding) + renderLatency;
     }
 
     void on_flush() override {
@@ -268,7 +271,9 @@ protected:
             started_ = false;
             Check(client_->Reset());
         }
+        omniphony_source_session_flush_output();
         current_.reset();
+        lastWriteUsedSourceSession_ = false;
         writableFrames_ = bufferFrames_;
         haveWritten_ = false;
     }
@@ -332,6 +337,8 @@ protected:
         if (!current_.open(kSampleRate)) {
             throw exception_output_device_not_found();
         }
+        lastWriteUsedSourceSession_ = false;
+        omniphony_source_session_set_output_active(true);
     }
 
     void write(const audio_chunk& data) override {
@@ -349,10 +356,22 @@ protected:
         for (std::size_t sample = 0; sample < samples; ++sample) {
             inputScratch_[sample] = static_cast<float>(input[sample]);
         }
+
         float* processed = scratch_.data();
-        if (!current_.process(inputScratch_.data(), processed, frames)) {
-            std::copy_n(inputScratch_.data(), samples, processed);
+        const bool usedSourceSession = omniphony_source_session_try_consume(
+            inputScratch_.data(), processed, frames, kSampleRate);
+        if (!usedSourceSession) {
+            // Current did not process source-session blocks. Reset it before the
+            // first ordinary-stereo block after a source scene so stale room or
+            // inference history can never leak across routing modes.
+            if (lastWriteUsedSourceSession_) {
+                current_.reset();
+            }
+            if (!current_.process(inputScratch_.data(), processed, frames)) {
+                std::copy_n(inputScratch_.data(), samples, processed);
+            }
         }
+        lastWriteUsedSourceSession_ = usedSourceSession;
 
         const float gain = volumeGain_.load(std::memory_order_acquire);
         if (gain != 1.0f) {
@@ -391,11 +410,13 @@ private:
     }
 
     void closeEndpoint() noexcept {
+        omniphony_source_session_set_output_active(false);
         if (client_ && started_) {
             (void)client_->Stop();
         }
         started_ = false;
         haveWritten_ = false;
+        lastWriteUsedSourceSession_ = false;
         writableFrames_ = 0;
         bufferFrames_ = 0;
         inputScratch_.clear();
@@ -415,6 +436,7 @@ private:
     bool started_ = false;
     bool paused_ = false;
     bool haveWritten_ = false;
+    bool lastWriteUsedSourceSession_ = false;
     UINT32 bufferFrames_ = 0;
     UINT32 writableFrames_ = 0;
     std::atomic<float> volumeGain_{1.0f};
