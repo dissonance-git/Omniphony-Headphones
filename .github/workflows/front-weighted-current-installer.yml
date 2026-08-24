@@ -1,0 +1,22 @@
+name: Build front-weighted Current installer
+
+on:
+  push:
+    branches: [helix/front-weighted-current]
+    paths:
+      - '.github/workflows/front-weighted-current-installer.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch canonical Windows installer workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh workflow run windows-installer.yml --repo "$REPO" --ref helix/front-weighted-current
