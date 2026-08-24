@@ -204,7 +204,10 @@ public:
     }
 
     void setOutputActive(bool active) noexcept {
-        active_.store(active, std::memory_order_release);
+        const bool previous = active_.exchange(active, std::memory_order_acq_rel);
+        if (previous == active) {
+            return;
+        }
         std::lock_guard<std::mutex> renderLock(renderMutex_);
         std::lock_guard<std::mutex> queueLock(queueMutex_);
         clearQueueUnlocked();
