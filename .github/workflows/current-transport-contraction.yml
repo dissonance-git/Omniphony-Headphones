@@ -60,4 +60,4 @@ jobs:
         run: cargo test -p realtime_ffi --lib
 
       - name: Authored-bed worker regression suite
-        run: cargo test -p bed_ffi --lib
+        run: cargo test --manifest-path bed_ffi/Cargo.toml --lib
