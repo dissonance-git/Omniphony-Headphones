@@ -213,35 +213,39 @@ pub struct OmniphonyNativeBedProcessor {
 pub unsafe extern "C" fn omniphony_native_bed_create(
     config: *const OmniphonyNativeBedConfig,
 ) -> *mut OmniphonyNativeBedProcessor {
-    if config.is_null() {
-        return ptr::null_mut();
-    }
-    let config = unsafe { &*config };
-    if config.sample_rate_hz == 0 || config.channels == 0 {
-        return ptr::null_mut();
-    }
-    let Ok(inner) = AsyncNativeBed::new(
-        config.sample_rate_hz,
-        config.channels as usize,
-        config.channel_mask,
-    ) else {
-        return ptr::null_mut();
-    };
-    Box::into_raw(Box::new(OmniphonyNativeBedProcessor {
-        sample_rate_hz: config.sample_rate_hz,
-        channels: config.channels,
-        channel_mask: config.channel_mask,
-        inner,
-    }))
+    crate::ffi_guard(ptr::null_mut(), || {
+        if config.is_null() {
+            return ptr::null_mut();
+        }
+        let config = unsafe { &*config };
+        if config.sample_rate_hz == 0 || config.channels == 0 {
+            return ptr::null_mut();
+        }
+        let Ok(inner) = AsyncNativeBed::new(
+            config.sample_rate_hz,
+            config.channels as usize,
+            config.channel_mask,
+        ) else {
+            return ptr::null_mut();
+        };
+        Box::into_raw(Box::new(OmniphonyNativeBedProcessor {
+            sample_rate_hz: config.sample_rate_hz,
+            channels: config.channels,
+            channel_mask: config.channel_mask,
+            inner,
+        }))
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn omniphony_native_bed_destroy(
     processor: *mut OmniphonyNativeBedProcessor,
 ) {
-    if !processor.is_null() {
-        unsafe { drop(Box::from_raw(processor)) };
-    }
+    crate::ffi_guard((), || {
+        if !processor.is_null() {
+            unsafe { drop(Box::from_raw(processor)) };
+        }
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -275,17 +279,19 @@ pub unsafe extern "C" fn omniphony_native_bed_process_f32(
     output_stereo: *mut f32,
     frames: usize,
 ) -> i32 {
-    if processor.is_null() {
-        return -1;
-    }
-    if frames == 0 {
-        return 0;
-    }
-    if input.is_null() || output_stereo.is_null() {
-        return -2;
-    }
-    let processor = unsafe { &mut *processor };
-    unsafe { processor.inner.process_raw(input, output_stereo, frames) }
+    crate::ffi_guard(-127, || {
+        if processor.is_null() {
+            return -1;
+        }
+        if frames == 0 {
+            return 0;
+        }
+        if input.is_null() || output_stereo.is_null() {
+            return -2;
+        }
+        let processor = unsafe { &mut *processor };
+        unsafe { processor.inner.process_raw(input, output_stereo, frames) }
+    })
 }
 
 #[unsafe(no_mangle)]

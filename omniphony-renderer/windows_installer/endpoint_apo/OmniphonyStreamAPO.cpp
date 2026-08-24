@@ -7,7 +7,9 @@
 #include <ksmedia.h>
 
 #include "omniphony_realtime.h"
+#include "OmniphonyStreamFallback.h"
 
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -189,25 +191,45 @@ public:
         latencyHns_ = static_cast<HNSTIME>(
             (static_cast<unsigned long long>(latencyFrames_) * 10'000'000ULL) /
             static_cast<unsigned long long>(sampleRateHz));
+        closing_.store(false, std::memory_order_release);
         return true;
     }
 
     bool process(const float* input, float* output, size_t frames) const noexcept {
-        if (!input || !output) {
+        if (closing_.load(std::memory_order_acquire) || !input || !output) {
             return false;
         }
-        if (mode_ == Mode::StereoCurrent && stereo_ && stereoProcess_) {
-            return stereoProcess_(stereo_, input, output, frames) == 0;
+        activeCalls_.fetch_add(1, std::memory_order_acq_rel);
+        if (closing_.load(std::memory_order_acquire)) {
+            activeCalls_.fetch_sub(1, std::memory_order_acq_rel);
+            return false;
         }
-        if (mode_ == Mode::NativeBed && bed_ && bedProcess_) {
-            return bedProcess_(bed_, input, output, frames) == 0;
+
+        const Mode mode = mode_;
+        auto* stereo = stereo_;
+        auto* bed = bed_;
+        const auto stereoProcess = stereoProcess_;
+        const auto bedProcess = bedProcess_;
+        bool processed = false;
+        if (mode == Mode::StereoCurrent && stereo && stereoProcess) {
+            processed = stereoProcess(stereo, input, output, frames) == 0;
+        } else if (mode == Mode::NativeBed && bed && bedProcess) {
+            processed = bedProcess(bed, input, output, frames) == 0;
         }
-        return false;
+        activeCalls_.fetch_sub(1, std::memory_order_acq_rel);
+        return processed;
     }
 
     HNSTIME latencyHns() const noexcept { return latencyHns_; }
 
     void shutdown() noexcept {
+        // Configuration/destruction may run while a final AudioDG callback is
+        // returning. Close admission first, then retire the processor only
+        // after every already-admitted nonblocking process call has left.
+        closing_.store(true, std::memory_order_release);
+        while (activeCalls_.load(std::memory_order_acquire) != 0) {
+            Sleep(1);
+        }
         if (stereo_ && stereoDestroy_) {
             stereoDestroy_(stereo_);
         }
@@ -271,6 +293,8 @@ private:
     BedDestroyFn bedDestroy_ = nullptr;
     BedLatencyFn bedLatency_ = nullptr;
     BedProcessFn bedProcess_ = nullptr;
+    mutable std::atomic<uint32_t> activeCalls_{0};
+    std::atomic<bool> closing_{true};
 };
 
 class OmniphonyStreamAPO final : public CBaseAudioProcessingObject,
@@ -516,6 +540,7 @@ public:
         if (FAILED(hr)) return hr;
 
         inputChannels_ = inputFormat.dwSamplesPerFrame;
+        inputChannelMask_ = inputFormat.dwChannelMask;
         outputChannels_ = outputFormat.dwSamplesPerFrame;
         inputBytesPerFrame_ = static_cast<size_t>(inputChannels_) * sizeof(float);
         outputBytesPerFrame_ = static_cast<size_t>(outputChannels_) * sizeof(float);
@@ -665,6 +690,15 @@ public:
                 output->pBuffer != input->pBuffer && outputBytes != 0) {
                 std::memmove(outputBuffer, processInput, outputBytes);
                 output->u32BufferFlags = BUFFER_VALID;
+            } else if (inputChannels_ > 2 && input->u32BufferFlags == BUFFER_VALID &&
+                       processInput && outputBuffer && output->pBuffer != input->pBuffer) {
+                omniphony::SafetyFoldDown(
+                    processInput,
+                    outputBuffer,
+                    frames,
+                    inputChannels_,
+                    inputChannelMask_);
+                output->u32BufferFlags = BUFFER_VALID;
             } else {
                 if (outputBuffer && outputBytes != 0) std::memset(outputBuffer, 0, outputBytes);
                 output->u32BufferFlags = BUFFER_SILENT;
@@ -687,6 +721,7 @@ private:
     void resetProcessing() noexcept {
         InterlockedExchange(&realtimeEligible_, 0);
         inputChannels_ = 0;
+        inputChannelMask_ = 0;
         outputChannels_ = 0;
         inputBytesPerFrame_ = 0;
         outputBytesPerFrame_ = 0;
@@ -697,6 +732,7 @@ private:
     volatile LONG references_ = 1;
     volatile LONG realtimeEligible_ = 0;
     UINT32 inputChannels_ = 0;
+    DWORD inputChannelMask_ = 0;
     UINT32 outputChannels_ = 0;
     size_t inputBytesPerFrame_ = 0;
     size_t outputBytesPerFrame_ = 0;

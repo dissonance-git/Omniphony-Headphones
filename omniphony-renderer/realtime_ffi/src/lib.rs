@@ -21,11 +21,16 @@ use renderer::music_field::{MUSIC_FIELD_CHANNELS, MusicFieldProcessor};
 use renderer::music_foundation::MusicFoundationProcessor;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+pub(crate) fn ffi_guard<T>(fallback: T, body: impl FnOnce() -> T) -> T {
+    catch_unwind(AssertUnwindSafe(body)).unwrap_or(fallback)
+}
 
 const ABI_MAJOR: u32 = 0;
 const ABI_MINOR: u32 = 4;
@@ -537,25 +542,29 @@ pub extern "C" fn omniphony_realtime_abi_minor() -> u32 { ABI_MINOR }
 pub unsafe extern "C" fn omniphony_realtime_create(
     config: *const OmniphonyRealtimeConfig,
 ) -> *mut OmniphonyRealtimeProcessor {
-    if config.is_null() {
-        return ptr::null_mut();
-    }
-    let config = unsafe { &*config };
-    if config.sample_rate_hz == 0 || config.channels == 0 {
-        return ptr::null_mut();
-    }
-    Box::into_raw(Box::new(OmniphonyRealtimeProcessor {
-        sample_rate_hz: config.sample_rate_hz,
-        channels: config.channels,
-        mode: ProcessorMode::Identity,
-    }))
+    ffi_guard(ptr::null_mut(), || {
+        if config.is_null() {
+            return ptr::null_mut();
+        }
+        let config = unsafe { &*config };
+        if config.sample_rate_hz == 0 || config.channels == 0 {
+            return ptr::null_mut();
+        }
+        Box::into_raw(Box::new(OmniphonyRealtimeProcessor {
+            sample_rate_hz: config.sample_rate_hz,
+            channels: config.channels,
+            mode: ProcessorMode::Identity,
+        }))
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn omniphony_realtime_destroy(processor: *mut OmniphonyRealtimeProcessor) {
-    if !processor.is_null() {
-        unsafe { drop(Box::from_raw(processor)) };
-    }
+    ffi_guard((), || {
+        if !processor.is_null() {
+            unsafe { drop(Box::from_raw(processor)) };
+        }
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -563,29 +572,31 @@ pub unsafe extern "C" fn omniphony_realtime_set_mode(
     processor: *mut OmniphonyRealtimeProcessor,
     mode: u32,
 ) -> i32 {
-    if processor.is_null() {
-        return -1;
-    }
-    let processor = unsafe { &mut *processor };
-    match mode {
-        MODE_IDENTITY => {
-            processor.mode = ProcessorMode::Identity;
-            0
+    ffi_guard(-127, || {
+        if processor.is_null() {
+            return -1;
         }
-        MODE_CURRENT => {
-            if processor.channels != 2 {
-                return -2;
+        let processor = unsafe { &mut *processor };
+        match mode {
+            MODE_IDENTITY => {
+                processor.mode = ProcessorMode::Identity;
+                0
             }
-            match AsyncCurrent::new(processor.sample_rate_hz) {
-                Ok(current) => {
-                    processor.mode = ProcessorMode::Current(current);
-                    0
+            MODE_CURRENT => {
+                if processor.channels != 2 {
+                    return -2;
                 }
-                Err(_) => -3,
+                match AsyncCurrent::new(processor.sample_rate_hz) {
+                    Ok(current) => {
+                        processor.mode = ProcessorMode::Current(current);
+                        0
+                    }
+                    Err(_) => -3,
+                }
             }
+            _ => -4,
         }
-        _ => -4,
-    }
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -641,32 +652,34 @@ pub unsafe extern "C" fn omniphony_realtime_process_f32(
     output: *mut f32,
     frames: usize,
 ) -> i32 {
-    if processor.is_null() {
-        return -1;
-    }
-    if frames == 0 {
-        return 0;
-    }
-    if input.is_null() || output.is_null() {
-        return -2;
-    }
-    let processor = unsafe { &mut *processor };
-    let Some(samples) = frames.checked_mul(processor.channels as usize) else {
-        return -3;
-    };
-    match &mut processor.mode {
-        ProcessorMode::Identity => {
-            unsafe { ptr::copy(input, output, samples) };
-            0
+    ffi_guard(-127, || {
+        if processor.is_null() {
+            return -1;
         }
-        ProcessorMode::Current(current) => {
-            if processor.channels != 2 {
-                -4
-            } else {
-                unsafe { current.process_raw(input, output, samples) }
+        if frames == 0 {
+            return 0;
+        }
+        if input.is_null() || output.is_null() {
+            return -2;
+        }
+        let processor = unsafe { &mut *processor };
+        let Some(samples) = frames.checked_mul(processor.channels as usize) else {
+            return -3;
+        };
+        match &mut processor.mode {
+            ProcessorMode::Identity => {
+                unsafe { ptr::copy(input, output, samples) };
+                0
+            }
+            ProcessorMode::Current(current) => {
+                if processor.channels != 2 {
+                    -4
+                } else {
+                    unsafe { current.process_raw(input, output, samples) }
+                }
             }
         }
-    }
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -689,6 +702,11 @@ mod tests {
 
     fn config() -> OmniphonyRealtimeConfig {
         OmniphonyRealtimeConfig { sample_rate_hz: 48_000, channels: 2 }
+    }
+
+    #[test]
+    fn ffi_guard_contains_panics_at_the_host_boundary() {
+        assert_eq!(ffi_guard(-127, || panic!("ffi boundary probe")), -127);
     }
 
     #[test]

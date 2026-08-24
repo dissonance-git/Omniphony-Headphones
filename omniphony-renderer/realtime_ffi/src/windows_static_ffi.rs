@@ -386,48 +386,52 @@ pub struct OmniphonySpatialStaticProcessor {
 pub unsafe extern "C" fn omniphony_spatial_static_create(
     config: *const OmniphonySpatialStaticConfig,
 ) -> *mut OmniphonySpatialStaticProcessor {
-    if config.is_null() {
-        return ptr::null_mut();
-    }
-    let config = unsafe { &*config };
-    if config.sample_rate_hz == 0
-        || config.frames_per_quantum == 0
-        || config.object_count == 0
-        || config.object_count > 17
-        || config.objects.is_null()
-    {
-        return ptr::null_mut();
-    }
+    crate::ffi_guard(ptr::null_mut(), || {
+        if config.is_null() {
+            return ptr::null_mut();
+        }
+        let config = unsafe { &*config };
+        if config.sample_rate_hz == 0
+            || config.frames_per_quantum == 0
+            || config.object_count == 0
+            || config.object_count > 17
+            || config.objects.is_null()
+        {
+            return ptr::null_mut();
+        }
 
-    let descriptors = unsafe {
-        std::slice::from_raw_parts(config.objects, config.object_count as usize)
-    };
-    let Ok(descriptors) = copy_descriptors(descriptors) else {
-        return ptr::null_mut();
-    };
-    let Ok(inner) = AsyncStaticObjects::new(
-        config.sample_rate_hz,
-        config.frames_per_quantum as usize,
-        descriptors,
-    ) else {
-        return ptr::null_mut();
-    };
+        let descriptors = unsafe {
+            std::slice::from_raw_parts(config.objects, config.object_count as usize)
+        };
+        let Ok(descriptors) = copy_descriptors(descriptors) else {
+            return ptr::null_mut();
+        };
+        let Ok(inner) = AsyncStaticObjects::new(
+            config.sample_rate_hz,
+            config.frames_per_quantum as usize,
+            descriptors,
+        ) else {
+            return ptr::null_mut();
+        };
 
-    Box::into_raw(Box::new(OmniphonySpatialStaticProcessor {
-        sample_rate_hz: config.sample_rate_hz,
-        frames_per_quantum: config.frames_per_quantum,
-        object_count: config.object_count,
-        inner,
-    }))
+        Box::into_raw(Box::new(OmniphonySpatialStaticProcessor {
+            sample_rate_hz: config.sample_rate_hz,
+            frames_per_quantum: config.frames_per_quantum,
+            object_count: config.object_count,
+            inner,
+        }))
+    })
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn omniphony_spatial_static_destroy(
     processor: *mut OmniphonySpatialStaticProcessor,
 ) {
-    if !processor.is_null() {
-        unsafe { drop(Box::from_raw(processor)) };
-    }
+    crate::ffi_guard((), || {
+        if !processor.is_null() {
+            unsafe { drop(Box::from_raw(processor)) };
+        }
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -464,17 +468,19 @@ pub unsafe extern "C" fn omniphony_spatial_static_process_f32(
     output_stereo: *mut f32,
     frames: usize,
 ) -> i32 {
-    if processor.is_null() {
-        return -1;
-    }
-    if frames == 0 {
-        return 0;
-    }
-    if input_planar.is_null() || output_stereo.is_null() {
-        return -2;
-    }
-    let processor = unsafe { &mut *processor };
-    unsafe { processor.inner.process_raw(input_planar, output_stereo, frames) }
+    crate::ffi_guard(-127, || {
+        if processor.is_null() {
+            return -1;
+        }
+        if frames == 0 {
+            return 0;
+        }
+        if input_planar.is_null() || output_stereo.is_null() {
+            return -2;
+        }
+        let processor = unsafe { &mut *processor };
+        unsafe { processor.inner.process_raw(input_planar, output_stereo, frames) }
+    })
 }
 
 #[unsafe(no_mangle)]

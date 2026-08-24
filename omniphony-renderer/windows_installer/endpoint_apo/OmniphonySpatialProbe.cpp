@@ -49,12 +49,27 @@ int Fail(const wchar_t* stage, HRESULT hr) {
     return 1;
 }
 
+class ComApartment final {
+public:
+    ComApartment() noexcept : status_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {}
+    ~ComApartment() {
+        if (SUCCEEDED(status_)) {
+            CoUninitialize();
+        }
+    }
+
+    HRESULT status() const noexcept { return status_; }
+
+private:
+    HRESULT status_;
+};
+
 } // namespace
 
 int wmain() {
-    const HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(coHr)) {
-        return Fail(L"CoInitializeEx", coHr);
+    ComApartment com;
+    if (FAILED(com.status())) {
+        return Fail(L"CoInitializeEx", com.status());
     }
 
     ComPtr<IMMDeviceEnumerator> deviceEnumerator;
@@ -64,14 +79,12 @@ int wmain() {
         CLSCTX_ALL,
         IID_PPV_ARGS(deviceEnumerator.GetAddressOf()));
     if (FAILED(hr)) {
-        CoUninitialize();
         return Fail(L"CoCreateInstance(MMDeviceEnumerator)", hr);
     }
 
     ComPtr<IMMDevice> endpoint;
     hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, endpoint.GetAddressOf());
     if (FAILED(hr)) {
-        CoUninitialize();
         return Fail(L"GetDefaultAudioEndpoint", hr);
     }
 
@@ -83,7 +96,6 @@ int wmain() {
         reinterpret_cast<void**>(spatialClient.GetAddressOf()));
     if (FAILED(hr)) {
         std::wcout << L"spatial_client=unavailable\n";
-        CoUninitialize();
         return Fail(L"IMMDevice::Activate(ISpatialAudioClient)", hr);
     }
 
@@ -92,7 +104,6 @@ int wmain() {
     AudioObjectType nativeMask = AudioObjectType_None;
     hr = spatialClient->GetNativeStaticObjectTypeMask(&nativeMask);
     if (FAILED(hr)) {
-        CoUninitialize();
         return Fail(L"GetNativeStaticObjectTypeMask", hr);
     }
 
@@ -103,7 +114,6 @@ int wmain() {
     UINT32 maxDynamicObjects = 0;
     hr = spatialClient->GetMaxDynamicObjectCount(&maxDynamicObjects);
     if (FAILED(hr)) {
-        CoUninitialize();
         return Fail(L"GetMaxDynamicObjectCount", hr);
     }
     std::wcout << L"max_dynamic_objects=" << maxDynamicObjects << L"\n";
@@ -111,14 +121,12 @@ int wmain() {
     ComPtr<IAudioFormatEnumerator> formatEnumerator;
     hr = spatialClient->GetSupportedAudioObjectFormatEnumerator(formatEnumerator.GetAddressOf());
     if (FAILED(hr)) {
-        CoUninitialize();
         return Fail(L"GetSupportedAudioObjectFormatEnumerator", hr);
     }
 
     UINT32 formatCount = 0;
     hr = formatEnumerator->GetCount(&formatCount);
     if (FAILED(hr)) {
-        CoUninitialize();
         return Fail(L"IAudioFormatEnumerator::GetCount", hr);
     }
     std::wcout << L"object_format_count=" << formatCount << L"\n";
@@ -127,7 +135,6 @@ int wmain() {
         WAVEFORMATEX* format = nullptr;
         hr = formatEnumerator->GetFormat(0, &format);
         if (FAILED(hr)) {
-            CoUninitialize();
             return Fail(L"IAudioFormatEnumerator::GetFormat(0)", hr);
         }
         if (format != nullptr) {
@@ -162,6 +169,5 @@ int wmain() {
         std::wcout << L"\n";
     }
 
-    CoUninitialize();
     return 0;
 }

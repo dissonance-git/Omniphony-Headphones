@@ -175,6 +175,16 @@ jobs:
           & "$release\OmniphonyRealtimeSmoke.exe" $realtime
           if ($LASTEXITCODE -ne 0) { throw "Realtime DLL smoke failed: $LASTEXITCODE" }
 
+          & "$release\OmniphonyStreamFallbackSmoke.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Stream fail-open fold-down smoke failed: $LASTEXITCODE" }
+
+          & "$release\OmniphonySpatialProbe.exe"
+          $spatialProbeExit = $LASTEXITCODE
+          if ($spatialProbeExit -eq -1073741819) {
+            throw 'Spatial endpoint probe crashed with access violation during COM teardown'
+          }
+          Write-Host "SPATIAL_ENDPOINT_PROBE_FINITE_EXIT $spatialProbeExit"
+
           $regsvr32 = "$env:WINDIR\System32\regsvr32.exe"
           $cases = @(
             @{ Dll = 'OmniphonyAPO.dll'; Smoke = 'OmniphonyApoSmoke.exe'; Label = 'endpoint Current' },

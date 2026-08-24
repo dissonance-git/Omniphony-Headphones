@@ -7,6 +7,7 @@
 
 #include "omniphony_realtime.h"
 
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -98,14 +99,25 @@ public:
         latencyHns_ = static_cast<HNSTIME>(
             (static_cast<unsigned long long>(latencyFrames) * 10'000'000ULL) /
             static_cast<unsigned long long>(sampleRateHz));
+        closing_.store(false, std::memory_order_release);
         return true;
     }
 
     bool process(const float* input, float* output, size_t frames) const noexcept {
-        if (!processor_ || !process_ || !input || !output) {
+        if (closing_.load(std::memory_order_acquire) || !input || !output) {
             return false;
         }
-        return process_(processor_, input, output, frames) == 0;
+        activeCalls_.fetch_add(1, std::memory_order_acq_rel);
+        if (closing_.load(std::memory_order_acquire)) {
+            activeCalls_.fetch_sub(1, std::memory_order_acq_rel);
+            return false;
+        }
+
+        auto* processor = processor_;
+        const auto process = process_;
+        const bool processed = processor && process && process(processor, input, output, frames) == 0;
+        activeCalls_.fetch_sub(1, std::memory_order_acq_rel);
+        return processed;
     }
 
     HNSTIME latencyHns() const noexcept {
@@ -113,6 +125,13 @@ public:
     }
 
     void shutdown() noexcept {
+        // Configuration/destruction may run while a final AudioDG callback is
+        // returning. Close admission first, then retire the processor only
+        // after every already-admitted nonblocking process call has left.
+        closing_.store(true, std::memory_order_release);
+        while (activeCalls_.load(std::memory_order_acquire) != 0) {
+            Sleep(1);
+        }
         if (processor_ && destroy_) {
             destroy_(processor_);
         }
@@ -154,6 +173,8 @@ private:
     SetModeFn setMode_ = nullptr;
     LatencyFramesFn latencyFrames_ = nullptr;
     ProcessFn process_ = nullptr;
+    mutable std::atomic<uint32_t> activeCalls_{0};
+    std::atomic<bool> closing_{true};
 };
 
 class OmniphonyAPO final : public CBaseAudioProcessingObject,

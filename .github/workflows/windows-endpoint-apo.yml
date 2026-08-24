@@ -139,6 +139,16 @@ jobs:
           $release = (Resolve-Path 'build/endpoint_apo/Release').Path
           $realtime = (Resolve-Path 'omniphony-renderer/target/release/omniphony_realtime.dll').Path
           Copy-Item $realtime (Join-Path $release 'omniphony_realtime.dll') -Force
+          $fallbackSmoke = (Resolve-Path (Join-Path $release 'OmniphonyStreamFallbackSmoke.exe')).Path
+          & $fallbackSmoke
+          if ($LASTEXITCODE -ne 0) { throw "Stream fail-open fold-down smoke failed: $LASTEXITCODE" }
+          $spatialEndpointProbe = (Resolve-Path (Join-Path $release 'OmniphonySpatialProbe.exe')).Path
+          & $spatialEndpointProbe
+          $spatialProbeExit = $LASTEXITCODE
+          if ($spatialProbeExit -eq -1073741819) {
+            throw 'Spatial endpoint probe crashed with access violation during COM teardown'
+          }
+          Write-Host "SPATIAL_ENDPOINT_PROBE_FINITE_EXIT $spatialProbeExit"
           $regsvr32 = "$env:WINDIR\System32\regsvr32.exe"
 
           $cases = @(

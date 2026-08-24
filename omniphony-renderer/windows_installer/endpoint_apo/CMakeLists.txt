@@ -59,6 +59,11 @@ target_compile_definitions(OmniphonyStreamApoSmoke PRIVATE UNICODE _UNICODE WIN3
 target_compile_options(OmniphonyStreamApoSmoke PRIVATE /W4 /WX /permissive-)
 target_link_libraries(OmniphonyStreamApoSmoke PRIVATE ole32 uuid audioeng audiomediatypecrt)
 
+add_executable(OmniphonyStreamFallbackSmoke OmniphonyStreamFallbackSmoke.cpp)
+target_compile_features(OmniphonyStreamFallbackSmoke PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonyStreamFallbackSmoke PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(OmniphonyStreamFallbackSmoke PRIVATE /W4 /WX /permissive-)
+
 # RAW processing mode is the single-render escape hatch for future provider
 # egress. This smoke runs in its own process and proves both Omniphony APOs stay
 # bit-transparent, add zero latency, and never load omniphony_realtime.dll.
