@@ -7,7 +7,7 @@ on:
       - '.github/workflows/current-decoded-frame-ingress.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,51 +15,34 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  contract:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: omniphony-renderer
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: helix/current-decoded-frame-ingress
-          fetch-depth: 0
-
-      - name: Apply contraction
-        run: |
-          python3 .github/scripts/current_decoded_frame_ingress.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('omniphony-renderer/orender_engine/src/music_support.rs')
-          s = p.read_text()
-          s = s.replace('#[cfg(test)]\nuse crate::bridge_loader::LoadedBridge;\n', 'use crate::bridge_loader::LoadedBridge;\n', 1)
-          p.write_text(s)
-          PY
-          rustfmt --edition 2024 omniphony-renderer/orender_engine/src/engine.rs omniphony-renderer/orender_engine/src/music_support.rs
 
       - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup override set "$RUST_TOOLCHAIN"
           rustup component add rustfmt
-        working-directory: omniphony-renderer
+
+      - name: Formatting
+        run: rustfmt --edition 2024 --check orender_engine/src/engine.rs orender_engine/src/music_support.rs
 
       - name: Differential null
         run: cargo test -p orender_engine music_support::tests::direct_current_ingress_matches_streaming_reference_bridge -- --exact --nocapture
-        working-directory: omniphony-renderer
 
       - name: Full engine regressions
         run: cargo test -p orender_engine --lib --tests
-        working-directory: omniphony-renderer
 
       - name: Realtime worker regressions
         run: cargo test -p realtime_ffi --lib
-        working-directory: omniphony-renderer
 
-      - name: Commit contraction
-        if: success()
+      - name: Authored-bed worker regressions
         run: |
-          git config user.name dissonance
-          git config user.email ustreamusa@aim.com
-          git add omniphony-renderer/orender_engine/src/engine.rs omniphony-renderer/orender_engine/src/music_support.rs
-          git commit -m 'refactor(current): enter Engine as decoded frames'
-          git push origin HEAD:helix/current-decoded-frame-ingress
+          sed -i '/^resolver = "2"$/a exclude = ["bed_ffi"]' Cargo.toml
+          cargo test --manifest-path bed_ffi/Cargo.toml --lib
