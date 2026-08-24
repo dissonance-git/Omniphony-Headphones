@@ -95,6 +95,22 @@ pub(crate) fn build_embedded_engine(
     sample_rate_hz: u32,
     label: &str,
 ) -> anyhow::Result<Engine> {
+    let mut bridge = LoadedBridge::from_library(reference_bridge::linked_library());
+    bridge.configure("presentation", "best");
+    build_embedded_engine_with_bridge(config_yaml, layout_yaml, sample_rate_hz, label, bridge)
+}
+
+/// Build the embedded Current renderer around a caller-supplied decoded-frame
+/// ingress. Production still passes the reference WAV bridge today; the seam is
+/// explicit so a transport-free challenger can be proven against it before the
+/// legacy path is removed.
+fn build_embedded_engine_with_bridge(
+    config_yaml: &str,
+    layout_yaml: &str,
+    sample_rate_hz: u32,
+    label: &str,
+    bridge: LoadedBridge,
+) -> anyhow::Result<Engine> {
     let mut config: Config = serde_yaml_ng::from_str(config_yaml)
         .with_context(|| format!("failed to parse embedded Omniphony {label} config"))?;
     if let Some(render) = config.render.as_mut() {
@@ -104,8 +120,6 @@ pub(crate) fn build_embedded_engine(
     let layout = SpeakerLayout::from_yaml_str(layout_yaml)
         .with_context(|| format!("failed to parse embedded Omniphony {label} layout"))?;
 
-    let mut bridge = LoadedBridge::from_library(reference_bridge::linked_library());
-    bridge.configure("presentation", "best");
     let vbap_defaults = bridge.vbap_cartesian_defaults();
     let preferred = bridge.preferred_vbap_table_mode();
 
@@ -255,5 +269,270 @@ pub(crate) fn f32_as_le_bytes(samples: &[f32], out: &mut Vec<u8>) {
     out.reserve(samples.len() * 4);
     for &sample in samples {
         out.extend_from_slice(&sample.to_le_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use abi_stable::{sabi_trait::prelude::TD_Opaque, std_types::{ROption, RSlice, RStr, RString, RVec}};
+    use bridge_api::{
+        FormatBridge, FormatBridgeBox, FormatBridge_TO, RChannelLabel, RCoordinateFormat,
+        RDecodedFrame, RPushResult, RVbapCartesianDefaults, RVbapTableMode,
+    };
+    use std::sync::{Arc, Mutex};
+
+    const BLOCK_FRAMES: usize = 2048;
+    const PCM_FULL_SCALE: f32 = 8_388_607.0;
+    const CURRENT_LABELS: [RChannelLabel; MUSIC_FIELD_CHANNELS] = [
+        RChannelLabel::L,
+        RChannelLabel::R,
+        RChannelLabel::C,
+        RChannelLabel::LFE,
+        RChannelLabel::Ls,
+        RChannelLabel::Rs,
+        RChannelLabel::Lb,
+        RChannelLabel::Rb,
+        RChannelLabel::Cb,
+        RChannelLabel::Tfl,
+        RChannelLabel::Tfr,
+        RChannelLabel::Tbl,
+        RChannelLabel::Tbr,
+        RChannelLabel::Bfl,
+        RChannelLabel::Bfr,
+        RChannelLabel::Bbl,
+        RChannelLabel::Bbr,
+    ];
+
+    #[derive(Clone, Default)]
+    struct DirectPcmIngress {
+        pending: Arc<Mutex<Vec<f32>>>,
+    }
+
+    impl DirectPcmIngress {
+        fn queue(&self, samples: &[f32]) {
+            let mut pending = self.pending.lock().unwrap_or_else(|poison| poison.into_inner());
+            assert!(pending.is_empty(), "previous direct PCM block was not consumed");
+            pending.extend_from_slice(samples);
+        }
+    }
+
+    struct DirectCurrentBridge {
+        ingress: DirectPcmIngress,
+        sample_rate_hz: u32,
+        scratch: Vec<f32>,
+        frames_emitted: u64,
+    }
+
+    impl DirectCurrentBridge {
+        fn new(ingress: DirectPcmIngress, sample_rate_hz: u32) -> Self {
+            Self {
+                ingress,
+                sample_rate_hz,
+                scratch: Vec::new(),
+                frames_emitted: 0,
+            }
+        }
+
+        #[inline]
+        fn quantize(sample: f32) -> i32 {
+            if sample.is_finite() {
+                (sample.clamp(-1.0, 1.0) * PCM_FULL_SCALE) as i32
+            } else {
+                0
+            }
+        }
+    }
+
+    impl FormatBridge for DirectCurrentBridge {
+        fn push_packet(
+            &mut self,
+            _data: RSlice<'_, u8>,
+            _transport: RInputTransport,
+            _data_type: u8,
+        ) -> RPushResult {
+            {
+                let mut pending = self
+                    .ingress
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                std::mem::swap(&mut self.scratch, &mut *pending);
+            }
+
+            let mut result = RPushResult {
+                frames: RVec::new(),
+                error_message: RString::new(),
+                did_reset: false,
+            };
+            if self.scratch.is_empty() {
+                return result;
+            }
+            if !self.scratch.len().is_multiple_of(MUSIC_FIELD_CHANNELS) {
+                result.error_message = RString::from("direct Current PCM width mismatch");
+                self.scratch.clear();
+                return result;
+            }
+
+            let total_frames = self.scratch.len() / MUSIC_FIELD_CHANNELS;
+            for frame_start in (0..total_frames).step_by(BLOCK_FRAMES) {
+                let n_frames = (total_frames - frame_start).min(BLOCK_FRAMES);
+                let sample_start = frame_start * MUSIC_FIELD_CHANNELS;
+                let sample_end = sample_start + n_frames * MUSIC_FIELD_CHANNELS;
+                let mut pcm = RVec::with_capacity(sample_end - sample_start);
+                for &sample in &self.scratch[sample_start..sample_end] {
+                    pcm.push(Self::quantize(sample));
+                }
+                result.frames.push(RDecodedFrame {
+                    sampling_frequency: self.sample_rate_hz,
+                    sample_count: n_frames as u32,
+                    channel_count: MUSIC_FIELD_CHANNELS as u32,
+                    pcm,
+                    channel_labels: RVec::from(CURRENT_LABELS.to_vec()),
+                    metadata: RVec::new(),
+                    drc_gain: 1.0,
+                    drc_ramp_duration: 0,
+                    dialogue_level: ROption::RNone,
+                    is_new_segment: false,
+                });
+            }
+            self.frames_emitted += total_frames as u64;
+            self.scratch.clear();
+            result
+        }
+
+        fn reset(&mut self) {
+            self.scratch.clear();
+            self.ingress
+                .pending
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .clear();
+            self.frames_emitted = 0;
+        }
+
+        fn is_ready(&self) -> bool {
+            self.frames_emitted > 0
+        }
+
+        fn has_objects(&self) -> bool {
+            false
+        }
+
+        fn configure(&mut self, key: RStr<'_>, _value: RStr<'_>) -> bool {
+            key.as_str() == "presentation"
+        }
+
+        fn coordinate_format(&self) -> RCoordinateFormat {
+            RCoordinateFormat::Cartesian
+        }
+
+        fn vbap_cartesian_defaults(&self) -> RVbapCartesianDefaults {
+            RVbapCartesianDefaults {
+                x_size: 62,
+                y_size: 62,
+                z_size: 15,
+                allow_negative_z: false,
+            }
+        }
+
+        fn preferred_vbap_table_mode(&self) -> RVbapTableMode {
+            RVbapTableMode::Cartesian
+        }
+
+        fn supported_drc_modes(&self) -> RVec<RString> {
+            RVec::new()
+        }
+
+        fn set_drc_mode(&mut self, _mode: RStr<'_>) -> bool {
+            false
+        }
+    }
+
+    fn direct_bridge(ingress: DirectPcmIngress, sample_rate_hz: u32) -> LoadedBridge {
+        let lib = reference_bridge::linked_library();
+        let bridge: FormatBridgeBox =
+            FormatBridge_TO::from_value(DirectCurrentBridge::new(ingress, sample_rate_hz), TD_Opaque);
+        LoadedBridge { lib, bridge }
+    }
+
+    fn current_test_input(frames: usize) -> Vec<f32> {
+        let mut out = Vec::with_capacity(frames * MUSIC_FIELD_CHANNELS);
+        for frame in 0..frames {
+            for channel in 0..MUSIC_FIELD_CHANNELS {
+                let phase = frame as f32 * 0.013 + channel as f32 * 0.17;
+                let carrier = phase.sin() * 0.55;
+                let texture = (phase * 0.37 + channel as f32 * 0.11).cos() * 0.18;
+                out.push(carrier + texture);
+            }
+        }
+        // Exercise the reference bridge's exact F32 compatibility law too:
+        // finite values clamp to ±1 before 24-bit scaling; non-finite values
+        // become zero. The direct challenger must reproduce that separately
+        // from any future native-float fidelity experiment.
+        out[3] = 1.25;
+        out[29] = -1.25;
+        out[61] = f32::NAN;
+        out[97] = f32::INFINITY;
+        out
+    }
+
+    #[test]
+    fn direct_current_ingress_matches_streaming_reference_bridge() {
+        const FIELD_CONFIG: &str =
+            include_str!("../../assets/binaural-baselines/stereo-field-prototype.yaml");
+        const GRID_LAYOUT: &str =
+            include_str!("../../../layouts/system-h-derived-22.0-upper60-grid10.yaml");
+        const SAMPLE_RATE: u32 = 48_000;
+
+        let current_config = current_model_config(FIELD_CONFIG);
+        let mut legacy = build_embedded_engine(
+            &current_config,
+            GRID_LAYOUT,
+            SAMPLE_RATE,
+            "legacy Current ingress",
+        )
+        .unwrap();
+        let header = streaming_f32_wav_header(MUSIC_FIELD_CHANNELS as u16, SAMPLE_RATE);
+        seed_engine(&mut legacy, &header, "legacy Current ingress").unwrap();
+
+        let ingress = DirectPcmIngress::default();
+        let mut direct = build_embedded_engine_with_bridge(
+            &current_config,
+            GRID_LAYOUT,
+            SAMPLE_RATE,
+            "direct Current ingress",
+            direct_bridge(ingress.clone(), SAMPLE_RATE),
+        )
+        .unwrap();
+
+        let input = current_test_input(BLOCK_FRAMES + 73);
+        let mut bytes = Vec::new();
+        f32_as_le_bytes(&input, &mut bytes);
+        let legacy_out = legacy.process(&bytes, RInputTransport::Raw, 0).unwrap();
+        ingress.queue(&input);
+        let direct_out = direct.process(&[0], RInputTransport::Raw, 0).unwrap();
+
+        assert_eq!(legacy_out.len(), direct_out.len(), "decoded block count changed");
+        let mut sum_sq = 0.0f64;
+        let mut max_abs = 0.0f32;
+        let mut samples = 0usize;
+        for (old, new) in legacy_out.iter().zip(&direct_out) {
+            assert_eq!(old.n_channels, new.n_channels);
+            assert_eq!(old.n_frames, new.n_frames);
+            assert_eq!(old.sample_pos, new.sample_pos);
+            assert_eq!(old.samples.len(), new.samples.len());
+            for (&a, &b) in old.samples.iter().zip(&new.samples) {
+                let d = (a - b).abs();
+                max_abs = max_abs.max(d);
+                sum_sq += (d as f64) * (d as f64);
+                samples += 1;
+            }
+        }
+        let rms = (sum_sq / samples.max(1) as f64).sqrt() as f32;
+        assert!(
+            max_abs <= 1.0e-6 && rms <= 1.0e-7,
+            "direct Current ingress changed the primary render: max_abs={max_abs:e} rms={rms:e}"
+        );
     }
 }
