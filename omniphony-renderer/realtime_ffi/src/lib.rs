@@ -33,7 +33,7 @@ pub(crate) fn ffi_guard<T>(fallback: T, body: impl FnOnce() -> T) -> T {
 }
 
 const ABI_MAJOR: u32 = 0;
-const ABI_MINOR: u32 = 4;
+const ABI_MINOR: u32 = 5;
 const MODE_IDENTITY: u32 = 0;
 const MODE_CURRENT: u32 = 1;
 const PROCESS_BLOCK_MS: usize = 20;
@@ -318,6 +318,12 @@ impl StereoDelay {
         self.frames.len()
     }
 
+    fn reset(&mut self) {
+        self.frames.fill([0.0, 0.0]);
+        self.offset = 0;
+        self.filled = 0;
+    }
+
     fn push(&mut self, input: [f32; 2]) -> ([f32; 2], bool) {
         let delayed = self.frames[self.offset];
         self.frames[self.offset] = input;
@@ -340,9 +346,11 @@ struct AsyncCurrent {
     failed: Arc<AtomicBool>,
     ready: Arc<AtomicBool>,
     processed_blocks: Arc<AtomicU64>,
+    rendered_frames: AtomicU64,
     worker: Option<JoinHandle<()>>,
     dry_delay: StereoDelay,
     missed_current_frames: usize,
+    worker_ready_observed: bool,
 }
 
 impl AsyncCurrent {
@@ -428,9 +436,11 @@ impl AsyncCurrent {
             failed,
             ready,
             processed_blocks,
+            rendered_frames: AtomicU64::new(0),
             worker: Some(worker),
             dry_delay: StereoDelay::new(sample_rate_hz),
             missed_current_frames: 0,
+            worker_ready_observed: false,
         })
     }
 
@@ -448,8 +458,23 @@ impl AsyncCurrent {
             return -10;
         }
 
-        let mut use_current = self.ready.load(Ordering::Acquire)
-            && !self.failed.load(Ordering::Acquire);
+        let worker_ready = self.ready.load(Ordering::Acquire);
+        if worker_ready && !self.worker_ready_observed {
+            // Renderer construction is deliberately asynchronous. Audio may
+            // have filled the delayed-dry lane before the worker became ready;
+            // restart the alignment window at the first callback that can
+            // actually submit Current PCM, otherwise every completed worker
+            // block is forever classified as stale and discarded.
+            self.worker_ready_observed = true;
+            self.dry_delay.reset();
+            self.missed_current_frames = 0;
+            let queued = self.output.available();
+            if queued > 0 {
+                self.output.discard(queued);
+            }
+        }
+
+        let mut use_current = worker_ready && !self.failed.load(Ordering::Acquire);
         if use_current {
             if !unsafe { self.input.push_ptr(input, samples) } {
                 self.failed.store(true, Ordering::Release);
@@ -484,6 +509,7 @@ impl AsyncCurrent {
                     let got = self.output.pop_slice(&mut current);
                     if got == 2 {
                         rendered = current;
+                        self.rendered_frames.fetch_add(1, Ordering::Relaxed);
                     } else {
                         self.missed_current_frames = self.missed_current_frames.saturating_add(1);
                     }
@@ -680,6 +706,19 @@ pub unsafe extern "C" fn omniphony_realtime_process_f32(
             }
         }
     })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn omniphony_realtime_rendered_frames(
+    processor: *const OmniphonyRealtimeProcessor,
+) -> u64 {
+    if processor.is_null() {
+        return 0;
+    }
+    match unsafe { &(*processor).mode } {
+        ProcessorMode::Identity => 0,
+        ProcessorMode::Current(current) => current.rendered_frames.load(Ordering::Relaxed),
+    }
 }
 
 #[unsafe(no_mangle)]

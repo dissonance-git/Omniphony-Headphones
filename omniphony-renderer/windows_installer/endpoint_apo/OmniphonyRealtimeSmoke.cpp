@@ -2,6 +2,7 @@
 
 #include "omniphony_realtime.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@ using SetModeFn = int32_t (*)(OmniphonyRealtimeProcessor*, uint32_t);
 using ModeFn = uint32_t (*)(const OmniphonyRealtimeProcessor*);
 using ProcessFn = int32_t (*)(OmniphonyRealtimeProcessor*, const float*, float*, size_t);
 using BlocksFn = uint64_t (*)(const OmniphonyRealtimeProcessor*);
+using RenderedFramesFn = uint64_t (*)(const OmniphonyRealtimeProcessor*);
 using LatencyFramesFn = size_t (*)(const OmniphonyRealtimeProcessor*);
 
 using SpatialStaticCreateFn = OmniphonySpatialStaticProcessor* (*)(const OmniphonySpatialStaticConfig*);
@@ -60,6 +62,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto mode = Resolve<ModeFn>(module, "omniphony_realtime_mode");
     const auto process = Resolve<ProcessFn>(module, "omniphony_realtime_process_f32");
     const auto blocks = Resolve<BlocksFn>(module, "omniphony_realtime_processed_blocks");
+    const auto renderedFrames = Resolve<RenderedFramesFn>(module, "omniphony_realtime_rendered_frames");
     const auto latencyFrames = Resolve<LatencyFramesFn>(module, "omniphony_realtime_latency_frames");
 
     const auto spatialCreate = Resolve<SpatialStaticCreateFn>(module, "omniphony_spatial_static_create");
@@ -72,7 +75,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto spatialCount = Resolve<SpatialStaticU32Fn>(module, "omniphony_spatial_static_object_count");
 
     if (!abiMajor || !abiMinor || !create || !destroy || !setMode || !mode ||
-        !process || !blocks || !latencyFrames || !spatialCreate || !spatialDestroy ||
+        !process || !blocks || !renderedFrames || !latencyFrames || !spatialCreate || !spatialDestroy ||
         !spatialProcess || !spatialBlocks || !spatialLatency || !spatialRate ||
         !spatialQuantum || !spatialCount) {
         std::wcerr << L"REALTIME_EXPORTS_MISSING" << std::endl;
@@ -118,6 +121,61 @@ int wmain(int argc, wchar_t** argv) {
             std::wcerr << L"REALTIME_CURRENT_LATENCY_FAILED\tFRAMES="
                        << latencyFrames(processor) << std::endl;
             result = 11;
+        } else {
+            // Drive the optimized DLL the way an audio host does while its
+            // Current worker initializes asynchronously. This must prove that
+            // real rendered PCM crosses back into the callback; initialization
+            // alone is not a sufficient release contract.
+            constexpr size_t kCurrentFrames = 960;
+            constexpr float kOutputCeiling = 0.8912509f;
+            std::array<float, kCurrentFrames * 2> currentInput = {};
+            std::array<float, kCurrentFrames * 2> currentOutput = {};
+            for (size_t frame = 0; frame < kCurrentFrames; ++frame) {
+                currentInput[frame * 2] = (frame % 2 == 0) ? 2.0f : -2.0f;
+                currentInput[frame * 2 + 1] = (frame % 3 == 0) ? -1.75f : 1.75f;
+            }
+
+            bool crossed = false;
+            const ULONGLONG deadline = GetTickCount64() + 20000u;
+            while (GetTickCount64() < deadline && result == 0) {
+                currentOutput.fill(NAN);
+                if (process(processor, currentInput.data(), currentOutput.data(), kCurrentFrames) != 0) {
+                    std::wcerr << L"REALTIME_CURRENT_PROCESS_FAILED" << std::endl;
+                    result = 18;
+                    break;
+                }
+                if (!AllFinite(currentOutput.data(), currentOutput.size())) {
+                    std::wcerr << L"REALTIME_CURRENT_NONFINITE_OUTPUT" << std::endl;
+                    result = 19;
+                    break;
+                }
+
+                float peak = 0.0f;
+                bool nonzero = false;
+                for (const float sample : currentOutput) {
+                    peak = (std::max)(peak, std::fabs(sample));
+                    nonzero = nonzero || std::fabs(sample) > 1.0e-6f;
+                }
+                if (peak > kOutputCeiling + 1.0e-6f) {
+                    std::wcerr << L"REALTIME_CURRENT_CEILING_FAILED\tPEAK=" << peak << std::endl;
+                    result = 20;
+                    break;
+                }
+                if (blocks(processor) > 0u && renderedFrames(processor) > 0u && nonzero) {
+                    crossed = true;
+                    break;
+                }
+                Sleep(20);
+            }
+            if (result == 0 && !crossed) {
+                std::wcerr << L"REALTIME_CURRENT_RENDER_TIMEOUT\tBLOCKS=" << blocks(processor)
+                           << L"\tRENDERED_FRAMES=" << renderedFrames(processor) << std::endl;
+                result = 21;
+            } else if (result == 0) {
+                std::wcout << L"REALTIME_CURRENT_RENDER_OK\tBLOCKS=" << blocks(processor)
+                           << L"\tRENDERED_FRAMES=" << renderedFrames(processor)
+                           << L"\tCEILING=" << kOutputCeiling << std::endl;
+            }
         }
     }
     destroy(processor);

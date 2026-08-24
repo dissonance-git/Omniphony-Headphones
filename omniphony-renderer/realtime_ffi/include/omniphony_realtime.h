@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define OMNIPHONY_REALTIME_ABI_MAJOR 0
-#define OMNIPHONY_REALTIME_ABI_MINOR 4
+#define OMNIPHONY_REALTIME_ABI_MINOR 5
 
 #define OMNIPHONY_REALTIME_MODE_IDENTITY 0u
 #define OMNIPHONY_REALTIME_MODE_CURRENT 1u
@@ -84,6 +84,14 @@ uint32_t omniphony_realtime_mode(
     const OmniphonyRealtimeProcessor *processor);
 
 uint64_t omniphony_realtime_processed_blocks(
+    const OmniphonyRealtimeProcessor *processor);
+
+/*
+ * Number of stereo frames actually consumed from Current's rendered-output
+ * ring. Unlike processed_blocks, this proves rendered PCM crossed back into
+ * the host callback instead of remaining on the delayed-dry safety lane.
+ */
+uint64_t omniphony_realtime_rendered_frames(
     const OmniphonyRealtimeProcessor *processor);
 
 /*
@@ -167,7 +175,7 @@ uint32_t omniphony_native_bed_channel_mask(
  * callback only performs bounded PCM movement and safety fold-down; the source
  * renderer runs on a dedicated worker thread.
  *
- * ABI 0.4 covers STATIC Spatial Audio objects only. Dynamic-object position and
+ * ABI 0.5 covers STATIC Spatial Audio objects only. Dynamic-object position and
  * lifetime updates are a separate later ABI so a fixed static stream does not
  * smuggle unstable dynamic slot semantics into this contract.
  */

@@ -70,6 +70,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "realtime_ffi tests failed: $LASTEXITCODE" }
           cargo build --release -p realtime_ffi
           if ($LASTEXITCODE -ne 0) { throw "realtime_ffi release build failed: $LASTEXITCODE" }
+          cargo test --release -p realtime_ffi --test current_mode -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "optimized Current liveness tests failed: $LASTEXITCODE" }
           if (-not (Test-Path 'target/release/omniphony_realtime.dll')) {
             throw 'realtime_ffi did not produce target/release/omniphony_realtime.dll'
           }

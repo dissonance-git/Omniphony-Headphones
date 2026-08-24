@@ -99,6 +99,8 @@ jobs:
             if ($attempt -lt 3) { Start-Sleep -Seconds (2 * $attempt) }
           }
           if (-not $built) { throw 'realtime_ffi release build failed after 3 isolated attempts' }
+          cargo test --release -p realtime_ffi --test current_mode -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "optimized Current liveness tests failed: $LASTEXITCODE" }
 
       - name: Setup VS2022 MSBuild
         uses: microsoft/setup-msbuild@v2

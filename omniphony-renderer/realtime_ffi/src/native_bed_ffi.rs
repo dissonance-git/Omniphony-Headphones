@@ -31,6 +31,7 @@ struct AsyncNativeBed {
     fallback_layout: NativeBedLayout,
     fallback_delay: StereoDelay,
     missed_native_frames: usize,
+    worker_ready_observed: bool,
     channels: usize,
 }
 
@@ -124,6 +125,7 @@ impl AsyncNativeBed {
             fallback_layout,
             fallback_delay: StereoDelay::new(sample_rate_hz),
             missed_native_frames: 0,
+            worker_ready_observed: false,
             channels,
         })
     }
@@ -137,8 +139,22 @@ impl AsyncNativeBed {
             return -10;
         };
 
-        let mut use_native = self.ready.load(Ordering::Acquire)
-            && !self.failed.load(Ordering::Acquire);
+        let worker_ready = self.ready.load(Ordering::Acquire);
+        if worker_ready && !self.worker_ready_observed {
+            // Align the delayed safety bed with the first PCM the asynchronous
+            // renderer can accept. Without this transition reset, callbacks
+            // that ran during construction make every later native block look
+            // permanently stale.
+            self.worker_ready_observed = true;
+            self.fallback_delay.reset();
+            self.missed_native_frames = 0;
+            let queued = self.output.available();
+            if queued > 0 {
+                self.output.discard(queued);
+            }
+        }
+
+        let mut use_native = worker_ready && !self.failed.load(Ordering::Acquire);
         if use_native && !unsafe { self.input.push_ptr(input, input_samples) } {
             self.failed.store(true, Ordering::Release);
             use_native = false;
