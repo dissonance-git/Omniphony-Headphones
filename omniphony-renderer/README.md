@@ -104,7 +104,7 @@ Headless construction layer for product rendering. `current_music_support` is th
 
 ### `realtime_ffi`
 
-Narrow realtime ABI used by the Windows endpoint APO. The present Current FFI path is **stereo input only**.
+Narrow realtime ABI used by the Windows APO and spatial-provider experiments. It owns the stereo Current worker seam plus authored native-bed and static-object realtime ingress. Richer authored geometry bypasses stereo inference rather than being collapsed into the stereo path.
 
 ### `dsp_fixtures`
 
@@ -245,19 +245,20 @@ Representative references are listed in the root README. They guide tests and fr
 
 ## Current Windows boundary
 
-The present endpoint APO Current path accepts **stereo float32** and returns stereo. It does not yet ingest authored 5.1/7.1 through the APO.
-
-That distinction matters:
+The normal format-changing stream SFX accepts stereo and authored multichannel float32 while the physical headphone endpoint remains stereo. Stereo enters protected-master Current. Authored beds retain their channel mask and positions and bypass stereo inference. Authored 7.1 is physically verified and authored 7.1.4 processing is regression-tested.
 
 ```text
-CANONICAL SCENE CAPABILITY
-17-lane 8.1.4.4 internal vocabulary
+stereo client
+→ protected stereo Current
+→ stereo endpoint
 
-CURRENT APO INGEST
-stereo only
+5.1 / 7.1 / height bed
+→ authored channel identities
+→ source-authoritative Current render
+→ stereo endpoint
 ```
 
-Native authored multichannel ingress is a separate host/API frontier. It must map real authored channels into the same canonical scene instead of creating a parallel renderer.
+The richer Windows Spatial Audio provider path remains gated while static-object transport and RAW single-render egress are proven end to end. Its authored object geometry is another ingress into the same portable scene/renderer contract, not a second renderer and not a serial stage after the stream SFX.
 
 ---
 
