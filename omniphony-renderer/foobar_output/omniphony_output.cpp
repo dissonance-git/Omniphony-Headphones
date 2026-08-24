@@ -184,7 +184,7 @@ public:
         }
     }
 
-    ~OmniphonyOutput() override {
+    ~OmniphonyOutput() {
         closeEndpoint();
         if (comInitialized_) {
             CoUninitialize();
@@ -326,6 +326,7 @@ protected:
         Check(client_->GetBufferSize(&bufferFrames_));
         Check(client_->GetService(IID_PPV_ARGS(render_.ReleaseAndGetAddressOf())));
 
+        inputScratch_.assign(static_cast<std::size_t>(bufferFrames_) * kChannels, 0.0f);
         scratch_.assign(static_cast<std::size_t>(bufferFrames_) * kChannels, 0.0f);
         writableFrames_ = bufferFrames_;
         if (!current_.open(kSampleRate)) {
@@ -334,25 +335,28 @@ protected:
     }
 
     void write(const audio_chunk& data) override {
-        static_assert(sizeof(audio_sample) == sizeof(float));
         const std::size_t frames = data.get_sample_count();
         if (!render_ || data.get_channels() != kChannels || data.get_srate() != kSampleRate ||
             frames > writableFrames_ || frames > bufferFrames_) {
             throw exception_io_data();
         }
 
-        const float* input = reinterpret_cast<const float*>(data.get_data());
+        const audio_sample* input = data.get_data();
         if (!input && frames != 0) {
             throw exception_io_data();
         }
+        const std::size_t samples = frames * kChannels;
+        for (std::size_t sample = 0; sample < samples; ++sample) {
+            inputScratch_[sample] = static_cast<float>(input[sample]);
+        }
         float* processed = scratch_.data();
-        if (!current_.process(input, processed, frames)) {
-            std::copy_n(input, frames * kChannels, processed);
+        if (!current_.process(inputScratch_.data(), processed, frames)) {
+            std::copy_n(inputScratch_.data(), samples, processed);
         }
 
         const float gain = volumeGain_.load(std::memory_order_acquire);
         if (gain != 1.0f) {
-            for (std::size_t sample = 0; sample < frames * kChannels; ++sample) {
+            for (std::size_t sample = 0; sample < samples; ++sample) {
                 processed[sample] *= gain;
             }
         }
@@ -394,6 +398,7 @@ private:
         haveWritten_ = false;
         writableFrames_ = 0;
         bufferFrames_ = 0;
+        inputScratch_.clear();
         scratch_.clear();
         current_.close();
         render_.Reset();
@@ -413,6 +418,7 @@ private:
     UINT32 bufferFrames_ = 0;
     UINT32 writableFrames_ = 0;
     std::atomic<float> volumeGain_{1.0f};
+    std::vector<float> inputScratch_;
     std::vector<float> scratch_;
     RealtimeCurrent current_;
     ComPtr<IMMDevice> device_;
