@@ -678,7 +678,7 @@ pub unsafe extern "C" fn omniphony_realtime_reset(
         // Dropping the old instance remains non-blocking: it signals its worker
         // and detaches the JoinHandle by design.
         let processor = unsafe { &mut *processor };
-        if matches!(processor.mode, ProcessorMode::Current(_)) {
+        if matches!(&processor.mode, ProcessorMode::Current(_)) {
             let replacement = match AsyncCurrent::new(processor.sample_rate_hz) {
                 Ok(current) => current,
                 Err(_) => return -2,
