@@ -10,6 +10,10 @@ const MODE_IDENTITY: u32 = 0;
 const MODE_CURRENT: u32 = 1;
 const BLOCK_FRAMES: usize = 960;
 const OUTPUT_CEILING: f32 = 0.891_250_9;
+// This debug-profile test owns eventual worker liveness, not production startup
+// latency. Release initialization and rendered blocks are checked separately by
+// OmniphonyRealtimeSmoke against the optimized DLL.
+const DEBUG_WORKER_DEADLINE_SECONDS: u64 = 30;
 
 fn config() -> OmniphonyRealtimeConfig {
     OmniphonyRealtimeConfig {
@@ -76,7 +80,7 @@ fn current_worker_round_trips_audio_and_can_be_recreated_in_one_process() {
         );
         assert!(output.iter().all(|sample| sample.is_finite()));
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(DEBUG_WORKER_DEADLINE_SECONDS);
         while omniphony_realtime_processed_blocks(processor) == 0 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
@@ -129,7 +133,7 @@ fn current_worker_never_exceeds_the_protected_master_ceiling() {
         );
         assert!(output.iter().all(|sample| sample.is_finite()));
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(DEBUG_WORKER_DEADLINE_SECONDS);
         while omniphony_realtime_processed_blocks(processor) == 0 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
