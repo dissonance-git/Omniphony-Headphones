@@ -188,7 +188,7 @@ $manifest = [ordered]@{
     CatalogsGenerated = -not [bool]$SkipCatalogs
     CertificateThumbprint = if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { $null } else { $CertificateThumbprint.ToUpperInvariant() }
     SignaturesVerified = [bool]$signaturesVerified
-    Files = @($files)
+    Files = $files.ToArray()
 }
 $manifestPath = Join-Path $OutputRoot 'package-manifest.json'
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
