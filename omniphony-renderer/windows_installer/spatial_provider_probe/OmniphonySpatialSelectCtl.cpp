@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Audio.h>
 
 #include <cwctype>
