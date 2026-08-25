@@ -10,7 +10,11 @@ $eqPresetPath = Join-Path $stateRoot 'eq-preset.txt'
 $legacyEqPath = Join-Path $stateRoot 'personal-eq.txt'
 $enhancementPath = Join-Path $stateRoot 'noire-x-enhancement.txt'
 $outputTrimPath = Join-Path $stateRoot 'output-trim.txt'
+$endpointBackupPath = Join-Path $stateRoot 'endpoint-backup.json'
 $restartAudioPath = Join-Path $PSScriptRoot 'Restart-OmniphonyAudio.ps1'
+$spatialEnablePath = Join-Path $PSScriptRoot 'Enable-OmniphonySpatialProvider.ps1'
+$spatialDisablePath = Join-Path $PSScriptRoot 'Disable-OmniphonySpatialProvider.ps1'
+$spatialConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
 $stopPath = Join-Path $stateRoot 'tray.stop'
 
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
@@ -56,10 +60,49 @@ function Get-EqEnabled {
 function Get-EnhancementEnabled { return Get-OnOffSetting $enhancementPath $true }
 function Get-OutputTrimEnabled { return Get-OnOffSetting $outputTrimPath $true }
 
+function Get-SpatialProviderEnabled {
+    try {
+        if (-not (Test-Path -LiteralPath $spatialConfigPath)) { return $false }
+        $config = Get-ItemProperty -LiteralPath $spatialConfigPath -ErrorAction Stop
+        return ([int]$config.Enabled -eq 1)
+    } catch { }
+    return $false
+}
+
+function Get-InstalledEndpointId {
+    try {
+        if (-not (Test-Path -LiteralPath $endpointBackupPath -PathType Leaf)) { return '' }
+        $state = ([IO.File]::ReadAllText($endpointBackupPath)) | ConvertFrom-Json
+        return [string]$state.EndpointId
+    } catch { }
+    return ''
+}
+
 function Show-TrayMessage([string]$Text) {
     $notify.BalloonTipTitle = 'Omniphony'
     $notify.BalloonTipText = $Text
     $notify.ShowBalloonTip(2500)
+}
+
+function Invoke-ElevatedPowerShellScript([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Required helper is missing: $Path"
+    }
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $process = Start-Process -FilePath $powershell `
+        -Verb RunAs `
+        -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy', 'Bypass',
+            '-WindowStyle', 'Hidden',
+            '-File', "`"$Path`""
+        ) `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "Elevated helper exited with code $($process.ExitCode)."
+    }
 }
 
 function Restart-WindowsAudioService([bool]$ShowSuccess = $true) {
@@ -67,20 +110,30 @@ function Restart-WindowsAudioService([bool]$ShowSuccess = $true) {
         if (-not (Test-Path -LiteralPath $restartAudioPath)) {
             throw "Restart helper is missing: $restartAudioPath"
         }
-        $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $process = Start-Process -FilePath $powershell `
-            -Verb RunAs `
-            -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$restartAudioPath`"") `
-            -Wait `
-            -PassThru
-        if ($process.ExitCode -ne 0) {
-            throw "Windows Audio restart exited with code $($process.ExitCode)."
-        }
+        Invoke-ElevatedPowerShellScript $restartAudioPath
         if ($ShowSuccess) { Show-TrayMessage 'Windows Audio service restarted.' }
         return $true
     } catch {
         Show-TrayMessage "Could not restart Windows Audio: $($_.Exception.Message)"
         return $false
+    }
+}
+
+function Open-SpatialSoundSettings {
+    try {
+        $endpointId = Get-InstalledEndpointId
+        if (-not [string]::IsNullOrWhiteSpace($endpointId)) {
+            $escaped = [Uri]::EscapeDataString($endpointId)
+            Start-Process -FilePath "ms-settings:sound-properties?endpointId=$escaped"
+            return
+        }
+        Start-Process -FilePath 'ms-settings:sound'
+    } catch {
+        try {
+            Start-Process -FilePath 'ms-settings:sound'
+        } catch {
+            Show-TrayMessage "Could not open Windows Sound settings: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -90,7 +143,7 @@ $notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $statusItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$statusItem.Text = 'Omniphony Current Controls'
+$statusItem.Text = 'Omniphony Controls'
 $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
 
@@ -105,6 +158,15 @@ $enhancementItem = New-Object System.Windows.Forms.ToolStripMenuItem
 
 $outputTrimItem = New-Object System.Windows.Forms.ToolStripMenuItem
 [void]$menu.Items.Add($outputTrimItem)
+
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+$spatialProviderItem = New-Object System.Windows.Forms.ToolStripMenuItem
+[void]$menu.Items.Add($spatialProviderItem)
+
+$spatialSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$spatialSettingsItem.Text = 'Open Windows Spatial sound settings...'
+[void]$menu.Items.Add($spatialSettingsItem)
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
@@ -124,6 +186,10 @@ function Update-TrayState {
     $eq = Get-EqEnabled
     $enhancement = Get-EnhancementEnabled
     $trim = Get-OutputTrimEnabled
+    $spatial = Get-SpatialProviderEnabled
+    $spatialHelpersPresent =
+        (Test-Path -LiteralPath $spatialEnablePath -PathType Leaf) -and
+        (Test-Path -LiteralPath $spatialDisablePath -PathType Leaf)
 
     $currentItem.Checked = $current
     $currentItem.Text = if ($current) { 'Stereo Current: On' } else { 'Stereo Current: Off (identity)' }
@@ -137,12 +203,23 @@ function Update-TrayState {
     $outputTrimItem.Checked = $trim
     $outputTrimItem.Text = if ($trim) { 'Output trim: +1.5 dB' } else { 'Output trim: 0 dB' }
 
+    $spatialProviderItem.Checked = $spatial
+    $spatialProviderItem.Enabled = $spatialHelpersPresent
+    if (-not $spatialHelpersPresent) {
+        $spatialProviderItem.Text = 'Spatial Sound provider: Helpers missing'
+    } elseif ($spatial) {
+        $spatialProviderItem.Text = 'Spatial Sound provider: Enabled (17 static + 16 dynamic)'
+    } else {
+        $spatialProviderItem.Text = 'Spatial Sound provider: Disabled'
+    }
+
     $currentText = if ($current) { 'Current On' } else { 'Current Off' }
     $eqText = if ($eq) { 'EQ On' } else { 'EQ Off' }
     $enhanceText = if ($enhancement) { 'NX On' } else { 'NX Off' }
     $trimText = if ($trim) { '+1.5dB' } else { '0dB' }
-    $statusItem.Text = "Omniphony Current Controls | $currentText | $eqText | $enhanceText | $trimText"
-    $notify.Text = "Omniphony | $currentText | $enhanceText | $trimText"
+    $spatialText = if ($spatial) { 'Spatial On' } else { 'Spatial Off' }
+    $statusItem.Text = "Omniphony Controls | $currentText | $spatialText | $eqText | $enhanceText | $trimText"
+    $notify.Text = "Omniphony | $currentText | $spatialText | $enhanceText"
 }
 
 function Toggle-Current {
@@ -197,10 +274,33 @@ function Toggle-OutputTrim {
     }
 }
 
+function Toggle-SpatialProvider {
+    try {
+        $wasEnabled = Get-SpatialProviderEnabled
+        if ($wasEnabled) {
+            Invoke-ElevatedPowerShellScript $spatialDisablePath
+        } else {
+            Invoke-ElevatedPowerShellScript $spatialEnablePath
+        }
+        Update-TrayState
+
+        if ($wasEnabled) {
+            Show-TrayMessage 'Spatial Sound provider disabled and unregistered. Windows provider selection was not changed.'
+        } else {
+            Show-TrayMessage 'Spatial Sound provider enabled. Select Omniphony under Spatial sound in Windows settings.'
+        }
+    } catch {
+        Update-TrayState
+        Show-TrayMessage "Could not change Spatial Sound provider: $($_.Exception.Message)"
+    }
+}
+
 $currentItem.Add_Click({ Toggle-Current })
 $eqItem.Add_Click({ Toggle-Eq })
 $enhancementItem.Add_Click({ Toggle-Enhancement })
 $outputTrimItem.Add_Click({ Toggle-OutputTrim })
+$spatialProviderItem.Add_Click({ Toggle-SpatialProvider })
+$spatialSettingsItem.Add_Click({ Open-SpatialSoundSettings })
 $restartAudioItem.Add_Click({ [void](Restart-WindowsAudioService $true) })
 
 $exitItem.Add_Click({
