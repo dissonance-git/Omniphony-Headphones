@@ -97,8 +97,12 @@ jobs:
             'Omniphony Development',
             'AddPackageByUriAsync',
             'ForceUpdateFromAnyVersion',
+            'CreateProcessWithTokenW',
+            'SPATIAL_SETUP_SHELL_TOKEN_MEDIUM',
+            'SPATIAL_SETUP_USER_PHASE_MEDIUM_OK',
             'RegisterMediaExtensionPackage',
             'SPATIAL_SETUP_MEDIA_EXTENSION_REGISTERED',
+            'SPATIAL_SETUP_PACKAGED_REGISTER_EXIT_CODE',
             'GetDefaultAudioEndpoint',
             'SPATIAL_SETUP_DEFAULT_RENDER_ENDPOINT_DISCOVERED',
             'OmniphonySpatialCompanion.exe',
@@ -161,7 +165,8 @@ jobs:
           Write-Host 'SPATIAL_COMPANION_MEDIA_COMPONENT_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_SPATIAL_SUBTYPE_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_MEDIA_EXTENSION_REGISTRATION_PATH_OK 1'
-          Write-Host 'SPATIAL_COMPANION_BOOTSTRAP_FULL_TRUST_REGISTRATION_PATH_OK 1'
+          Write-Host 'SPATIAL_COMPANION_MEDIUM_INTEGRITY_HANDOFF_PATH_OK 1'
+          Write-Host 'SPATIAL_COMPANION_MEDIUM_PACKAGED_REGISTRATION_FALLBACK_OK 1'
           Write-Host 'SPATIAL_COMPANION_DEFAULT_ENDPOINT_DISCOVERY_PATH_OK 1'
           Write-Host 'SPATIAL_COMPANION_ONE_COMMAND_PHYSICAL_GATE_OK 1'
           Write-Host 'SPATIAL_COMPANION_APP_SERVICE_CONTRACT_OK 1'
