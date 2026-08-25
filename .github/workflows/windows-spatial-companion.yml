@@ -1,0 +1,86 @@
+name: Windows spatial companion package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-spatial-companion.yml'
+      - 'omniphony-renderer/windows_installer/spatial_companion/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-companion:
+    name: Build packaged Spatial Sound companion
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Omniphony
+        uses: actions/checkout@v4
+
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build signed development MSIX
+        shell: pwsh
+        run: |
+          $script = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_companion\Build-SpatialCompanionPackage.ps1"
+          & $script -Sign
+          if ($LASTEXITCODE -ne 0) { throw "Spatial companion package build failed: $LASTEXITCODE" }
+
+      - name: Validate packaged ownership bridge contract
+        shell: pwsh
+        run: |
+          $dist = "$env:GITHUB_WORKSPACE\dist\Omniphony-Spatial-Companion"
+          $msix = Join-Path $dist 'OmniphonySpatialCompanion.msix'
+          $cer = Join-Path $dist 'OmniphonySpatialCompanion.cer'
+          if (-not (Test-Path $msix)) { throw "Missing MSIX: $msix" }
+          if (-not (Test-Path $cer)) { throw "Missing development certificate: $cer" }
+
+          $kitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $makeAppx = Get-ChildItem -Path $kitsBin -Recurse -Filter makeappx.exe |
+            Where-Object { $_.FullName -match '\\x64\\makeappx\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $makeAppx) { throw 'MakeAppx.exe not found.' }
+
+          $unpacked = "$env:GITHUB_WORKSPACE\build\spatial-companion-unpacked"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $unpacked
+          & $makeAppx.FullName unpack /p $msix /d $unpacked /o
+          if ($LASTEXITCODE -ne 0) { throw "MSIX unpack failed: $LASTEXITCODE" }
+
+          $manifest = Get-Content -LiteralPath (Join-Path $unpacked 'AppxManifest.xml') -Raw
+          if ($manifest -notmatch 'Name="Omniphony\.SpatialCompanion"') { throw 'Package identity drifted.' }
+          if ($manifest -notmatch 'Category="windows\.appService"') { throw 'windows.appService extension missing.' }
+          if ($manifest -notmatch 'Name="OmniphonySpatialLicense"') { throw 'Spatial license AppService name drifted.' }
+          if ($manifest -notmatch 'OmniphonySpatialLicenseService\.SpatialLicenseService') { throw 'Spatial license service entry point drifted.' }
+          if ($manifest -notmatch 'Category="windows\.appExecutionAlias"') { throw 'Packaged companion execution alias missing.' }
+
+          foreach ($name in @(
+            'OmniphonySpatialCompanion.exe',
+            'OmniphonySpatialLicenseService.dll',
+            'OmniphonySpatialLicenseService.winmd'
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $unpacked $name))) { throw "Missing packaged payload: $name" }
+          }
+
+          $serviceSource = Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_companion\AppServiceComponent\SpatialLicenseService.cpp" -Raw
+          foreach ($token in @('GetLicenseInfo','GetRuntimeParameters','Status','ExpirationDate','IsAudioRendererCapable','LaunchUri')) {
+            if ($serviceSource -notmatch [regex]::Escape($token)) { throw "License broker response token missing: $token" }
+          }
+
+          Write-Host 'SPATIAL_COMPANION_MSIX_CONTRACT_OK 1'
+          Write-Host 'SPATIAL_COMPANION_PACKAGE_IDENTITY_OK 1'
+          Write-Host 'SPATIAL_COMPANION_APP_SERVICE_CONTRACT_OK 1'
+          Write-Host 'SPATIAL_COMPANION_EXTERNAL_OWNERSHIP_GATE_UNPROVEN 1'
+
+      - name: Upload spatial companion artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omniphony-spatial-companion-${{ github.sha }}
+          path: dist/Omniphony-Spatial-Companion
+          if-no-files-found: error
+          retention-days: 14
