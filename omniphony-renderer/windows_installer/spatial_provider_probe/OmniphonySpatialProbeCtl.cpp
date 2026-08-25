@@ -3,6 +3,10 @@
 #include <windows.h>
 #include <objbase.h>
 
+#include <winrt/base.h>
+#include <winrt/Windows.Media.Audio.h>
+
+#include <cwctype>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -11,15 +15,22 @@
 
 namespace {
 
+using winrt::Windows::Media::Audio::SetDefaultSpatialAudioFormatStatus;
+using winrt::Windows::Media::Audio::SpatialAudioDeviceConfiguration;
+
 constexpr int kExitUsage = 2;
 constexpr int kExitNotRegistered = 3;
 constexpr int kExitAccess = 4;
 constexpr int kExitVerify = 5;
+constexpr int kExitSelectionUnsupported = 6;
+constexpr int kExitSelectionRejected = 7;
+constexpr int kExitSelectionReadback = 8;
+constexpr int kExitSelectionRuntime = 9;
 
 constexpr wchar_t kDisplayName[] = L"Omniphony";
 constexpr wchar_t kFormatGuid[] = L"{4BD75423-A66C-4586-B782-1FCBBDF2AE74}";
 constexpr wchar_t kClsidText[] = L"{F3CDF827-20C4-405E-A430-8F739343FC89}";
-constexpr GUID kProbeClsid = {
+constexpr GUID kProviderClsid = {
     0xf3cdf827, 0x20c4, 0x405e, {0xa4, 0x30, 0x8f, 0x73, 0x93, 0x43, 0xfc, 0x89}};
 
 constexpr wchar_t kEncoderBase[] = L"SOFTWARE\\Microsoft\\Multimedia\\Audio\\Spatial\\Encoder";
@@ -151,14 +162,53 @@ bool KeyExists(HKEY root, const std::wstring& path) {
     return false;
 }
 
+LONG DeleteOwnedKey(const std::wstring& path) {
+    const LONG result = RegDeleteTreeW(HKEY_LOCAL_MACHINE, path.c_str());
+    if (result == ERROR_FILE_NOT_FOUND || result == ERROR_PATH_NOT_FOUND) {
+        return ERROR_SUCCESS;
+    }
+    return result;
+}
+
+std::wstring NormalizeGuid(std::wstring value) {
+    for (wchar_t& ch : value) {
+        ch = static_cast<wchar_t>(std::towupper(ch));
+    }
+    return value;
+}
+
+bool IsOmniphonyFormat(const winrt::hstring& value) {
+    return NormalizeGuid(value.c_str()) == NormalizeGuid(kFormatGuid);
+}
+
+const wchar_t* SelectionStatusText(SetDefaultSpatialAudioFormatStatus status) {
+    switch (status) {
+    case SetDefaultSpatialAudioFormatStatus::Succeeded:
+        return L"Succeeded";
+    case SetDefaultSpatialAudioFormatStatus::AccessDenied:
+        return L"AccessDenied";
+    case SetDefaultSpatialAudioFormatStatus::LicenseExpired:
+        return L"LicenseExpired";
+    case SetDefaultSpatialAudioFormatStatus::LicenseNotValidForAudioEndpoint:
+        return L"LicenseNotValidForAudioEndpoint";
+    case SetDefaultSpatialAudioFormatStatus::NotSupportedOnAudioEndpoint:
+        return L"NotSupportedOnAudioEndpoint";
+    case SetDefaultSpatialAudioFormatStatus::UnknownError:
+        return L"UnknownError";
+    default:
+        return L"Unrecognized";
+    }
+}
+
 void PrintContract() {
     std::wcout << L"FORMAT_GUID\t" << kFormatGuid << L'\n';
     std::wcout << L"COM_CLSID\t" << kClsidText << L'\n';
     std::wcout << L"ENCODER_BASE\tHKLM\\" << kEncoderBase << L'\n';
     std::wcout << L"COM_BASE\tHKLM\\" << kComBase << L'\n';
-    std::wcout << L"NO_AUDIO_PROCESSING\t1\n";
-    std::wcout << L"NO_MMDEVICES_WRITES\t1\n";
-    std::wcout << L"NO_DEFAULT_ENDPOINT_CHANGE\t1\n";
+    std::wcout << L"STATIC_OBJECTS\t17\n";
+    std::wcout << L"MAX_DYNAMIC_OBJECTS\t16\n";
+    std::wcout << L"SELECTION_API\tWindows.Media.Audio.SpatialAudioDeviceConfiguration\n";
+    std::wcout << L"DIRECT_MMDEVICES_SELECTION_WRITES\t0\n";
 }
 
 int ListProviders() {
@@ -206,44 +256,39 @@ int ListProviders() {
     return 0;
 }
 
-int Status() {
+int RegistrationStatus() {
     const std::wstring encoderPath = Join(kEncoderBase, kFormatGuid);
     const std::wstring classPath = Join(kComBase, kClsidText);
     const std::wstring inprocPath = classPath + L"\\InProcServer32";
 
     std::wstring display;
     std::wstring clsid;
+    std::wstring icon;
     std::wstring server;
     const bool encoder = KeyExists(HKEY_LOCAL_MACHINE, encoderPath);
     const bool com = KeyExists(HKEY_LOCAL_MACHINE, inprocPath);
     if (encoder) {
         ReadString(HKEY_LOCAL_MACHINE, encoderPath, nullptr, display);
         ReadString(HKEY_LOCAL_MACHINE, encoderPath, L"CLSID", clsid);
+        ReadString(HKEY_LOCAL_MACHINE, encoderPath, L"IconPath", icon);
     }
     if (com) {
         ReadString(HKEY_LOCAL_MACHINE, inprocPath, nullptr, server);
     }
 
-    std::wcout << L"SPATIAL_PROBE_STATUS\tENCODER=" << (encoder ? 1 : 0)
+    std::wcout << L"SPATIAL_PROVIDER_STATUS\tENCODER=" << (encoder ? 1 : 0)
                << L"\tCOM=" << (com ? 1 : 0) << L'\n';
     std::wcout << L"FORMAT_GUID\t" << kFormatGuid << L'\n';
     std::wcout << L"COM_CLSID\t" << kClsidText << L'\n';
     if (encoder) {
         std::wcout << L"ENCODER_NAME\t" << (display.empty() ? L"<none>" : display) << L'\n';
         std::wcout << L"ENCODER_CLSID\t" << (clsid.empty() ? L"<none>" : clsid) << L'\n';
+        std::wcout << L"ENCODER_ICON\t" << (icon.empty() ? L"<none>" : icon) << L'\n';
     }
     if (com) {
         std::wcout << L"COM_SERVER\t" << (server.empty() ? L"<none>" : server) << L'\n';
     }
     return (encoder && com) ? 0 : kExitNotRegistered;
-}
-
-LONG DeleteOwnedKey(const std::wstring& path) {
-    const LONG result = RegDeleteTreeW(HKEY_LOCAL_MACHINE, path.c_str());
-    if (result == ERROR_FILE_NOT_FOUND || result == ERROR_PATH_NOT_FOUND) {
-        return ERROR_SUCCESS;
-    }
-    return result;
 }
 
 int UnregisterOwnedKeys() {
@@ -254,7 +299,6 @@ int UnregisterOwnedKeys() {
 
     const std::wstring encoderPath = Join(kEncoderBase, kFormatGuid);
     const std::wstring classPath = Join(kComBase, kClsidText);
-
     const LONG encoder = DeleteOwnedKey(encoderPath);
     const LONG com = DeleteOwnedKey(classPath);
     if (encoder != ERROR_SUCCESS) {
@@ -266,7 +310,7 @@ int UnregisterOwnedKeys() {
         return kExitAccess;
     }
 
-    std::wcout << L"SPATIAL_PROBE_UNREGISTERED\tFORMAT_GUID=" << kFormatGuid
+    std::wcout << L"SPATIAL_PROVIDER_UNREGISTERED\tFORMAT_GUID=" << kFormatGuid
                << L"\tCLSID=" << kClsidText << L'\n';
     return 0;
 }
@@ -279,7 +323,7 @@ int RegisterOwnedKeys(const wchar_t* dllArgument) {
 
     std::wstring dllPath;
     if (!AbsolutePath(dllArgument, dllPath) || !FileExists(dllPath)) {
-        std::wcerr << L"ERROR\tprobe DLL not found\t" << dllArgument << L'\n';
+        std::wcerr << L"ERROR\tprovider DLL not found\t" << dllArgument << L'\n';
         return kExitUsage;
     }
 
@@ -295,7 +339,7 @@ int RegisterOwnedKeys(const wchar_t* dllArgument) {
         std::wcerr << L"ERROR\tcreate Omniphony COM class\t" << Win32Text(result) << L'\n';
         return kExitAccess;
     }
-    result = SetString(classKey, nullptr, L"Omniphony Spatial Provider Probe");
+    result = SetString(classKey, nullptr, L"Omniphony Spatial Provider");
     RegCloseKey(classKey);
     if (result != ERROR_SUCCESS) {
         DeleteOwnedKey(classPath);
@@ -332,6 +376,9 @@ int RegisterOwnedKeys(const wchar_t* dllArgument) {
     if (result == ERROR_SUCCESS) {
         result = SetString(encoderKey, L"CLSID", kClsidText);
     }
+    if (result == ERROR_SUCCESS) {
+        result = SetString(encoderKey, L"IconPath", dllPath + L",0");
+    }
     if (encoderKey) {
         RegCloseKey(encoderKey);
     }
@@ -352,12 +399,12 @@ int RegisterOwnedKeys(const wchar_t* dllArgument) {
         return kExitVerify;
     }
 
-    IUnknown* probe = nullptr;
+    IUnknown* provider = nullptr;
     const HRESULT activate = CoCreateInstance(
-        kProbeClsid, nullptr, CLSCTX_INPROC_SERVER, IID_IUnknown,
-        reinterpret_cast<void**>(&probe));
-    if (probe) {
-        probe->Release();
+        kProviderClsid, nullptr, CLSCTX_INPROC_SERVER, IID_IUnknown,
+        reinterpret_cast<void**>(&provider));
+    if (provider) {
+        provider->Release();
     }
     if (SUCCEEDED(init)) {
         CoUninitialize();
@@ -365,27 +412,26 @@ int RegisterOwnedKeys(const wchar_t* dllArgument) {
     if (FAILED(activate)) {
         DeleteOwnedKey(encoderPath);
         DeleteOwnedKey(classPath);
-        std::wcerr << L"ERROR\tprobe COM activation failed; registration rolled back\t0x"
+        std::wcerr << L"ERROR\tprovider COM activation failed; registration rolled back\t0x"
                    << std::uppercase << std::hex << static_cast<unsigned long>(activate) << L'\n';
         return kExitVerify;
     }
 
-    std::wcout << L"SPATIAL_PROBE_REGISTERED\tFORMAT_GUID=" << kFormatGuid
+    std::wcout << L"SPATIAL_PROVIDER_REGISTERED\tFORMAT_GUID=" << kFormatGuid
                << L"\tCLSID=" << kClsidText << L"\tDLL=" << dllPath << L'\n';
     std::wcout << L"COM_ACTIVATION_OK\tIUnknown\n";
-    std::wcout << L"NEXT\tReopen Settings > System > Sound > your output > Spatial sound and check for Omniphony.\n";
-    std::wcout << L"BOUNDARY\tMenu appearance proves enumeration only; this probe does not implement a spatial renderer.\n";
+    std::wcout << L"OBJECT_CAPACITY\tSTATIC=17\tDYNAMIC=16\n";
     return 0;
 }
 
 int Diagnose() {
-    const int status = Status();
+    const int status = RegistrationStatus();
     const int listed = ListProviders();
     if (listed != 0) {
         return listed;
     }
     if (status != 0) {
-        std::wcerr << L"DIAGNOSIS\tOmniphony probe is not fully registered.\n";
+        std::wcerr << L"DIAGNOSIS\tOmniphony provider is not fully registered.\n";
         return status;
     }
 
@@ -396,37 +442,131 @@ int Diagnose() {
         return kExitVerify;
     }
 
-    IUnknown* probe = nullptr;
+    IUnknown* provider = nullptr;
     const HRESULT activate = CoCreateInstance(
-        kProbeClsid, nullptr, CLSCTX_INPROC_SERVER, IID_IUnknown,
-        reinterpret_cast<void**>(&probe));
-    if (probe) {
-        probe->Release();
+        kProviderClsid, nullptr, CLSCTX_INPROC_SERVER, IID_IUnknown,
+        reinterpret_cast<void**>(&provider));
+    if (provider) {
+        provider->Release();
     }
     if (SUCCEEDED(init)) {
         CoUninitialize();
     }
     if (FAILED(activate)) {
-        std::wcerr << L"ERROR\tCoCreateInstance probe\t0x" << std::uppercase << std::hex
+        std::wcerr << L"ERROR\tCoCreateInstance provider\t0x" << std::uppercase << std::hex
                    << static_cast<unsigned long>(activate) << L'\n';
         return kExitVerify;
     }
 
     std::wcout << L"COM_ACTIVATION_OK\tIUnknown\n";
-    std::wcout << L"DIAGNOSIS\tRegistry state and inert COM activation are internally consistent.\n";
-    std::wcout << L"BOUNDARY\tWindows Settings enumeration and spatial-renderer activation still require a real machine test.\n";
+    std::wcout << L"DIAGNOSIS\tRegistration and provider COM construction are internally consistent.\n";
+    std::wcout << L"OBJECT_CAPACITY\tSTATIC=17\tDYNAMIC=16\n";
     return 0;
+}
+
+void PrintSelectionState(const SpatialAudioDeviceConfiguration& config) {
+    const auto defaultFormat = config.DefaultSpatialAudioFormat();
+    const auto activeFormat = config.ActiveSpatialAudioFormat();
+    std::wcout << L"SPATIAL_SUPPORTED\t" << (config.IsSpatialAudioSupported() ? 1 : 0) << L'\n';
+    std::wcout << L"OMNIPHONY_FORMAT_SUPPORTED\t"
+               << (config.IsSpatialAudioFormatSupported(winrt::hstring{kFormatGuid}) ? 1 : 0) << L'\n';
+    std::wcout << L"DEFAULT_FORMAT\t" << defaultFormat.c_str() << L'\n';
+    std::wcout << L"ACTIVE_FORMAT\t" << activeFormat.c_str() << L'\n';
+    std::wcout << L"OMNIPHONY_DEFAULT\t" << (IsOmniphonyFormat(defaultFormat) ? 1 : 0) << L'\n';
+    std::wcout << L"OMNIPHONY_ACTIVE\t" << (IsOmniphonyFormat(activeFormat) ? 1 : 0) << L'\n';
+}
+
+int SelectionStatus(const wchar_t* endpointId, bool requireOmniphony) {
+    const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
+    PrintSelectionState(config);
+    if (!requireOmniphony) {
+        return 0;
+    }
+    if (!config.IsSpatialAudioSupported() ||
+        !config.IsSpatialAudioFormatSupported(winrt::hstring{kFormatGuid})) {
+        return kExitSelectionUnsupported;
+    }
+    if (!IsOmniphonyFormat(config.DefaultSpatialAudioFormat()) ||
+        !IsOmniphonyFormat(config.ActiveSpatialAudioFormat())) {
+        return kExitSelectionReadback;
+    }
+    std::wcout << L"OMNIPHONY_SPATIAL_SELECTION_VERIFIED\t1\n";
+    return 0;
+}
+
+int SelectEndpoint(const wchar_t* endpointId) {
+    const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
+    std::wcout << L"BEFORE\n";
+    PrintSelectionState(config);
+
+    if (!config.IsSpatialAudioSupported() ||
+        !config.IsSpatialAudioFormatSupported(winrt::hstring{kFormatGuid})) {
+        std::wcerr << L"ERROR\tOmniphony is not reported as supported on this endpoint.\n";
+        return kExitSelectionUnsupported;
+    }
+
+    if (!IsOmniphonyFormat(config.DefaultSpatialAudioFormat())) {
+        const auto result = config.SetDefaultSpatialAudioFormatAsync(winrt::hstring{kFormatGuid}).get();
+        const auto status = result.Status();
+        std::wcout << L"SET_STATUS\t" << static_cast<int>(status)
+                   << L"\t" << SelectionStatusText(status) << L'\n';
+        if (status != SetDefaultSpatialAudioFormatStatus::Succeeded) {
+            return kExitSelectionRejected;
+        }
+    } else {
+        std::wcout << L"SET_STATUS\t0\tAlreadyDefault\n";
+    }
+
+    const auto after = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
+    std::wcout << L"AFTER\n";
+    PrintSelectionState(after);
+    if (!IsOmniphonyFormat(after.DefaultSpatialAudioFormat())) {
+        std::wcerr << L"ERROR\tWindows did not retain Omniphony as the default spatial format.\n";
+        return kExitSelectionReadback;
+    }
+    std::wcout << L"OMNIPHONY_SPATIAL_DEFAULT_SET\t1\n";
+    return 0;
+}
+
+int RunSelectionCommand(const std::wstring& command, const wchar_t* endpointId) {
+    try {
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        if (command == L"selection-status") {
+            return SelectionStatus(endpointId, false);
+        }
+        if (command == L"selection-select") {
+            return SelectEndpoint(endpointId);
+        }
+        if (command == L"selection-verify") {
+            return SelectionStatus(endpointId, true);
+        }
+        return kExitUsage;
+    } catch (const winrt::hresult_error& error) {
+        std::wcerr << L"ERROR\tWinRT\t0x" << std::hex << std::uppercase
+                   << static_cast<unsigned long>(error.code().value)
+                   << L"\t" << error.message().c_str() << L'\n';
+        return kExitSelectionRuntime;
+    } catch (const std::exception& error) {
+        std::cerr << "ERROR\tstd::exception\t" << error.what() << '\n';
+        return kExitSelectionRuntime;
+    } catch (...) {
+        std::wcerr << L"ERROR\tUnknown spatial selection failure.\n";
+        return kExitSelectionRuntime;
+    }
 }
 
 void Usage() {
     std::wcerr
-        << L"usage: OmniphonySpatialProbeCtl <contract|list|status|register|diagnose|unregister> [probe-dll]\n"
-        << L"  contract                 print stable GUIDs and safety boundaries\n"
-        << L"  list                     list current HKLM Spatial\\Encoder entries (read-only)\n"
-        << L"  status                   inspect only Omniphony-owned registration keys (read-only)\n"
-        << L"  register <probe-dll>     register inert Omniphony provider probe (Administrator)\n"
-        << L"  diagnose                 verify registry plus IUnknown COM activation (read-only)\n"
-        << L"  unregister               remove only Omniphony probe keys (Administrator)\n";
+        << L"usage: OmniphonySpatialProbeCtl <command> [argument]\n"
+        << L"  contract                         print stable provider and selection contract\n"
+        << L"  list                             list HKLM Spatial\\Encoder entries (read-only)\n"
+        << L"  status                           inspect Omniphony registration (read-only)\n"
+        << L"  register <provider-dll>          register Omniphony provider (Administrator)\n"
+        << L"  diagnose                         verify registry plus provider COM construction\n"
+        << L"  unregister                       remove only Omniphony registration (Administrator)\n"
+        << L"  selection-status <endpoint-id>   print Windows spatial selection state\n"
+        << L"  selection-select <endpoint-id>   set Omniphony by GUID and read default back\n"
+        << L"  selection-verify <endpoint-id>   require Omniphony as both default and active\n";
 }
 
 } // namespace
@@ -439,14 +579,18 @@ int wmain(int argc, wchar_t** argv) {
 
     const std::wstring command = argv[1];
     if (command == L"contract") {
+        if (argc != 2) {
+            Usage();
+            return kExitUsage;
+        }
         PrintContract();
         return 0;
     }
     if (command == L"list") {
-        return ListProviders();
+        return argc == 2 ? ListProviders() : kExitUsage;
     }
     if (command == L"status") {
-        return Status();
+        return argc == 2 ? RegistrationStatus() : kExitUsage;
     }
     if (command == L"register") {
         if (argc != 3 || !argv[2] || !*argv[2]) {
@@ -456,10 +600,18 @@ int wmain(int argc, wchar_t** argv) {
         return RegisterOwnedKeys(argv[2]);
     }
     if (command == L"diagnose") {
-        return Diagnose();
+        return argc == 2 ? Diagnose() : kExitUsage;
     }
     if (command == L"unregister") {
-        return UnregisterOwnedKeys();
+        return argc == 2 ? UnregisterOwnedKeys() : kExitUsage;
+    }
+    if (command == L"selection-status" || command == L"selection-select" ||
+        command == L"selection-verify") {
+        if (argc != 3 || !argv[2] || !*argv[2]) {
+            Usage();
+            return kExitUsage;
+        }
+        return RunSelectionCommand(command, argv[2]);
     }
 
     Usage();
