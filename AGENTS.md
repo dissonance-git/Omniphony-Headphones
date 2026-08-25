@@ -24,6 +24,8 @@ current main HEAD
 6. Write against the exact current blob SHA. Preserve unrelated concurrent work. Never replace a file from a cached or reconstructed older copy.
 7. After publication, fetch the resulting commit, inspect its changed paths, and confirm the commit remains in current `main` history. Report publication, compile/tests, CI, measurements, and physical listening as separate evidence states.
 
+Repository workflow is **main-only unless the user explicitly changes that instruction**. Do not create a branch as routine safety scaffolding. Keep sound-changing commits small and atomic enough that a rejected mechanism can be reverted cleanly on `main`.
+
 Fast routes:
 
 - current listening model, retained baseline, active candidate, and frontier: `README.md`
@@ -125,6 +127,16 @@ The active music architecture uses a protected stereo master plus coherent found
 Dense spatial sampling is not permission to smear sources. The current anti-blur law is:
 
 > **The environment may grow while direct musical structure becomes sharper.**
+
+### Accepted Current listening baseline
+
+The physically accepted stereo Current baseline is the `ddeb0b15` lineage. It retains the protected master, coherent foundation, 17-lane derived field, 22-direction cascaded shell, SAF/KEMAR binaural rendering, Noire X output profile, linked transient enhancement, output trim, and final peak guard.
+
+The frontal-hemisphere correction is accepted. In the 1.2–5 kHz presence band, existing rear support is transferred forward at 30% base and up to 38% with stable frontal-anchor evidence; top-rear support transfers top-front at 18% base and up to 22% with the same bounded evidence. This is an algebraic transfer of already-earned support, not a copied wet path or synthetic center. Side support remains structurally independent.
+
+The current transient enhancement is a stereo-linked attack/sustain designer with frequency-aware detection. The detector may inspect frequency structure, but audible output remains one broadband linked gain applied equally to both ears so it does not intentionally rewrite ILD/IPD/HRTF relationships. The attack/sustain form has been accepted as beneficial; the frequency-aware detector is retained in the current build but should still be treated as independently revisable if later listening isolates a cost.
+
+Do not keep increasing frontal transfer merely because front improvement was successful. The next frontal problem is **depth/externalization**, not occupancy. Prefer front-specific binaural/early-field evidence, distance cues, and physically motivated reflection geometry over more global front gain, synthetic-center duplication, or extra late reverb.
 
 ## Listening authority
 
