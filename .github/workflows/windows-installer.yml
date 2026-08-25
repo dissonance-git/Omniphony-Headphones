@@ -123,6 +123,19 @@ jobs:
           cmake --build "$env:GITHUB_WORKSPACE\build\apo" --config Release --parallel
           if ($LASTEXITCODE -ne 0) { throw "APO build failed: $LASTEXITCODE" }
 
+      - name: Build closed-gate physical egress diagnostic
+        shell: pwsh
+        run: |
+          $source = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\spatial_provider_probe"
+          $build = "$env:GITHUB_WORKSPACE\build\spatial-provider"
+          cmake -S $source -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "Closed-gate CMake configure failed: $LASTEXITCODE" }
+          cmake --build $build --config Release --target OmniphonySpatialClosedGateEgressProbe --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Closed-gate egress probe build failed: $LASTEXITCODE" }
+          $probe = Join-Path $build 'Release\OmniphonySpatialClosedGateEgressProbe.exe'
+          if (-not (Test-Path $probe)) { throw "Closed-gate egress probe was not produced: $probe" }
+          Write-Host "CLOSED_GATE_EGRESS_PROBE_BUILD_OK file=$probe"
+
       - name: Build physical endpoint control helper
         shell: pwsh
         run: |
@@ -225,6 +238,8 @@ jobs:
           $release = "$env:GITHUB_WORKSPACE\build\apo\Release"
           $renderer = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
           $endpointCtl = "$renderer\windows_installer\build\endpoint_ctl\OmniphonyEndpointCtl.exe"
+          $closedGateProbe = "$env:GITHUB_WORKSPACE\build\spatial-provider\Release\OmniphonySpatialClosedGateEgressProbe.exe"
+          $closedGateRunner = "$renderer\windows_installer\spatial_provider_probe\Run-ClosedGateEgress.ps1"
 
           # Both APO binaries ship during native-surround bring-up. The endpoint
           # APO is the proven rollback floor; the stream APO is activated only by
@@ -245,6 +260,8 @@ jobs:
           Copy-Item "$release\OmniphonyMixProbe.exe" $support -Force
           Copy-Item "$release\OmniphonySpatialProbe.exe" $support -Force
           Copy-Item "$release\OmniphonySpatialProviderProbe.exe" $support -Force
+          Copy-Item $closedGateProbe $support -Force
+          Copy-Item $closedGateRunner $support -Force
           Copy-Item $endpointCtl $support -Force
           Copy-Item "$env:GITHUB_WORKSPACE\omniphony\LICENSE" "$payload\LICENSE" -Force
 
@@ -255,6 +272,8 @@ jobs:
           Write-Host '  Omniphony\support\OmniphonyTray.ps1'
           Write-Host '  Omniphony\support\OmniphonySpatialProbe.exe (read-only capability probe)'
           Write-Host '  Omniphony\support\OmniphonySpatialProviderProbe.exe (read-only provider/COM probe)'
+          Write-Host '  Omniphony\support\OmniphonySpatialClosedGateEgressProbe.exe (manual physical egress diagnostic)'
+          Write-Host '  Omniphony\support\Run-ClosedGateEgress.ps1 (installed closed-gate runner)'
           Write-Host '  no taskbar window; no background host process'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
 
