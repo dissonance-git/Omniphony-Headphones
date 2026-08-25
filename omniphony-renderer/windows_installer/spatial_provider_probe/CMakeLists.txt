@@ -12,6 +12,8 @@ set(OMNIPHONY_REALTIME_INCLUDE
 add_library(OmniphonySpatialProbe SHARED
     OmniphonySpatialProbe.cpp
     OmniphonySpatialProviderRuntime.cpp
+    OmniphonySpatialObjectStream.cpp
+    OmniphonySpatialObjectRealtimeBridge.cpp
     OmniphonySpatialStaticStream.cpp
     OmniphonySpatialRealtimeBridge.cpp
     OmniphonySpatialRawOutputPump.cpp
@@ -57,6 +59,19 @@ target_include_directories(
     PRIVATE "${OMNIPHONY_REALTIME_INCLUDE}"
 )
 target_link_libraries(OmniphonySpatialStaticStreamSmoke PRIVATE ole32 uuid)
+
+add_executable(OmniphonySpatialObjectStreamSmoke
+    OmniphonySpatialObjectStreamSmoke.cpp
+    OmniphonySpatialObjectStream.cpp
+)
+target_compile_features(OmniphonySpatialObjectStreamSmoke PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialObjectStreamSmoke PRIVATE UNICODE _UNICODE)
+target_compile_options(OmniphonySpatialObjectStreamSmoke PRIVATE /W4 /WX /permissive-)
+target_include_directories(
+    OmniphonySpatialObjectStreamSmoke
+    PRIVATE "${OMNIPHONY_REALTIME_INCLUDE}"
+)
+target_link_libraries(OmniphonySpatialObjectStreamSmoke PRIVATE ole32 uuid)
 
 add_executable(OmniphonySpatialRealtimeBridgeSmoke
     OmniphonySpatialRealtimeBridgeSmoke.cpp
