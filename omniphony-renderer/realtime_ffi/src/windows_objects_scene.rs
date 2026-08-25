@@ -101,6 +101,17 @@ impl WindowsSpatialObjectPipeline {
         })
     }
 
+    /// Advance stream time through a quantum in which a dynamic-only stream has
+    /// no currently active objects. No source is fabricated merely to keep the
+    /// clock moving.
+    pub(crate) fn process_silence(&mut self, frames: usize) -> Result<Vec<f32>, String> {
+        if frames == 0 {
+            return Err("spatial object silence quantum has zero frames".to_string());
+        }
+        self.sample_pos = self.sample_pos.saturating_add(frames as u64);
+        Ok(self.peak_guard.process_interleaved(&vec![0.0f32; frames * 2]))
+    }
+
     fn validate_quantum(
         static_objects: &[WindowsStaticObject<'_>],
         dynamic_objects: &[WindowsDynamicObject<'_>],
