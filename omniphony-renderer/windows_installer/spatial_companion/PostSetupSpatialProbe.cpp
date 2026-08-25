@@ -26,6 +26,7 @@ using winrt::Windows::Foundation::Collections::IVector;
 
 constexpr wchar_t kPackageFamilyName[] = L"Omniphony.SpatialCompanion_1nv7pqmcjcq0w";
 constexpr wchar_t kAliasName[] = L"OmniphonySpatialCompanion.exe";
+constexpr wchar_t kAppServiceProbeAlias[] = L"OmniphonySpatialAppServiceProbeV17.exe";
 
 DWORD CurrentIntegrityRid() {
     HANDLE token = nullptr;
@@ -201,7 +202,7 @@ void DumpOmniphonyMediaComponent() {
     std::wcout << L"POST_SETUP_MEDIA_OMNIPHONY_FOUND\t" << (found ? 1 : 0) << L'\n';
 }
 
-std::wstring ExecutionAliasPath() {
+std::wstring ExecutionAliasPath(const wchar_t* aliasName) {
     DWORD required = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
     if (required == 0) {
         return {};
@@ -212,17 +213,20 @@ std::wstring ExecutionAliasPath() {
         return {};
     }
     localAppData.resize(written);
-    return localAppData + L"\\Microsoft\\WindowsApps\\" + kAliasName;
+    return localAppData + L"\\Microsoft\\WindowsApps\\" + aliasName;
 }
 
-DWORD RunPackagedCommand(const std::wstring& arguments, const wchar_t* marker) {
-    const auto alias = ExecutionAliasPath();
+DWORD RunPackagedAlias(const wchar_t* aliasName, const std::wstring& arguments, const wchar_t* marker) {
+    const auto alias = ExecutionAliasPath(aliasName);
     if (alias.empty()) {
         std::wcout << marker << L"_LAUNCHED\t0\n";
         return ERROR_PATH_NOT_FOUND;
     }
 
-    std::wstring commandLine = L"\"" + alias + L"\" " + arguments;
+    std::wstring commandLine = L"\"" + alias + L"\"";
+    if (!arguments.empty()) {
+        commandLine += L" " + arguments;
+    }
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
@@ -250,6 +254,10 @@ DWORD RunPackagedCommand(const std::wstring& arguments, const wchar_t* marker) {
     CloseHandle(process.hProcess);
     std::wcout << marker << L"_EXIT_CODE\t" << exitCode << L'\n';
     return exitCode;
+}
+
+DWORD RunPackagedCommand(const std::wstring& arguments, const wchar_t* marker) {
+    return RunPackagedAlias(kAliasName, arguments, marker);
 }
 
 std::wstring DefaultRenderEndpointId() {
@@ -313,6 +321,10 @@ void PostSetupProbe() {
     } catch (...) {
         std::wcout << L"POST_SETUP_MEDIA_PROBE_EXCEPTION\tUNKNOWN\n";
     }
+
+    const DWORD appServiceProbeExit = RunPackagedAlias(
+        kAppServiceProbeAlias, L"", L"POST_SETUP_APPSERVICE_V17");
+    std::wcout << L"POST_SETUP_APPSERVICE_V17_OK\t" << (appServiceProbeExit == 0 ? 1 : 0) << L'\n';
 
     const DWORD notifyExit = RunPackagedCommand(L"notify", L"POST_SETUP_NOTIFY");
     std::wcout << L"POST_SETUP_NOTIFY_OK\t" << (notifyExit == 0 ? 1 : 0) << L'\n';
