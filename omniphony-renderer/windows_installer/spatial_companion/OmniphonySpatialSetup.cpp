@@ -698,11 +698,14 @@ int MediumUserPhase(const std::filesystem::path& self) {
         std::wcout << L"SPATIAL_SETUP_ACTION\tRetry media-extension registration from medium-integrity package identity\n";
         registerExit = LaunchPackagedCommand(L"register", L"SPATIAL_SETUP_PACKAGED_REGISTER_EXIT_CODE");
         if (registerExit != 0) {
-            std::filesystem::remove_all(temp, ec);
-            return registerExit;
+            std::wcout << L"SPATIAL_SETUP_PACKAGED_REGISTERED\t0\n";
+            std::wcout << L"SPATIAL_SETUP_REGISTRATION_GATE_UNPROVEN\t1\n";
+            std::wcout << L"SPATIAL_SETUP_ACTION\tContinue to real spatial setter despite registration helper denial\n";
+        } else {
+            std::wcout << L"SPATIAL_SETUP_PACKAGED_REGISTERED\t1\n";
         }
-        std::wcout << L"SPATIAL_SETUP_PACKAGED_REGISTERED\t1\n";
     }
+    std::wcout << L"SPATIAL_SETUP_REGISTRATION_CONFIRMED\t" << (registerExit == 0 ? 1 : 0) << L"\n";
 
     const auto endpointId = DefaultRenderEndpointId();
     std::wcout << L"SPATIAL_SETUP_READY\t1\n";
