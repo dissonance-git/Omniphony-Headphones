@@ -189,7 +189,7 @@ int wmain(int argc, wchar_t** argv) {
 
     hr = spatial->IsSpatialAudioStreamAvailable(
         __uuidof(ISpatialAudioObjectRenderStream), nullptr);
-    if (hr != SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE) {
+    if (hr != SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE) {
         spatial->Release();
         FreeLibrary(module);
         return Fail(L"IsSpatialAudioStreamAvailable expected unavailable", hr);
@@ -200,7 +200,7 @@ int wmain(int argc, wchar_t** argv) {
         nullptr,
         __uuidof(ISpatialAudioObjectRenderStream),
         &stream);
-    if (hr != SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE || stream != nullptr) {
+    if (hr != SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE || stream != nullptr) {
         spatial->Release();
         FreeLibrary(module);
         return Fail(L"ActivateSpatialAudioStream expected unavailable", hr);
