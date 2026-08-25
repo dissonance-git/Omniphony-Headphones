@@ -2,7 +2,9 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <wincrypt.h>
+#include <mmdeviceapi.h>
 
+#include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Management.Deployment.h>
 
@@ -315,7 +317,87 @@ bool InstallPackage(const std::filesystem::path& msix) {
     return DeploymentSucceeded(result, L"SPATIAL_SETUP_PACKAGE_INSTALLED");
 }
 
-int LaunchVerifier() {
+std::wstring InstalledPackageFamilyName() {
+    using namespace winrt::Windows::Management::Deployment;
+
+    PackageManager manager;
+    for (const auto& package : manager.FindPackagesForUser(L"")) {
+        if (std::wstring(package.Id().Name().c_str()) == kPackageName) {
+            return std::wstring(package.Id().FamilyName().c_str());
+        }
+    }
+    throw std::runtime_error("Installed Omniphony spatial companion package family was not found.");
+}
+
+int RegisterMediaExtensionFromBootstrap() {
+    using RegisterMediaExtensionPackageFn = HRESULT(WINAPI*)(PCWSTR);
+
+    const auto familyName = InstalledPackageFamilyName();
+    HMODULE module = LoadLibraryW(L"CompPkgSup.dll");
+    if (module == nullptr) {
+        const DWORD error = GetLastError();
+        std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t0\n";
+        std::wcerr << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTER_ERROR\t" << error
+                   << L"\t" << Win32Message(error) << L"\n";
+        return 23;
+    }
+
+    const auto registerMediaExtensionPackage = reinterpret_cast<RegisterMediaExtensionPackageFn>(
+        GetProcAddress(module, "RegisterMediaExtensionPackage"));
+    if (registerMediaExtensionPackage == nullptr) {
+        std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t0\n";
+        std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTER_REQUIRES_WINDOWS_11_24H2\t1\n";
+        FreeLibrary(module);
+        return 23;
+    }
+
+    std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t1\n";
+    std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_PACKAGE_FAMILY\t" << familyName << L"\n";
+    const HRESULT result = registerMediaExtensionPackage(familyName.c_str());
+    FreeLibrary(module);
+
+    std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTER_HRESULT\t0x"
+               << std::hex << std::uppercase << static_cast<unsigned long>(result)
+               << std::dec << L"\n";
+    if (FAILED(result)) {
+        std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTERED\t0\n";
+        return 23;
+    }
+
+    std::wcout << L"SPATIAL_SETUP_MEDIA_EXTENSION_REGISTERED\t1\n";
+    return 0;
+}
+
+std::wstring DefaultRenderEndpointId() {
+    winrt::com_ptr<IMMDeviceEnumerator> enumerator;
+    winrt::check_hresult(CoCreateInstance(
+        __uuidof(MMDeviceEnumerator),
+        nullptr,
+        CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator),
+        enumerator.put_void()));
+
+    winrt::com_ptr<IMMDevice> device;
+    winrt::check_hresult(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, device.put()));
+
+    LPWSTR rawEndpointId = nullptr;
+    winrt::check_hresult(device->GetId(&rawEndpointId));
+    std::wstring endpointId;
+    if (rawEndpointId != nullptr) {
+        endpointId.assign(rawEndpointId);
+        CoTaskMemFree(rawEndpointId);
+    }
+    if (endpointId.empty()) {
+        throw winrt::hresult_error(E_FAIL, L"Default render endpoint returned an empty device ID.");
+    }
+
+    std::wcout << L"SPATIAL_SETUP_DEFAULT_RENDER_ROLE\teMultimedia\n";
+    std::wcout << L"SPATIAL_SETUP_DEFAULT_RENDER_ENDPOINT_DISCOVERED\t1\n";
+    std::wcout << L"SPATIAL_SETUP_DEFAULT_RENDER_ENDPOINT_ID\t" << endpointId << L"\n";
+    return endpointId;
+}
+
+int LaunchPackagedCommand(const std::wstring& arguments, const wchar_t* exitMarker) {
     wchar_t localAppData[32768]{};
     const DWORD length = GetEnvironmentVariableW(
         L"LOCALAPPDATA",
@@ -328,7 +410,7 @@ int LaunchVerifier() {
 
     const auto alias = std::filesystem::path(localAppData) /
         L"Microsoft" / L"WindowsApps" / L"OmniphonySpatialCompanion.exe";
-    std::wstring commandLine = L"\"" + alias.wstring() + L"\" verify-default";
+    std::wstring commandLine = L"\"" + alias.wstring() + L"\" " + arguments;
 
     for (int attempt = 0; attempt != 20; ++attempt) {
         STARTUPINFOW startup{};
@@ -354,7 +436,7 @@ int LaunchVerifier() {
             GetExitCodeProcess(process.hProcess, &exitCode);
             CloseHandle(process.hThread);
             CloseHandle(process.hProcess);
-            std::wcout << L"SPATIAL_SETUP_VERIFY_EXIT_CODE\t" << exitCode << L"\n";
+            std::wcout << exitMarker << L"\t" << exitCode << L"\n";
             return static_cast<int>(exitCode);
         }
 
@@ -414,11 +496,33 @@ int InstallAndVerify(const std::filesystem::path& self, const BundleLayout& layo
         return 22;
     }
 
+    std::wcout << L"SPATIAL_SETUP_ACTION\tRegister installed media extension from elevated full-trust bootstrap\n";
+    if (RegisterMediaExtensionFromBootstrap() != 0) {
+        std::filesystem::remove_all(temp, ec);
+        return 23;
+    }
+
+    const auto endpointId = DefaultRenderEndpointId();
     std::wcout << L"SPATIAL_SETUP_READY\t1\n";
-    std::wcout << L"SPATIAL_SETUP_ACTION\tRun packaged verify-default ownership test\n";
-    const int verifierExit = LaunchVerifier();
+
+    std::wcout << L"SPATIAL_SETUP_ACTION\tNotify spatial license/configuration change from package identity\n";
+    const int notifyExit = LaunchPackagedCommand(L"notify", L"SPATIAL_SETUP_NOTIFY_EXIT_CODE");
+    if (notifyExit != 0) {
+        std::filesystem::remove_all(temp, ec);
+        return notifyExit;
+    }
+
+    std::wcout << L"SPATIAL_SETUP_ACTION\tSelect Omniphony on the default multimedia render endpoint from package identity\n";
+    const std::wstring selectArguments = L"select \"" + endpointId + L"\"";
+    const int selectExit = LaunchPackagedCommand(selectArguments, L"SPATIAL_SETUP_SELECT_EXIT_CODE");
+    if (selectExit == 0) {
+        std::wcout << L"SPATIAL_SETUP_VERIFY_DEFAULT_OK\t1\n";
+    } else {
+        std::wcout << L"SPATIAL_SETUP_VERIFY_DEFAULT_OK\t0\n";
+    }
+
     std::filesystem::remove_all(temp, ec);
-    return verifierExit;
+    return selectExit;
 }
 
 }  // namespace
