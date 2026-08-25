@@ -93,7 +93,8 @@ try {
         TimestampUtc = [DateTime]::UtcNow.ToString('o')
         Enabled = $true
         StaticObjects = $true
-        DynamicObjects = $false
+        DynamicObjects = $true
+        MaxDynamicObjects = 16
         EndpointId = $endpointId
         EndpointName = $endpointName
         ProviderDll = $ProviderDll
