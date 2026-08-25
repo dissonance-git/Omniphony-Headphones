@@ -54,6 +54,8 @@ jobs:
 
           $manifest = Get-Content -LiteralPath (Join-Path $unpacked 'AppxManifest.xml') -Raw
           if ($manifest -notmatch 'Name="Omniphony\.SpatialCompanion"') { throw 'Package identity drifted.' }
+          if ($manifest -notmatch 'Category="windows\.mediaPlayback"') { throw 'windows.mediaPlayback extension missing.' }
+          if ($manifest -notmatch '<uap:Codec Name="\{4BD75423-A66C-4586-B782-1FCBBDF2AE74\}"') { throw 'Spatial subtype media-component binding drifted.' }
           if ($manifest -notmatch 'Category="windows\.appService"') { throw 'windows.appService extension missing.' }
           if ($manifest -notmatch 'Name="OmniphonySpatialLicense"') { throw 'Spatial license AppService name drifted.' }
           if ($manifest -notmatch 'OmniphonySpatialLicenseService\.SpatialLicenseService') { throw 'Spatial license service entry point drifted.' }
@@ -74,6 +76,8 @@ jobs:
 
           Write-Host 'SPATIAL_COMPANION_MSIX_CONTRACT_OK 1'
           Write-Host 'SPATIAL_COMPANION_PACKAGE_IDENTITY_OK 1'
+          Write-Host 'SPATIAL_COMPANION_MEDIA_COMPONENT_DECLARED 1'
+          Write-Host 'SPATIAL_COMPANION_SPATIAL_SUBTYPE_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_APP_SERVICE_CONTRACT_OK 1'
           Write-Host 'SPATIAL_COMPANION_EXTERNAL_OWNERSHIP_GATE_UNPROVEN 1'
 
