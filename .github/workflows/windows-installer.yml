@@ -123,18 +123,42 @@ jobs:
           cmake --build "$env:GITHUB_WORKSPACE\build\apo" --config Release --parallel
           if ($LASTEXITCODE -ne 0) { throw "APO build failed: $LASTEXITCODE" }
 
-      - name: Build closed-gate physical egress diagnostic
+      - name: Build spatial provider and diagnostics
         shell: pwsh
         run: |
           $source = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\spatial_provider_probe"
           $build = "$env:GITHUB_WORKSPACE\build\spatial-provider"
           cmake -S $source -B $build -A x64
-          if ($LASTEXITCODE -ne 0) { throw "Closed-gate CMake configure failed: $LASTEXITCODE" }
-          cmake --build $build --config Release --target OmniphonySpatialClosedGateEgressProbe --parallel
-          if ($LASTEXITCODE -ne 0) { throw "Closed-gate egress probe build failed: $LASTEXITCODE" }
-          $probe = Join-Path $build 'Release\OmniphonySpatialClosedGateEgressProbe.exe'
-          if (-not (Test-Path $probe)) { throw "Closed-gate egress probe was not produced: $probe" }
-          Write-Host "CLOSED_GATE_EGRESS_PROBE_BUILD_OK file=$probe"
+          if ($LASTEXITCODE -ne 0) { throw "Spatial provider CMake configure failed: $LASTEXITCODE" }
+
+          foreach ($target in @(
+            'OmniphonySpatialProbe',
+            'OmniphonySpatialProbeCtl',
+            'OmniphonySpatialProbeSmoke',
+            'OmniphonySpatialClosedGateEgressProbe'
+          )) {
+            cmake --build $build --config Release --target $target --parallel
+            if ($LASTEXITCODE -ne 0) { throw "Spatial provider target '$target' failed: $LASTEXITCODE" }
+          }
+
+          $release = Join-Path $build 'Release'
+          $provider = Join-Path $release 'OmniphonySpatialProbe.dll'
+          $control = Join-Path $release 'OmniphonySpatialProbeCtl.exe'
+          $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
+          $closedGate = Join-Path $release 'OmniphonySpatialClosedGateEgressProbe.exe'
+          foreach ($file in @($provider, $control, $smoke, $closedGate)) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Spatial provider build output is missing: $file"
+            }
+          }
+
+          # CI deliberately has no HKLM\SOFTWARE\Omniphony\SpatialProvider gate.
+          # The provider must therefore expose capabilities but reject public
+          # stream activation while still proving its complete DLL links/loads.
+          & $smoke $provider
+          if ($LASTEXITCODE -ne 0) { throw "Spatial provider fail-closed COM smoke failed: $LASTEXITCODE" }
+          Write-Host "SPATIAL_PROVIDER_BUILD_OK dll=$provider"
+          Write-Host "CLOSED_GATE_EGRESS_PROBE_BUILD_OK file=$closedGate"
 
       - name: Build physical endpoint control helper
         shell: pwsh
@@ -238,8 +262,14 @@ jobs:
           $release = "$env:GITHUB_WORKSPACE\build\apo\Release"
           $renderer = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
           $endpointCtl = "$renderer\windows_installer\build\endpoint_ctl\OmniphonyEndpointCtl.exe"
-          $closedGateProbe = "$env:GITHUB_WORKSPACE\build\spatial-provider\Release\OmniphonySpatialClosedGateEgressProbe.exe"
-          $closedGateRunner = "$renderer\windows_installer\spatial_provider_probe\Run-ClosedGateEgress.ps1"
+          $spatialRelease = "$env:GITHUB_WORKSPACE\build\spatial-provider\Release"
+          $providerDll = Join-Path $spatialRelease 'OmniphonySpatialProbe.dll'
+          $providerCtl = Join-Path $spatialRelease 'OmniphonySpatialProbeCtl.exe'
+          $closedGateProbe = Join-Path $spatialRelease 'OmniphonySpatialClosedGateEgressProbe.exe'
+          $spatialSource = "$renderer\windows_installer\spatial_provider_probe"
+          $closedGateRunner = Join-Path $spatialSource 'Run-ClosedGateEgress.ps1'
+          $providerEnable = Join-Path $spatialSource 'Enable-OmniphonySpatialProvider.ps1'
+          $providerDisable = Join-Path $spatialSource 'Disable-OmniphonySpatialProvider.ps1'
 
           # Both APO binaries ship during native-surround bring-up. The endpoint
           # APO is the proven rollback floor; the stream APO is activated only by
@@ -260,6 +290,10 @@ jobs:
           Copy-Item "$release\OmniphonyMixProbe.exe" $support -Force
           Copy-Item "$release\OmniphonySpatialProbe.exe" $support -Force
           Copy-Item "$release\OmniphonySpatialProviderProbe.exe" $support -Force
+          Copy-Item $providerDll $support -Force
+          Copy-Item $providerCtl $support -Force
+          Copy-Item $providerEnable $support -Force
+          Copy-Item $providerDisable $support -Force
           Copy-Item $closedGateProbe $support -Force
           Copy-Item $closedGateRunner $support -Force
           Copy-Item $endpointCtl $support -Force
@@ -272,6 +306,10 @@ jobs:
           Write-Host '  Omniphony\support\OmniphonyTray.ps1'
           Write-Host '  Omniphony\support\OmniphonySpatialProbe.exe (read-only capability probe)'
           Write-Host '  Omniphony\support\OmniphonySpatialProviderProbe.exe (read-only provider/COM probe)'
+          Write-Host '  Omniphony\support\OmniphonySpatialProbe.dll (opt-in static Spatial Sound provider)'
+          Write-Host '  Omniphony\support\OmniphonySpatialProbeCtl.exe (provider registration control)'
+          Write-Host '  Omniphony\support\Enable-OmniphonySpatialProvider.ps1 (explicit provider gate)'
+          Write-Host '  Omniphony\support\Disable-OmniphonySpatialProvider.ps1 (provider rollback)'
           Write-Host '  Omniphony\support\OmniphonySpatialClosedGateEgressProbe.exe (manual physical egress diagnostic)'
           Write-Host '  Omniphony\support\Run-ClosedGateEgress.ps1 (installed closed-gate runner)'
           Write-Host '  no taskbar window; no background host process'
@@ -318,7 +356,7 @@ jobs:
           $repo = $env:GITHUB_REPOSITORY
           $sha = $env:GITHUB_SHA
           $asset = 'dist/OmniphonySetup.exe'
-          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, and native-surround 7.1.4 stream smoke passed."
+          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, native-surround 7.1.4 stream smoke, and fail-closed Spatial Sound provider COM smoke passed."
 
           gh release view windows-current --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
