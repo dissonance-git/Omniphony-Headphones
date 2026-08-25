@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <string>
 
+#include "OmniphonySpatialProviderRuntime.h"
 #include "OmniphonySpatialRoles.h"
 
 namespace {
@@ -19,8 +21,15 @@ constexpr GUID kProbeClsid = {
 
 constexpr UINT32 kObjectSampleRate = 48'000;
 constexpr UINT32 kObjectFramesPerBuffer = 480;
+constexpr wchar_t kProviderConfigPath[] = L"SOFTWARE\\Omniphony\\SpatialProvider";
 
 volatile LONG g_liveReferences = 0;
+
+struct ProviderConfig {
+    bool enabled = false;
+    std::wstring endpointId;
+    std::wstring realtimeDll;
+};
 
 bool IsProbeObjectFormat(const WAVEFORMATEX* format) noexcept {
     return format != nullptr &&
@@ -55,6 +64,102 @@ HRESULT StaticPosition(AudioObjectType type, float* x, float* y, float* z) noexc
     *y = role->y_up_m;
     *z = role->z_back_m;
     return S_OK;
+}
+
+bool ReadRegistryString(HKEY key, const wchar_t* name, std::wstring& value) {
+    DWORD type = 0;
+    DWORD bytes = 0;
+    LONG result = RegQueryValueExW(key, name, nullptr, &type, nullptr, &bytes);
+    if (result != ERROR_SUCCESS ||
+        (type != REG_SZ && type != REG_EXPAND_SZ) ||
+        bytes < sizeof(wchar_t)) {
+        return false;
+    }
+
+    std::wstring buffer(bytes / sizeof(wchar_t), L'\0');
+    result = RegQueryValueExW(
+        key,
+        name,
+        nullptr,
+        &type,
+        reinterpret_cast<BYTE*>(buffer.data()),
+        &bytes);
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+    while (!buffer.empty() && buffer.back() == L'\0') {
+        buffer.pop_back();
+    }
+    if (type == REG_EXPAND_SZ && !buffer.empty()) {
+        const DWORD needed = ExpandEnvironmentStringsW(buffer.c_str(), nullptr, 0);
+        if (needed == 0) {
+            return false;
+        }
+        std::wstring expanded(needed, L'\0');
+        const DWORD written = ExpandEnvironmentStringsW(
+            buffer.c_str(), expanded.data(), needed);
+        if (written == 0 || written > needed) {
+            return false;
+        }
+        while (!expanded.empty() && expanded.back() == L'\0') {
+            expanded.pop_back();
+        }
+        buffer = std::move(expanded);
+    }
+    value = std::move(buffer);
+    return !value.empty();
+}
+
+bool LoadProviderConfig(ProviderConfig& config) {
+    config = {};
+
+    HKEY key = nullptr;
+    const LONG open = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        kProviderConfigPath,
+        0,
+        KEY_READ | KEY_WOW64_64KEY,
+        &key);
+    if (open != ERROR_SUCCESS) {
+        return false;
+    }
+
+    DWORD enabled = 0;
+    DWORD enabledType = 0;
+    DWORD enabledBytes = sizeof(enabled);
+    const LONG enabledResult = RegQueryValueExW(
+        key,
+        L"Enabled",
+        nullptr,
+        &enabledType,
+        reinterpret_cast<BYTE*>(&enabled),
+        &enabledBytes);
+
+    std::wstring endpoint;
+    std::wstring realtime;
+    const bool endpointOk = ReadRegistryString(key, L"EndpointId", endpoint);
+    const bool realtimeOk = ReadRegistryString(key, L"RealtimeDll", realtime);
+    RegCloseKey(key);
+
+    if (enabledResult != ERROR_SUCCESS ||
+        enabledType != REG_DWORD ||
+        enabledBytes != sizeof(enabled) ||
+        enabled != 1 ||
+        !endpointOk ||
+        !realtimeOk) {
+        return false;
+    }
+
+    const DWORD attributes = GetFileAttributesW(realtime.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return false;
+    }
+
+    config.enabled = true;
+    config.endpointId = std::move(endpoint);
+    config.realtimeDll = std::move(realtime);
+    return true;
 }
 
 class ProbeFormatEnumerator final : public IAudioFormatEnumerator {
@@ -179,9 +284,8 @@ public:
         if (!value) {
             return E_POINTER;
         }
-        // Static transport is being built first. Dynamic XYZ capacity remains
-        // zero until identity, position updates, lifetime, and realtime transport
-        // exist as a separate truthful contract.
+        // Dynamic XYZ is intentionally not advertised until its continuous
+        // identity/position transport reaches the same live provider path.
         *value = 0;
         return S_OK;
     }
@@ -217,23 +321,40 @@ public:
     }
 
     HRESULT STDMETHODCALLTYPE IsSpatialAudioStreamAvailable(
-        REFIID,
+        REFIID streamUuid,
         const PROPVARIANT*) override {
-        // Internal COM -> Current transport now exists in source, but the final
-        // Windows output/cadence boundary is not yet proven. Keep the provider
-        // closed so an application can never submit audio to a silent sink.
-        return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+        if (!IsEqualIID(streamUuid, __uuidof(ISpatialAudioObjectRenderStream))) {
+            return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+        }
+        ProviderConfig config;
+        return LoadProviderConfig(config)
+            ? S_OK
+            : SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
     }
 
     HRESULT STDMETHODCALLTYPE ActivateSpatialAudioStream(
-        const PROPVARIANT*,
-        REFIID,
+        const PROPVARIANT* activationParams,
+        REFIID riid,
         void** stream) override {
         if (!stream) {
             return E_POINTER;
         }
         *stream = nullptr;
-        return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+        if (!IsEqualIID(riid, __uuidof(ISpatialAudioObjectRenderStream))) {
+            return E_NOINTERFACE;
+        }
+
+        ProviderConfig config;
+        if (!LoadProviderConfig(config)) {
+            return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+        }
+
+        return CreateOmniphonySpatialProviderStaticStreamFromActivation(
+            activationParams,
+            riid,
+            config.realtimeDll.c_str(),
+            config.endpointId.c_str(),
+            stream);
     }
 
 private:
@@ -308,6 +429,14 @@ private:
 };
 
 } // namespace
+
+void OmniphonySpatialProviderModuleAddRef() noexcept {
+    InterlockedIncrement(&g_liveReferences);
+}
+
+void OmniphonySpatialProviderModuleRelease() noexcept {
+    InterlockedDecrement(&g_liveReferences);
+}
 
 STDAPI DllGetClassObject(REFCLSID clsid, REFIID riid, LPVOID* object) {
     if (!object) {
