@@ -39,3 +39,8 @@ public:
 ExplorerPause g_explorerPause;
 
 } // namespace
+
+// Some probes keep an explicit pause guard for clarity. The actual pause is
+// owned by the translation-unit global above, so this hook intentionally does
+// nothing and merely provides a stable link target.
+void PauseIfExplorerLaunch() {}
