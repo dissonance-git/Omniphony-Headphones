@@ -39,7 +39,7 @@ void InsertLicenseResponse(ValueSet^ response, int status) {
 
 void SpatialLicenseService::Run(IBackgroundTaskInstance^ taskInstance)
 {
-    _taskDeferral = Platform::Agile<BackgroundTaskDeferral^>(taskInstance->GetDeferral());
+    _taskDeferral = Platform::Agile<BackgroundTaskDeferral>(taskInstance->GetDeferral());
     taskInstance->Canceled += ref new BackgroundTaskCanceledEventHandler(
         this, &SpatialLicenseService::OnCanceled);
 

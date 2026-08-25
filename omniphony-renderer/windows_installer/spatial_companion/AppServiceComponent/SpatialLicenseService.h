@@ -1,5 +1,7 @@
 #pragma once
 
+#include <collection.h>
+
 namespace OmniphonySpatialLicenseService
 {
     [Windows::Foundation::Metadata::WebHostHidden]
@@ -18,6 +20,6 @@ namespace OmniphonySpatialLicenseService
             Windows::ApplicationModel::AppService::AppServiceConnection^ sender,
             Windows::ApplicationModel::AppService::AppServiceRequestReceivedEventArgs^ args);
 
-        Platform::Agile<Windows::ApplicationModel::Background::BackgroundTaskDeferral^> _taskDeferral;
+        Platform::Agile<Windows::ApplicationModel::Background::BackgroundTaskDeferral> _taskDeferral;
     };
 }
