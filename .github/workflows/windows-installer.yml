@@ -135,6 +135,8 @@ jobs:
             'OmniphonySpatialProbe',
             'OmniphonySpatialProbeCtl',
             'OmniphonySpatialProbeSmoke',
+            'OmniphonySpatialObjectStreamSmoke',
+            'OmniphonySpatialObjectRealtimeSmoke',
             'OmniphonySpatialClosedGateEgressProbe'
           )) {
             cmake --build $build --config Release --target $target --parallel
@@ -145,19 +147,27 @@ jobs:
           $provider = Join-Path $release 'OmniphonySpatialProbe.dll'
           $control = Join-Path $release 'OmniphonySpatialProbeCtl.exe'
           $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
+          $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
+          $objectRealtimeSmoke = Join-Path $release 'OmniphonySpatialObjectRealtimeSmoke.exe'
           $closedGate = Join-Path $release 'OmniphonySpatialClosedGateEgressProbe.exe'
-          foreach ($file in @($provider, $control, $smoke, $closedGate)) {
+          foreach ($file in @($provider, $control, $smoke, $objectStreamSmoke, $objectRealtimeSmoke, $closedGate)) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
               throw "Spatial provider build output is missing: $file"
             }
           }
+
+          & $objectStreamSmoke
+          if ($LASTEXITCODE -ne 0) { throw "Spatial dynamic object COM smoke failed: $LASTEXITCODE" }
+
+          & $objectRealtimeSmoke $env:OMNIPHONY_REALTIME_DLL
+          if ($LASTEXITCODE -ne 0) { throw "Spatial object realtime ABI 0.6 smoke failed: $LASTEXITCODE" }
 
           # CI deliberately has no HKLM\SOFTWARE\Omniphony\SpatialProvider gate.
           # The provider must therefore expose capabilities but reject public
           # stream activation while still proving its complete DLL links/loads.
           & $smoke $provider
           if ($LASTEXITCODE -ne 0) { throw "Spatial provider fail-closed COM smoke failed: $LASTEXITCODE" }
-          Write-Host "SPATIAL_PROVIDER_BUILD_OK dll=$provider"
+          Write-Host "SPATIAL_PROVIDER_BUILD_OK dll=$provider static_objects=17 dynamic_objects=16"
           Write-Host "CLOSED_GATE_EGRESS_PROBE_BUILD_OK file=$closedGate"
 
       - name: Build physical endpoint control helper
@@ -306,7 +316,7 @@ jobs:
           Write-Host '  Omniphony\support\OmniphonyTray.ps1'
           Write-Host '  Omniphony\support\OmniphonySpatialProbe.exe (read-only capability probe)'
           Write-Host '  Omniphony\support\OmniphonySpatialProviderProbe.exe (read-only provider/COM probe)'
-          Write-Host '  Omniphony\support\OmniphonySpatialProbe.dll (opt-in static Spatial Sound provider)'
+          Write-Host '  Omniphony\support\OmniphonySpatialProbe.dll (opt-in static + dynamic Spatial Sound provider)'
           Write-Host '  Omniphony\support\OmniphonySpatialProbeCtl.exe (provider registration control)'
           Write-Host '  Omniphony\support\Enable-OmniphonySpatialProvider.ps1 (explicit provider gate)'
           Write-Host '  Omniphony\support\Disable-OmniphonySpatialProvider.ps1 (provider rollback)'
@@ -356,7 +366,7 @@ jobs:
           $repo = $env:GITHUB_REPOSITORY
           $sha = $env:GITHUB_SHA
           $asset = 'dist/OmniphonySetup.exe'
-          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, native-surround 7.1.4 stream smoke, and fail-closed Spatial Sound provider COM smoke passed."
+          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, native-surround 7.1.4 stream smoke, static/dynamic Spatial Sound object COM smoke, realtime object ABI 0.6 moving-XYZ smoke, and fail-closed provider COM smoke passed."
 
           gh release view windows-current --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
