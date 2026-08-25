@@ -133,3 +133,17 @@ set_target_properties(OmniphonySpatialLicenseEtlProbeV15 PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../../../dist/Omniphony-Spatial-Companion"
 )
+
+add_executable(OmniphonySpatialMediaMetadataProbeV16
+    OmniphonySpatialMediaMetadataProbeV16.cpp
+    ExplorerPause.cpp
+)
+target_compile_features(OmniphonySpatialMediaMetadataProbeV16 PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialMediaMetadataProbeV16 PRIVATE UNICODE _UNICODE NOMINMAX)
+target_compile_options(OmniphonySpatialMediaMetadataProbeV16 PRIVATE /W4 /permissive-)
+target_link_libraries(OmniphonySpatialMediaMetadataProbeV16 PRIVATE windowsapp ole32)
+set_target_properties(OmniphonySpatialMediaMetadataProbeV16 PROPERTIES
+    LINK_FLAGS "/MANIFESTUAC:\"level='asInvoker' uiAccess='false'\""
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../../../dist/Omniphony-Spatial-Companion"
+)
