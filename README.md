@@ -175,6 +175,36 @@ The finished stereo master remains protected. Omniphony may analyze it to infer 
 
 The stereo path therefore combines protected source material with bounded evidence-derived spatial support rather than treating a two-channel master as if it were an authored object scene.
 
+### Current listening baseline
+
+The retained stereo Current listening state is the `ddeb0b15` lineage.
+
+Its accepted structure is:
+
+```text
+protected stereo master
++ coherent foundation
++ 17-lane evidence-derived support field
+        ↓
+22-direction cascaded Current shell
+        ↓
+SAF/KEMAR binaural render
+        ↓
+Noire X output profile
+        ↓
+stereo-linked transient enhancement
+        ↓
+output trim
+        ↓
+final peak guard
+```
+
+The frontal-hemisphere correction is physically accepted: the front now has real occupancy rather than leaving the convincing side/rear shell perceptually dominant. In the 1.2–5 kHz presence band, the derived field transfers 30% of existing rear support forward at baseline and up to 38% with stable frontal-anchor evidence. Top-rear support transfers top-front at 18% baseline and up to 22% with the same bounded evidence. These are sum-preserving transfers of already-earned support, not copied wet energy or a synthetic center channel; side support remains intact.
+
+The Noire X Enhancement is a restrained production-style transient designer. Its audible action remains one stereo-linked broadband gain, while the detector may use frequency-aware analysis to decide which attacks should drive that gain. The attack/sustain form is retained as beneficial; the frequency-aware detector remains independently revisable if later isolated listening reveals a cost.
+
+The next stereo spatial frontier is **frontal depth and externalization, not more frontal quantity**. Further work should prefer physically motivated front-specific early-field structure, binaural reflection cues, distance evidence, and other bounded externalization mechanisms over additional global rear-to-front transfer, synthetic-center duplication, widening, or extra late reverb.
+
 ## Native surround and height
 
 When Windows or another host supplies authored multichannel PCM, Omniphony maps the supplied channel mask directly into authored source positions and bypasses stereo spatial inference for those channels.
