@@ -1,14 +1,33 @@
 [CmdletBinding()]
 param(
-    [string]$ProviderDll = (Join-Path $PSScriptRoot 'OmniphonySpatialProbe.dll'),
-    [string]$ControlPath = (Join-Path $PSScriptRoot 'OmniphonySpatialProbeCtl.exe'),
-    [string]$RealtimeDll = (Join-Path (Split-Path -Parent $PSScriptRoot) 'APO\omniphony_realtime.dll'),
-    [string]$EndpointStatePath = (Join-Path $env:ProgramData 'Omniphony\endpoint-backup.json'),
-    [string]$ReceiptPath = (Join-Path $env:ProgramData 'Omniphony\spatial-provider-last.json')
+    [string]$ProviderDll = '',
+    [string]$ControlPath = '',
+    [string]$RealtimeDll = '',
+    [string]$EndpointStatePath = '',
+    [string]$ReceiptPath = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 can evaluate script parameter defaults before
+# $PSScriptRoot is populated. Resolve install-relative defaults only after the
+# param block so the shipped tray helper works on stock Windows PowerShell.
+if ([string]::IsNullOrWhiteSpace($ProviderDll)) {
+    $ProviderDll = Join-Path $PSScriptRoot 'OmniphonySpatialProbe.dll'
+}
+if ([string]::IsNullOrWhiteSpace($ControlPath)) {
+    $ControlPath = Join-Path $PSScriptRoot 'OmniphonySpatialProbeCtl.exe'
+}
+if ([string]::IsNullOrWhiteSpace($RealtimeDll)) {
+    $RealtimeDll = Join-Path (Split-Path -Parent $PSScriptRoot) 'APO\omniphony_realtime.dll'
+}
+if ([string]::IsNullOrWhiteSpace($EndpointStatePath)) {
+    $EndpointStatePath = Join-Path $env:ProgramData 'Omniphony\endpoint-backup.json'
+}
+if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
+    $ReceiptPath = Join-Path $env:ProgramData 'Omniphony\spatial-provider-last.json'
+}
 
 $ConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
 
