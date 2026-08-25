@@ -52,7 +52,7 @@ foreach ($path in @($companionExe, $serviceDll, $serviceWinmd)) {
 Copy-Item -LiteralPath $companionExe -Destination $PackageRoot -Force
 Copy-Item -LiteralPath $serviceDll -Destination $PackageRoot -Force
 Copy-Item -LiteralPath $serviceWinmd -Destination $PackageRoot -Force
-Copy-Item -LiteralPath (Join-Path $SourceRoot 'Package.appxmanifest') -Destination $PackageRoot -Force
+Copy-Item -LiteralPath (Join-Path $SourceRoot 'Package.appxmanifest') -Destination (Join-Path $PackageRoot 'AppxManifest.xml') -Force
 
 $assets = Join-Path $PackageRoot 'Assets'
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
