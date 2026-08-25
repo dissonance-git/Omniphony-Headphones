@@ -56,14 +56,15 @@ const REAR_COHERENT_HEIGHT_TRANSFER: [f32; 3] = [0.12, 0.32, 0.28];
 
 /// Front weighting is a transfer, not a gain or copied wet path. Existing rear
 /// support is moved sample-for-sample into the matching front lane, preserving
-/// the algebraic front+rear sum before binaural rendering. The fixed base makes
-/// the front stronger for all earned shell material. Stable frontal-anchor
-/// evidence adds a bounded extra bias so primary musical structure receives a
-/// firmer front frame without inventing an authored center channel.
-const REAR_TO_FRONT_BASE_TRANSFER: [f32; 3] = [0.14, 0.22, 0.16];
-const REAR_TO_FRONT_ANCHOR_BONUS: [f32; 3] = [0.04, 0.06, 0.04];
-const TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER: [f32; 3] = [0.08, 0.14, 0.10];
-const TOP_REAR_TO_TOP_FRONT_ANCHOR_BONUS: [f32; 3] = [0.02, 0.03, 0.02];
+/// the algebraic front+rear sum before binaural rendering. Physical listening
+/// still found the frontal hemisphere under-filled relative to the convincing
+/// rear/side shell, so this stage now gives the front materially more occupancy,
+/// especially in the 1.2-5 kHz presence band. Stable frontal-anchor evidence
+/// adds a bounded extra bias without inventing an authored center channel.
+const REAR_TO_FRONT_BASE_TRANSFER: [f32; 3] = [0.20, 0.30, 0.22];
+const REAR_TO_FRONT_ANCHOR_BONUS: [f32; 3] = [0.06, 0.08, 0.06];
+const TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER: [f32; 3] = [0.11, 0.18, 0.13];
+const TOP_REAR_TO_TOP_FRONT_ANCHOR_BONUS: [f32; 3] = [0.03, 0.04, 0.03];
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MusicFieldSnapshot {
@@ -546,7 +547,7 @@ mod tests {
             let mut r = rear;
             let mut f = 0.20_f32;
             let before = r + f;
-            transfer_forward(&mut r, &mut f, 0.28);
+            transfer_forward(&mut r, &mut f, 0.38);
             assert!((r + f - before).abs() < 1.0e-6);
             assert!(r.abs() < rear.abs());
         }
@@ -562,13 +563,17 @@ mod tests {
     }
 
     #[test]
-    fn stable_anchor_can_strengthen_front_beyond_the_previous_fixed_candidate() {
+    fn frontal_hemisphere_is_materially_stronger_without_erasing_the_rear() {
         let band = 1usize;
         let anchored = REAR_TO_FRONT_BASE_TRANSFER[band] + REAR_TO_FRONT_ANCHOR_BONUS[band];
-        assert!(REAR_TO_FRONT_BASE_TRANSFER[band] > 0.16);
-        assert!(anchored > 0.24);
+        let elevated = TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER[band]
+            + TOP_REAR_TO_TOP_FRONT_ANCHOR_BONUS[band];
+        assert!(REAR_TO_FRONT_BASE_TRANSFER[band] >= 0.30);
+        assert!(anchored >= 0.38);
         assert!(anchored <= 0.40);
-        assert!(TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER[band] > 0.10);
+        assert!(TOP_REAR_TO_TOP_FRONT_BASE_TRANSFER[band] >= 0.18);
+        assert!(elevated >= 0.22);
+        assert!(elevated < anchored);
     }
 
     #[test]
