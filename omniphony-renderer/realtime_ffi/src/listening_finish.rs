@@ -6,9 +6,11 @@
 //! widened, decorrelated, delayed, or otherwise re-authored here.
 //!
 //! The single `Noire X Enhancement` switch is intentionally conservative. It
-//! uses linked fast/slow envelopes to give short musical attacks a little more
-//! crest and microdynamic contrast, leaning into the headphone's low distortion
-//! and fast planar transient behavior without adding saturation or another EQ.
+//! uses linked fast/slow envelopes as a production-style transient designer:
+//! short attacks earn a little extra crest while falling/sustain regions receive
+//! a much smaller relief. This increases attack-to-body contrast without relying
+//! on a large peak boost, leaning into the headphone's low distortion and fast
+//! planar transient behavior without adding saturation, widening, or another EQ.
 //! Output trim is a separate user preference and is still bounded by the final
 //! peak guard owned by `lib.rs`.
 
@@ -23,8 +25,10 @@ const OUTPUT_TRIM_FILE_NAME: &str = "output-trim.txt";
 
 const FAST_ENVELOPE_MS: f32 = 2.5;
 const SLOW_ENVELOPE_MS: f32 = 42.0;
-const MAX_TRANSIENT_LIFT_DB: f32 = 0.90;
+const MAX_ATTACK_LIFT_DB: f32 = 1.00;
+const MAX_SUSTAIN_RELIEF_DB: f32 = 0.18;
 const TRANSIENT_FULL_SCALE: f32 = 1.35;
+const SUSTAIN_FULL_SCALE: f32 = 0.65;
 const DEFAULT_OUTPUT_TRIM_DB: f32 = 1.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,13 +121,23 @@ impl ListeningFinish {
                 self.fast_energy += self.fast_alpha * (linked_energy - self.fast_energy);
                 self.slow_energy += self.slow_alpha * (linked_energy - self.slow_energy);
 
-                // Only positive fast-vs-slow energy earns extra attack. The
-                // denominator is intentionally floor-limited so silence/noise
-                // cannot produce a huge gain command.
+                // A production transient designer treats the rising and falling
+                // sides of the local envelope separately. Rising fast-vs-slow
+                // energy earns a bounded attack lift. Falling fast-vs-slow energy
+                // receives only a tiny sustain relief. The latter makes the hit
+                // feel larger mostly through contrast rather than peak level.
+                // Both terms use the same linked detector and one broadband gain,
+                // so binaural left/right relationships remain untouched.
                 let positive_rise = (self.fast_energy - self.slow_energy).max(0.0);
                 let relative_rise = positive_rise / (self.slow_energy + 1.0e-7);
                 let transient = (relative_rise / TRANSIENT_FULL_SCALE).clamp(0.0, 1.0);
-                let linked_gain = db_to_gain(MAX_TRANSIENT_LIFT_DB * transient);
+
+                let positive_fall = (self.slow_energy - self.fast_energy).max(0.0);
+                let relative_fall = positive_fall / (self.slow_energy + 1.0e-7);
+                let sustain = (relative_fall / SUSTAIN_FULL_SCALE).clamp(0.0, 1.0);
+
+                let gain_db = MAX_ATTACK_LIFT_DB * transient - MAX_SUSTAIN_RELIEF_DB * sustain;
+                let linked_gain = db_to_gain(gain_db);
                 left *= linked_gain;
                 right *= linked_gain;
             } else {
@@ -213,6 +227,14 @@ mod tests {
     }
 
     #[test]
+    fn attack_lift_and_sustain_relief_are_bounded() {
+        assert!(MAX_ATTACK_LIFT_DB > 0.90);
+        assert!(MAX_ATTACK_LIFT_DB <= 1.0);
+        assert!(MAX_SUSTAIN_RELIEF_DB > 0.0);
+        assert!(MAX_SUSTAIN_RELIEF_DB < MAX_ATTACK_LIFT_DB);
+    }
+
+    #[test]
     fn enhancement_gain_is_bounded() {
         let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
         let mut samples = vec![0.0_f32; 1024 * 2];
@@ -222,7 +244,37 @@ mod tests {
         }
         finish.process_interleaved(&mut samples);
         let max = samples.iter().fold(0.0_f32, |a, &b| a.max(b.abs()));
-        assert!(max <= db_to_gain(MAX_TRANSIENT_LIFT_DB) + 1.0e-5);
+        assert!(max <= db_to_gain(MAX_ATTACK_LIFT_DB) + 1.0e-5);
+    }
+
+    #[test]
+    fn falling_envelope_gets_small_sustain_relief() {
+        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
+        let steady_frames = 4096usize;
+        let tail_frames = 1024usize;
+        let mut samples = vec![0.0_f32; (steady_frames + tail_frames) * 2];
+
+        for frame in 0..steady_frames {
+            samples[frame * 2] = 0.5;
+            samples[frame * 2 + 1] = -0.25;
+        }
+        for frame in steady_frames..(steady_frames + tail_frames) {
+            samples[frame * 2] = 0.15;
+            samples[frame * 2 + 1] = -0.075;
+        }
+
+        finish.process_interleaved(&mut samples);
+
+        let mut min_gain = 1.0_f32;
+        for frame in steady_frames..(steady_frames + tail_frames) {
+            let gain = samples[frame * 2] / 0.15;
+            min_gain = min_gain.min(gain);
+            let right_gain = samples[frame * 2 + 1] / -0.075;
+            assert!((gain - right_gain).abs() < 1.0e-5);
+        }
+
+        assert!(min_gain < 1.0);
+        assert!(min_gain >= db_to_gain(-MAX_SUSTAIN_RELIEF_DB) - 1.0e-5);
     }
 
     #[test]
