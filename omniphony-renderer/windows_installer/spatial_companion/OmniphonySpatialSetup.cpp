@@ -1,6 +1,6 @@
 #include <windows.h>
-#include <shellapi.h>
 #include <shlwapi.h>
+#include <userenv.h>
 #include <wincrypt.h>
 #include <mmdeviceapi.h>
 
@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -40,6 +41,32 @@ static_assert(sizeof(BundleFooter) == 32, "Bundle footer layout drifted.");
 struct BundleLayout {
     std::uint64_t payloadOffset = 0;
     BundleFooter footer{};
+};
+
+struct UniqueHandle {
+    HANDLE value = nullptr;
+
+    UniqueHandle() = default;
+    explicit UniqueHandle(HANDLE handle) : value(handle) {}
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+    UniqueHandle(UniqueHandle&& other) noexcept : value(other.value) { other.value = nullptr; }
+    UniqueHandle& operator=(UniqueHandle&& other) noexcept {
+        if (this != &other) {
+            if (value != nullptr && value != INVALID_HANDLE_VALUE) {
+                CloseHandle(value);
+            }
+            value = other.value;
+            other.value = nullptr;
+        }
+        return *this;
+    }
+    ~UniqueHandle() {
+        if (value != nullptr && value != INVALID_HANDLE_VALUE) {
+            CloseHandle(value);
+        }
+    }
+    explicit operator bool() const { return value != nullptr && value != INVALID_HANDLE_VALUE; }
 };
 
 std::wstring Win32Message(DWORD error) {
@@ -71,7 +98,7 @@ std::filesystem::path SelfPath() {
     return std::filesystem::path(std::wstring(buffer.data(), length));
 }
 
-bool InspectBundle(const std::filesystem::path& path, BundleLayout& layout) {
+bool InspectBundle(const std::filesystem::path& path, BundleLayout& layout, bool emitMarkers = true) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) {
         std::wcerr << L"SPATIAL_SETUP_BUNDLE_OPEN_ERROR\t" << path << L"\n";
@@ -108,10 +135,12 @@ bool InspectBundle(const std::filesystem::path& path, BundleLayout& layout) {
 
     layout.payloadOffset = totalSize - sizeof(BundleFooter) - payloadSize;
     layout.footer = footer;
-    std::wcout << L"SPATIAL_SETUP_BUNDLE_MAGIC_OK\t1\n";
-    std::wcout << L"SPATIAL_SETUP_BUNDLE_LENGTHS_OK\t1\n";
-    std::wcout << L"SPATIAL_SETUP_EMBEDDED_MSIX_BYTES\t" << footer.msixSize << L"\n";
-    std::wcout << L"SPATIAL_SETUP_EMBEDDED_CERT_BYTES\t" << footer.certificateSize << L"\n";
+    if (emitMarkers) {
+        std::wcout << L"SPATIAL_SETUP_BUNDLE_MAGIC_OK\t1\n";
+        std::wcout << L"SPATIAL_SETUP_BUNDLE_LENGTHS_OK\t1\n";
+        std::wcout << L"SPATIAL_SETUP_EMBEDDED_MSIX_BYTES\t" << footer.msixSize << L"\n";
+        std::wcout << L"SPATIAL_SETUP_EMBEDDED_CERT_BYTES\t" << footer.certificateSize << L"\n";
+    }
     return true;
 }
 
@@ -326,10 +355,69 @@ std::wstring InstalledPackageFamilyName() {
             return std::wstring(package.Id().FamilyName().c_str());
         }
     }
-    throw std::runtime_error("Installed Omniphony spatial companion package family was not found.");
+    throw std::runtime_error("Installed Omniphony spatial companion package family was not found for the current user.");
 }
 
-int RegisterMediaExtensionFromBootstrap() {
+DWORD TokenIntegrityRid(HANDLE token) {
+    DWORD required = 0;
+    GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &required);
+    if (required == 0) {
+        throw std::runtime_error("GetTokenInformation(TokenIntegrityLevel) failed");
+    }
+
+    std::vector<std::uint8_t> buffer(required);
+    if (!GetTokenInformation(token, TokenIntegrityLevel, buffer.data(), required, &required)) {
+        throw std::runtime_error("GetTokenInformation(TokenIntegrityLevel) failed");
+    }
+
+    const auto label = reinterpret_cast<TOKEN_MANDATORY_LABEL*>(buffer.data());
+    const auto count = GetSidSubAuthorityCount(label->Label.Sid);
+    if (count == nullptr || *count == 0) {
+        throw std::runtime_error("Token integrity SID is invalid");
+    }
+    return *GetSidSubAuthority(label->Label.Sid, *count - 1);
+}
+
+bool TokenElevated(HANDLE token) {
+    TOKEN_ELEVATION elevation{};
+    DWORD size = 0;
+    if (!GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size)) {
+        throw std::runtime_error("GetTokenInformation(TokenElevation) failed");
+    }
+    return elevation.TokenIsElevated != 0;
+}
+
+const wchar_t* IntegrityName(DWORD rid) {
+    if (rid < SECURITY_MANDATORY_LOW_RID) {
+        return L"Untrusted";
+    }
+    if (rid < SECURITY_MANDATORY_MEDIUM_RID) {
+        return L"Low";
+    }
+    if (rid < SECURITY_MANDATORY_HIGH_RID) {
+        return L"Medium";
+    }
+    if (rid < SECURITY_MANDATORY_SYSTEM_RID) {
+        return L"High";
+    }
+    return L"System";
+}
+
+void PrintCurrentIntegrity(const wchar_t* phase) {
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken)) {
+        throw std::runtime_error("OpenProcessToken failed");
+    }
+    UniqueHandle token(rawToken);
+    const DWORD rid = TokenIntegrityRid(token.value);
+    std::wcout << L"SPATIAL_SETUP_PHASE\t" << phase << L"\n";
+    std::wcout << L"SPATIAL_SETUP_PROCESS_INTEGRITY\t" << IntegrityName(rid) << L"\n";
+    std::wcout << L"SPATIAL_SETUP_PROCESS_INTEGRITY_RID\t0x"
+               << std::hex << std::uppercase << rid << std::dec << L"\n";
+    std::wcout << L"SPATIAL_SETUP_PROCESS_ELEVATED\t" << (TokenElevated(token.value) ? 1 : 0) << L"\n";
+}
+
+int RegisterMediaExtensionFromCurrentProcess() {
     using RegisterMediaExtensionPackageFn = HRESULT(WINAPI*)(PCWSTR);
 
     const auto familyName = InstalledPackageFamilyName();
@@ -463,43 +551,51 @@ std::filesystem::path TemporaryDirectory() {
         (L"OmniphonySpatialSetup-" + std::to_wstring(GetCurrentProcessId()));
 }
 
-void MaybePauseForExplorerLaunch() {
-    DWORD processIds[4]{};
-    const DWORD count = GetConsoleProcessList(processIds, static_cast<DWORD>(std::size(processIds)));
-    if (count <= 1) {
-        std::wcout << L"\nPress Enter to close..." << std::flush;
-        std::wstring ignored;
-        std::getline(std::wcin, ignored);
-    }
-}
+int UserPhaseVerify(const std::filesystem::path& self) {
+    PrintCurrentIntegrity(L"USER_MEDIUM");
 
-int InstallAndVerify(const std::filesystem::path& self, const BundleLayout& layout) {
+    HANDLE currentRaw = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &currentRaw)) {
+        throw std::runtime_error("OpenProcessToken failed in user phase");
+    }
+    UniqueHandle currentToken(currentRaw);
+    const DWORD currentRid = TokenIntegrityRid(currentToken.value);
+    if (currentRid < SECURITY_MANDATORY_MEDIUM_RID || currentRid >= SECURITY_MANDATORY_HIGH_RID) {
+        std::wcout << L"SPATIAL_SETUP_USER_PHASE_MEDIUM_OK\t0\n";
+        return 24;
+    }
+    std::wcout << L"SPATIAL_SETUP_USER_PHASE_MEDIUM_OK\t1\n";
+
+    BundleLayout layout{};
+    if (!InspectBundle(self, layout, false)) {
+        return 10;
+    }
+
     const auto temp = TemporaryDirectory();
     std::error_code ec;
     std::filesystem::remove_all(temp, ec);
-
     std::filesystem::path msix;
     std::filesystem::path certificate;
     if (!ExtractBundle(self, layout, temp, msix, certificate)) {
         return 20;
     }
 
-    std::wcout << L"SPATIAL_SETUP_ACTION\tTrust embedded Omniphony development certificate in LocalMachine\\TrustedPeople\n";
-    if (!TrustDevelopmentCertificate(certificate)) {
-        std::filesystem::remove_all(temp, ec);
-        return 21;
-    }
-
-    std::wcout << L"SPATIAL_SETUP_ACTION\tInstall embedded signed MSIX for current user\n";
+    std::wcout << L"SPATIAL_SETUP_ACTION\tInstall embedded signed MSIX for interactive user at medium integrity\n";
     if (!InstallPackage(msix)) {
         std::filesystem::remove_all(temp, ec);
         return 22;
     }
 
-    std::wcout << L"SPATIAL_SETUP_ACTION\tRegister installed media extension from elevated full-trust bootstrap\n";
-    if (RegisterMediaExtensionFromBootstrap() != 0) {
-        std::filesystem::remove_all(temp, ec);
-        return 23;
+    std::wcout << L"SPATIAL_SETUP_ACTION\tRegister installed media extension from medium-integrity desktop process\n";
+    int registerExit = RegisterMediaExtensionFromCurrentProcess();
+    if (registerExit != 0) {
+        std::wcout << L"SPATIAL_SETUP_ACTION\tRetry media-extension registration from medium-integrity package identity\n";
+        registerExit = LaunchPackagedCommand(L"register", L"SPATIAL_SETUP_PACKAGED_REGISTER_EXIT_CODE");
+        if (registerExit != 0) {
+            std::filesystem::remove_all(temp, ec);
+            return registerExit;
+        }
+        std::wcout << L"SPATIAL_SETUP_PACKAGED_REGISTERED\t1\n";
     }
 
     const auto endpointId = DefaultRenderEndpointId();
@@ -525,12 +621,138 @@ int InstallAndVerify(const std::filesystem::path& self, const BundleLayout& layo
     return selectExit;
 }
 
+int LaunchMediumIntegrityUserPhase(const std::filesystem::path& self) {
+    const HWND shellWindow = GetShellWindow();
+    if (shellWindow == nullptr) {
+        std::wcerr << L"SPATIAL_SETUP_SHELL_WINDOW_OK\t0\n";
+        return 24;
+    }
+
+    DWORD shellProcessId = 0;
+    GetWindowThreadProcessId(shellWindow, &shellProcessId);
+    if (shellProcessId == 0) {
+        std::wcerr << L"SPATIAL_SETUP_SHELL_PROCESS_OK\t0\n";
+        return 24;
+    }
+
+    UniqueHandle shellProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, shellProcessId));
+    if (!shellProcess) {
+        const DWORD error = GetLastError();
+        std::wcerr << L"SPATIAL_SETUP_SHELL_PROCESS_OK\t0\t" << error
+                   << L"\t" << Win32Message(error) << L"\n";
+        return 24;
+    }
+
+    HANDLE shellTokenRaw = nullptr;
+    if (!OpenProcessToken(
+            shellProcess.value,
+            TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY,
+            &shellTokenRaw)) {
+        const DWORD error = GetLastError();
+        std::wcerr << L"SPATIAL_SETUP_SHELL_TOKEN_OK\t0\t" << error
+                   << L"\t" << Win32Message(error) << L"\n";
+        return 24;
+    }
+    UniqueHandle shellToken(shellTokenRaw);
+
+    const DWORD shellRid = TokenIntegrityRid(shellToken.value);
+    const bool shellMedium = shellRid >= SECURITY_MANDATORY_MEDIUM_RID && shellRid < SECURITY_MANDATORY_HIGH_RID;
+    std::wcout << L"SPATIAL_SETUP_SHELL_TOKEN_INTEGRITY\t" << IntegrityName(shellRid) << L"\n";
+    std::wcout << L"SPATIAL_SETUP_SHELL_TOKEN_MEDIUM\t" << (shellMedium ? 1 : 0) << L"\n";
+    if (!shellMedium) {
+        return 24;
+    }
+
+    LPVOID environment = nullptr;
+    if (!CreateEnvironmentBlock(&environment, shellToken.value, FALSE)) {
+        const DWORD error = GetLastError();
+        std::wcerr << L"SPATIAL_SETUP_USER_ENVIRONMENT_OK\t0\t" << error
+                   << L"\t" << Win32Message(error) << L"\n";
+        return 24;
+    }
+
+    std::wstring commandLine = L"\"" + self.wstring() + L"\" --user-phase";
+    std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
+    mutableCommand.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    const auto currentDirectory = self.parent_path();
+
+    const BOOL created = CreateProcessWithTokenW(
+        shellToken.value,
+        0,
+        self.c_str(),
+        mutableCommand.data(),
+        CREATE_UNICODE_ENVIRONMENT,
+        environment,
+        currentDirectory.c_str(),
+        &startup,
+        &process);
+    const DWORD createError = created ? ERROR_SUCCESS : GetLastError();
+    DestroyEnvironmentBlock(environment);
+
+    if (!created) {
+        std::wcerr << L"SPATIAL_SETUP_USER_PHASE_LAUNCHED\t0\t" << createError
+                   << L"\t" << Win32Message(createError) << L"\n";
+        return 24;
+    }
+
+    std::wcout << L"SPATIAL_SETUP_USER_PHASE_LAUNCHED\t1\n";
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    std::wcout << L"SPATIAL_SETUP_USER_PHASE_EXIT_CODE\t" << exitCode << L"\n";
+    return static_cast<int>(exitCode);
+}
+
+void MaybePauseForExplorerLaunch() {
+    DWORD processIds[4]{};
+    const DWORD count = GetConsoleProcessList(processIds, static_cast<DWORD>(std::size(processIds)));
+    if (count <= 1) {
+        std::wcout << L"\nPress Enter to close..." << std::flush;
+        std::wstring ignored;
+        std::getline(std::wcin, ignored);
+    }
+}
+
+int AdminPhase(const std::filesystem::path& self, const BundleLayout& layout) {
+    PrintCurrentIntegrity(L"ADMIN_CERT_TRUST");
+
+    const auto temp = TemporaryDirectory();
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
+
+    std::filesystem::path msix;
+    std::filesystem::path certificate;
+    if (!ExtractBundle(self, layout, temp, msix, certificate)) {
+        return 20;
+    }
+
+    std::wcout << L"SPATIAL_SETUP_ACTION\tTrust embedded Omniphony development certificate in LocalMachine\\TrustedPeople\n";
+    if (!TrustDevelopmentCertificate(certificate)) {
+        std::filesystem::remove_all(temp, ec);
+        return 21;
+    }
+    std::filesystem::remove_all(temp, ec);
+
+    std::wcout << L"SPATIAL_SETUP_ACTION\tReturn to interactive user's medium-integrity token for package install and registration\n";
+    return LaunchMediumIntegrityUserPhase(self);
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         const auto self = SelfPath();
+
+        if (argc >= 2 && std::wstring(argv[1]) == L"--user-phase") {
+            return UserPhaseVerify(self);
+        }
+
         BundleLayout layout{};
         if (!InspectBundle(self, layout)) {
             MaybePauseForExplorerLaunch();
@@ -553,7 +775,7 @@ int wmain(int argc, wchar_t** argv) {
             return 11;
         }
 
-        const int result = InstallAndVerify(self, layout);
+        const int result = AdminPhase(self, layout);
         MaybePauseForExplorerLaunch();
         return result;
     } catch (const winrt::hresult_error& error) {
