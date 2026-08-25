@@ -137,6 +137,13 @@ try {
     # The provider must be live before Windows is asked to make it active.
     Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 1
 
+    # Registration writes and COM construction are not proof that the running
+    # Windows Audio graph has refreshed its spatial-provider inventory. Reopen
+    # the graph before asking the documented setter to select the new format.
+    Write-Host 'Refreshing Windows Audio provider inventory before selection...'
+    & $RestartAudioPath
+    Write-Host 'WINDOWS_SPATIAL_PROVIDER_REFRESH_OK 1'
+
     Write-Host "Selecting Omniphony headlessly for: $endpointName"
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('selection-select', $endpointId)
     $selectionCommitted = $true
