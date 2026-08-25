@@ -29,7 +29,7 @@ target_precompile_headers(OmniphonySpatialSetup PRIVATE
     <winrt/Windows.ApplicationModel.h>
     <winrt/Windows.Foundation.Collections.h>
 )
-target_link_libraries(OmniphonySpatialSetup PRIVATE windowsapp crypt32 shlwapi ole32)
+target_link_libraries(OmniphonySpatialSetup PRIVATE windowsapp crypt32 shlwapi ole32 advapi32 user32 userenv)
 set_target_properties(OmniphonySpatialSetup PROPERTIES
     LINK_FLAGS "/MANIFESTUAC:\"level='requireAdministrator' uiAccess='false'\""
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
