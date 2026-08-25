@@ -20,6 +20,7 @@ set_property(TARGET OmniphonySpatialCompanion PROPERTY
 
 add_executable(OmniphonySpatialSetup
     OmniphonySpatialSetup.cpp
+    PostSetupSpatialProbe.cpp
 )
 
 target_compile_features(OmniphonySpatialSetup PRIVATE cxx_std_17)
