@@ -17,7 +17,6 @@ using winrt::Windows::Media::Audio::SpatialAudioDeviceConfiguration;
 
 constexpr wchar_t kOmniphonyFormat[] = L"{4BD75423-A66C-4586-B782-1FCBBDF2AE74}";
 constexpr int kExitUsage = 2;
-constexpr int kExitUnsupported = 3;
 constexpr int kExitSetRejected = 4;
 constexpr int kExitReadback = 5;
 constexpr int kExitRuntime = 6;
@@ -67,10 +66,6 @@ void PrintState(const SpatialAudioDeviceConfiguration& config) {
 int Inspect(const wchar_t* endpointId, bool requireActive) {
     const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(endpointId);
     PrintState(config);
-    if (!config.IsSpatialAudioSupported() ||
-        !config.IsSpatialAudioFormatSupported(kOmniphonyFormat)) {
-        return kExitUnsupported;
-    }
     if (!IsOmniphony(config.DefaultSpatialAudioFormat())) {
         return kExitReadback;
     }
@@ -84,15 +79,7 @@ int Select(const wchar_t* endpointId) {
     const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(endpointId);
     std::wcout << L"BEFORE\n";
     PrintState(config);
-
-    if (!config.IsSpatialAudioSupported()) {
-        std::wcerr << L"ERROR\tEndpoint does not support Windows Spatial Audio.\n";
-        return kExitUnsupported;
-    }
-    if (!config.IsSpatialAudioFormatSupported(kOmniphonyFormat)) {
-        std::wcerr << L"ERROR\tWindows does not report the Omniphony format as supported on this endpoint.\n";
-        return kExitUnsupported;
-    }
+    std::wcout << L"CAPABILITY_FLAGS\tDIAGNOSTIC_ONLY\n";
 
     if (!IsOmniphony(config.DefaultSpatialAudioFormat())) {
         const auto result = config.SetDefaultSpatialAudioFormatAsync(kOmniphonyFormat).get();
@@ -122,6 +109,8 @@ void Contract() {
     std::wcout << L"FORMAT_GUID\t" << kOmniphonyFormat << L'\n';
     std::wcout << L"SELECTION_API\tWindows.Media.Audio.SpatialAudioDeviceConfiguration\n";
     std::wcout << L"SET_API\tSetDefaultSpatialAudioFormatAsync\n";
+    std::wcout << L"SELECTION_CAPABILITY_FLAGS\tDIAGNOSTIC_ONLY\n";
+    std::wcout << L"SELECTION_RESULT_AUTHORITY\tSetDefaultSpatialAudioFormatResult.Status\n";
     std::wcout << L"VERIFY_DEFAULT\t1\n";
     std::wcout << L"VERIFY_ACTIVE_SUPPORTED\t1\n";
     std::wcout << L"UNDOCUMENTED_FORMAT_ID_WRITES\t0\n";
