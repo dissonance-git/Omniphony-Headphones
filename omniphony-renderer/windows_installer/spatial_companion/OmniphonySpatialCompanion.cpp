@@ -1,16 +1,22 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <appmodel.h>
 #include <mmdeviceapi.h>
+#include <shobjidl_core.h>
 
 #include <winrt/base.h>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Audio.h>
 
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -20,6 +26,7 @@ using winrt::Windows::Media::Audio::SpatialAudioDeviceConfiguration;
 using winrt::Windows::Media::Audio::SpatialAudioFormatConfiguration;
 
 constexpr wchar_t kFormatGuid[] = L"{4BD75423-A66C-4586-B782-1FCBBDF2AE74}";
+constexpr wchar_t kApplicationId[] = L"Companion";
 
 const wchar_t* SelectionStatusText(SetDefaultSpatialAudioFormatStatus status) {
     switch (status) {
@@ -44,6 +51,109 @@ bool IsOmniphonyFormat(const winrt::hstring& value) {
     return _wcsicmp(value.c_str(), kFormatGuid) == 0;
 }
 
+DWORD TokenIntegrityRid(HANDLE token) {
+    DWORD required = 0;
+    GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &required);
+    if (required == 0) {
+        throw std::runtime_error("GetTokenInformation(TokenIntegrityLevel) failed");
+    }
+
+    std::vector<std::uint8_t> buffer(required);
+    if (!GetTokenInformation(token, TokenIntegrityLevel, buffer.data(), required, &required)) {
+        throw std::runtime_error("GetTokenInformation(TokenIntegrityLevel) failed");
+    }
+
+    const auto label = reinterpret_cast<TOKEN_MANDATORY_LABEL*>(buffer.data());
+    const auto count = GetSidSubAuthorityCount(label->Label.Sid);
+    if (count == nullptr || *count == 0) {
+        throw std::runtime_error("Token integrity SID is invalid");
+    }
+    return *GetSidSubAuthority(label->Label.Sid, *count - 1);
+}
+
+bool QueryTokenBool(HANDLE token, TOKEN_INFORMATION_CLASS infoClass) {
+    DWORD value = 0;
+    DWORD size = 0;
+    if (!GetTokenInformation(token, infoClass, &value, sizeof(value), &size)) {
+        throw std::runtime_error("GetTokenInformation boolean query failed");
+    }
+    return value != 0;
+}
+
+bool TokenElevated(HANDLE token) {
+    TOKEN_ELEVATION elevation{};
+    DWORD size = 0;
+    if (!GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size)) {
+        throw std::runtime_error("GetTokenInformation(TokenElevation) failed");
+    }
+    return elevation.TokenIsElevated != 0;
+}
+
+const wchar_t* IntegrityName(DWORD rid) {
+    if (rid < SECURITY_MANDATORY_LOW_RID) {
+        return L"Untrusted";
+    }
+    if (rid < SECURITY_MANDATORY_MEDIUM_RID) {
+        return L"Low";
+    }
+    if (rid < SECURITY_MANDATORY_HIGH_RID) {
+        return L"Medium";
+    }
+    if (rid < SECURITY_MANDATORY_SYSTEM_RID) {
+        return L"High";
+    }
+    return L"System";
+}
+
+std::wstring CurrentApplicationUserModelId(LONG& status) {
+    UINT32 length = 0;
+    status = GetCurrentApplicationUserModelId(&length, nullptr);
+    if (status != ERROR_INSUFFICIENT_BUFFER || length == 0) {
+        return {};
+    }
+
+    std::vector<wchar_t> buffer(length);
+    status = GetCurrentApplicationUserModelId(&length, buffer.data());
+    if (status != ERROR_SUCCESS) {
+        return {};
+    }
+    return std::wstring(buffer.data());
+}
+
+void PrintProcessTrustDiagnostics() {
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken)) {
+        std::wcout << L"PROCESS_TOKEN_QUERY_OK\t0\n";
+        return;
+    }
+
+    const DWORD rid = TokenIntegrityRid(rawToken);
+    const bool elevated = TokenElevated(rawToken);
+    const bool appContainer = QueryTokenBool(rawToken, TokenIsAppContainer);
+    CloseHandle(rawToken);
+
+    std::wcout << L"PROCESS_TOKEN_QUERY_OK\t1\n";
+    std::wcout << L"PROCESS_INTEGRITY\t" << IntegrityName(rid) << L'\n';
+    std::wcout << L"PROCESS_INTEGRITY_RID\t0x" << std::hex << std::uppercase << rid
+               << std::dec << L'\n';
+    std::wcout << L"PROCESS_ELEVATED\t" << (elevated ? 1 : 0) << L'\n';
+    std::wcout << L"PROCESS_TOKEN_IS_APPCONTAINER\t" << (appContainer ? 1 : 0) << L'\n';
+    std::wcout << L"PROCESS_TOKEN_FULL_TRUST_SHAPE\t"
+               << (!appContainer && rid >= SECURITY_MANDATORY_MEDIUM_RID &&
+                       rid < SECURITY_MANDATORY_HIGH_RID && !elevated
+                       ? 1
+                       : 0)
+               << L'\n';
+
+    LONG aumidStatus = ERROR_SUCCESS;
+    const auto aumid = CurrentApplicationUserModelId(aumidStatus);
+    std::wcout << L"CURRENT_AUMID_QUERY_STATUS\t" << aumidStatus << L'\n';
+    std::wcout << L"CURRENT_AUMID_PRESENT\t" << (!aumid.empty() ? 1 : 0) << L'\n';
+    if (!aumid.empty()) {
+        std::wcout << L"CURRENT_AUMID\t" << aumid << L'\n';
+    }
+}
+
 void PrintSelectionState(const SpatialAudioDeviceConfiguration& config) {
     const auto defaultFormat = config.DefaultSpatialAudioFormat();
     const auto activeFormat = config.ActiveSpatialAudioFormat();
@@ -65,10 +175,11 @@ int PrintIdentity() {
     std::wcout << L"PACKAGE_FULL_NAME\t" << id.FullName().c_str() << L'\n';
     std::wcout << L"PACKAGE_PUBLISHER_ID\t" << id.PublisherId().c_str() << L'\n';
     std::wcout << L"SPATIAL_FORMAT_GUID\t" << kFormatGuid << L'\n';
+    PrintProcessTrustDiagnostics();
     return 0;
 }
 
-int RegisterCurrentMediaExtension() {
+int RegisterCurrentMediaExtension(HRESULT* registrationResult = nullptr) {
     using RegisterMediaExtensionPackageFn = HRESULT(WINAPI*)(PCWSTR);
 
     const auto package = Package::Current();
@@ -78,6 +189,9 @@ int RegisterCurrentMediaExtension() {
         const auto error = GetLastError();
         std::wcout << L"MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t0\n";
         std::wcerr << L"ERROR\tCompPkgSup.dll unavailable\t" << error << L'\n';
+        if (registrationResult != nullptr) {
+            *registrationResult = HRESULT_FROM_WIN32(error);
+        }
         return 6;
     }
 
@@ -87,6 +201,9 @@ int RegisterCurrentMediaExtension() {
         std::wcout << L"MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t0\n";
         std::wcout << L"MEDIA_EXTENSION_REGISTER_REQUIRES_WINDOWS_11_24H2\t1\n";
         FreeLibrary(module);
+        if (registrationResult != nullptr) {
+            *registrationResult = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+        }
         return 6;
     }
 
@@ -95,13 +212,145 @@ int RegisterCurrentMediaExtension() {
     const HRESULT result = registerMediaExtensionPackage(familyName.c_str());
     FreeLibrary(module);
 
+    if (registrationResult != nullptr) {
+        *registrationResult = result;
+    }
     std::wcout << L"MEDIA_EXTENSION_REGISTER_HRESULT\t0x"
-               << std::hex << std::uppercase << static_cast<unsigned long>(result) << std::dec << L'\n';
+               << std::hex << std::uppercase << static_cast<std::uint32_t>(result) << std::dec << L'\n';
     if (FAILED(result)) {
+        std::wcout << L"MEDIA_EXTENSION_REGISTERED\t0\n";
         return 6;
     }
     std::wcout << L"MEDIA_EXTENSION_REGISTERED\t1\n";
     return 0;
+}
+
+std::filesystem::path ActivationProbeResultPath() {
+    wchar_t temp[32768]{};
+    const DWORD length = GetTempPathW(static_cast<DWORD>(std::size(temp)), temp);
+    if (length == 0 || length >= std::size(temp)) {
+        throw std::runtime_error("GetTempPathW failed for activation probe");
+    }
+    return std::filesystem::path(temp) /
+        (L"OmniphonySpatialRegisterAumid-" + std::to_wstring(GetCurrentProcessId()) + L".txt");
+}
+
+bool WriteActivationProbeResult(const std::filesystem::path& path, HRESULT hr) {
+    std::wofstream output(path, std::ios::trunc);
+    if (!output) {
+        return false;
+    }
+    output << L"0x" << std::hex << std::uppercase << static_cast<std::uint32_t>(hr) << L'\n';
+    return static_cast<bool>(output);
+}
+
+bool ReadActivationProbeResult(const std::filesystem::path& path, HRESULT& hr) {
+    std::wifstream input(path);
+    if (!input) {
+        return false;
+    }
+    std::wstring value;
+    input >> value;
+    if (value.size() < 3 || value.rfind(L"0x", 0) != 0) {
+        return false;
+    }
+    try {
+        const auto parsed = std::stoul(value.substr(2), nullptr, 16);
+        hr = static_cast<HRESULT>(static_cast<std::uint32_t>(parsed));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+int RegisterActivatedProbe(const wchar_t* resultPath) {
+    HRESULT registrationResult = E_FAIL;
+    const int exitCode = RegisterCurrentMediaExtension(&registrationResult);
+    const bool written = WriteActivationProbeResult(std::filesystem::path(resultPath), registrationResult);
+    return written ? exitCode : 10;
+}
+
+int ActivateRegisterThroughAumid() {
+    const auto package = Package::Current();
+    const std::wstring aumid = std::wstring(package.Id().FamilyName().c_str()) + L"!" + kApplicationId;
+    const auto resultPath = ActivationProbeResultPath();
+    std::error_code ec;
+    std::filesystem::remove(resultPath, ec);
+
+    const std::wstring arguments = L"register-activated \"" + resultPath.wstring() + L"\"";
+    winrt::com_ptr<IApplicationActivationManager> manager;
+    const HRESULT createResult = CoCreateInstance(
+        CLSID_ApplicationActivationManager,
+        nullptr,
+        CLSCTX_LOCAL_SERVER,
+        __uuidof(IApplicationActivationManager),
+        manager.put_void());
+    std::wcout << L"AUMID_ACTIVATION_MANAGER_HRESULT\t0x"
+               << std::hex << std::uppercase << static_cast<std::uint32_t>(createResult)
+               << std::dec << L'\n';
+    if (FAILED(createResult)) {
+        return 6;
+    }
+
+    DWORD processId = 0;
+    const HRESULT activateResult = manager->ActivateApplication(
+        aumid.c_str(),
+        arguments.c_str(),
+        AO_NONE,
+        &processId);
+    std::wcout << L"AUMID_REGISTER_APPLICATION_ID\t" << aumid << L'\n';
+    std::wcout << L"AUMID_REGISTER_ACTIVATE_HRESULT\t0x"
+               << std::hex << std::uppercase << static_cast<std::uint32_t>(activateResult)
+               << std::dec << L'\n';
+    std::wcout << L"AUMID_REGISTER_ACTIVATED_PID\t" << processId << L'\n';
+    if (FAILED(activateResult)) {
+        return 6;
+    }
+
+    HANDLE process = nullptr;
+    if (processId != 0) {
+        process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    }
+    if (process != nullptr) {
+        WaitForSingleObject(process, 10000);
+        CloseHandle(process);
+    }
+
+    HRESULT registrationResult = E_FAIL;
+    bool resultAvailable = false;
+    for (int attempt = 0; attempt != 40; ++attempt) {
+        if (ReadActivationProbeResult(resultPath, registrationResult)) {
+            resultAvailable = true;
+            break;
+        }
+        Sleep(250);
+    }
+    std::filesystem::remove(resultPath, ec);
+
+    std::wcout << L"AUMID_REGISTER_RESULT_AVAILABLE\t" << (resultAvailable ? 1 : 0) << L'\n';
+    if (!resultAvailable) {
+        return 6;
+    }
+    std::wcout << L"AUMID_REGISTER_HRESULT\t0x"
+               << std::hex << std::uppercase << static_cast<std::uint32_t>(registrationResult)
+               << std::dec << L'\n';
+    std::wcout << L"AUMID_REGISTERED\t" << (SUCCEEDED(registrationResult) ? 1 : 0) << L'\n';
+    return SUCCEEDED(registrationResult) ? 0 : 6;
+}
+
+int RegisterWithActivationFallback() {
+    HRESULT directResult = E_FAIL;
+    const int directExit = RegisterCurrentMediaExtension(&directResult);
+    if (directExit == 0) {
+        return 0;
+    }
+
+    if (directResult != E_ACCESSDENIED) {
+        return directExit;
+    }
+
+    std::wcout << L"MEDIA_EXTENSION_REGISTER_ACTIVATION_FALLBACK\t1\n";
+    return ActivateRegisterThroughAumid();
 }
 
 int NotifySpatialFormatChanged() {
@@ -183,7 +432,7 @@ int VerifyDefaultEndpoint() {
     std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_BEGIN\t1\n";
     PrintIdentity();
 
-    int result = RegisterCurrentMediaExtension();
+    int result = RegisterWithActivationFallback();
     if (result != 0) {
         std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK\t0\n";
         return result;
@@ -217,8 +466,8 @@ int VerifyDefaultEndpoint() {
 void Usage() {
     std::wcerr
         << L"usage: OmniphonySpatialCompanion <command> [endpoint-id]\n"
-        << L"  identity              prove the process is running with package identity\n"
-        << L"  register              register the package media extension on Windows 11 24H2+\n"
+        << L"  identity              prove the process is running with package/application identity\n"
+        << L"  register              register media extension, retrying through AUMID activation on access denial\n"
         << L"  notify                report license/configuration change for Omniphony\n"
         << L"  status <endpoint-id>  read spatial selection state from packaged identity\n"
         << L"  select <endpoint-id>  ask Windows to select Omniphony from packaged identity\n"
@@ -241,7 +490,10 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (command == L"register" && argc == 2) {
             PrintIdentity();
-            return RegisterCurrentMediaExtension();
+            return RegisterWithActivationFallback();
+        }
+        if (command == L"register-activated" && argc == 3) {
+            return RegisterActivatedProbe(argv[2]);
         }
         if (command == L"notify" && argc == 2) {
             PrintIdentity();
@@ -262,7 +514,7 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     } catch (const winrt::hresult_error& error) {
         std::wcerr << L"ERROR\tWinRT\t0x" << std::hex << std::uppercase
-                   << static_cast<unsigned long>(error.code().value)
+                   << static_cast<std::uint32_t>(error.code().value)
                    << L"\t" << error.message().c_str() << L'\n';
         return 9;
     } catch (const std::exception& error) {
