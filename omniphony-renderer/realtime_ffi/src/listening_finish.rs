@@ -5,16 +5,15 @@
 //! same time-varying enhancement gain, so ILD/IPD/HRTF relationships are not
 //! widened, decorrelated, delayed, or otherwise re-authored here.
 //!
-//! The single `Noire X Enhancement` switch is intentionally conservative. It
+//! The single `Noire X Enhancement` switch is deliberately punch-forward. It
 //! uses linked fast/slow envelopes as a production-style transient designer:
-//! short attacks earn a little extra crest while falling/sustain regions receive
-//! a much smaller relief. A lightweight three-band sidechain makes the detector
-//! frequency-aware without filtering the audible output: low/mid musical attack
-//! energy keeps strong authority while high-frequency-only energy receives less
-//! influence. The resulting gain is still one broadband linked gain for both
+//! short attacks earn extra crest while falling/sustain regions receive a small
+//! relief that increases contrast without persistent loudness gain. A lightweight
+//! three-band sidechain makes the detector frequency-aware without filtering the
+//! audible output: kick/body energy below roughly 220 Hz has the most authority,
+//! midrange attacks retain useful influence, and high-frequency-only energy has
+//! much less. The resulting gain is still one broadband linked gain for both
 //! ears, preserving the finished binaural relationship.
-//! Output trim is a separate user preference and is still bounded by the final
-//! peak guard owned by `lib.rs`.
 
 use std::env;
 use std::f32::consts::PI;
@@ -24,25 +23,23 @@ use std::time::{Duration, Instant};
 
 const SETTING_POLL_MS: u64 = 500;
 const ENHANCEMENT_FILE_NAME: &str = "noire-x-enhancement.txt";
-const OUTPUT_TRIM_FILE_NAME: &str = "output-trim.txt";
 
-const FAST_ENVELOPE_MS: f32 = 2.5;
-const SLOW_ENVELOPE_MS: f32 = 42.0;
-const MAX_ATTACK_LIFT_DB: f32 = 1.15;
-const MAX_SUSTAIN_RELIEF_DB: f32 = 0.22;
-const TRANSIENT_FULL_SCALE: f32 = 1.35;
+const FAST_ENVELOPE_MS: f32 = 2.0;
+const SLOW_ENVELOPE_MS: f32 = 48.0;
+const MAX_ATTACK_LIFT_DB: f32 = 2.8;
+const MAX_SUSTAIN_RELIEF_DB: f32 = 0.35;
+const TRANSIENT_FULL_SCALE: f32 = 1.15;
 const SUSTAIN_FULL_SCALE: f32 = 0.65;
-const DEFAULT_OUTPUT_TRIM_DB: f32 = 1.5;
 
 const DETECTOR_BANDS: usize = 3;
-const DETECTOR_LOW_CUTOFF_HZ: f32 = 280.0;
+const DETECTOR_LOW_CUTOFF_HZ: f32 = 220.0;
 const DETECTOR_HIGH_CUTOFF_HZ: f32 = 4_000.0;
-const DETECTOR_ATTACK_BAND_WEIGHTS: [f32; DETECTOR_BANDS] = [0.95, 1.15, 0.15];
-const DETECTOR_SUSTAIN_BAND_WEIGHTS: [f32; DETECTOR_BANDS] = [0.95, 1.05, 0.55];
-const BROADBAND_ATTACK_BLEND: f32 = 0.20;
-const SUBBAND_ATTACK_BLEND: f32 = 0.80;
-const BROADBAND_SUSTAIN_BLEND: f32 = 0.50;
-const SUBBAND_SUSTAIN_BLEND: f32 = 0.50;
+const DETECTOR_ATTACK_BAND_WEIGHTS: [f32; DETECTOR_BANDS] = [1.45, 1.00, 0.10];
+const DETECTOR_SUSTAIN_BAND_WEIGHTS: [f32; DETECTOR_BANDS] = [1.10, 1.00, 0.45];
+const BROADBAND_ATTACK_BLEND: f32 = 0.15;
+const SUBBAND_ATTACK_BLEND: f32 = 0.85;
+const BROADBAND_SUSTAIN_BLEND: f32 = 0.45;
+const SUBBAND_SUSTAIN_BLEND: f32 = 0.55;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EnhancementPreset {
@@ -59,33 +56,9 @@ impl EnhancementPreset {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum OutputTrim {
-    Flat,
-    Plus1_5Db,
-}
-
-impl OutputTrim {
-    fn from_text(text: &str) -> Self {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "0" | "0db" | "flat" | "off" | "false" | "disabled" => Self::Flat,
-            _ => Self::Plus1_5Db,
-        }
-    }
-
-    fn gain(self) -> f32 {
-        match self {
-            Self::Flat => 1.0,
-            Self::Plus1_5Db => db_to_gain(DEFAULT_OUTPUT_TRIM_DB),
-        }
-    }
-}
-
 pub(crate) struct ListeningFinish {
     enhancement: EnhancementPreset,
-    output_trim: OutputTrim,
     enhancement_path: PathBuf,
-    output_trim_path: PathBuf,
     last_setting_check: Instant,
     fast_energy: f32,
     slow_energy: f32,
@@ -105,13 +78,10 @@ impl ListeningFinish {
     pub(crate) fn new(sample_rate_hz: u32) -> Self {
         let root = omniphony_state_root();
         let enhancement_path = root.join(ENHANCEMENT_FILE_NAME);
-        let output_trim_path = root.join(OUTPUT_TRIM_FILE_NAME);
         let sample_rate = sample_rate_hz.max(1) as f32;
         Self {
             enhancement: read_enhancement(&enhancement_path),
-            output_trim: read_output_trim(&output_trim_path),
             enhancement_path,
-            output_trim_path,
             last_setting_check: Instant::now(),
             fast_energy: 0.0,
             slow_energy: 0.0,
@@ -134,12 +104,10 @@ impl ListeningFinish {
         }
         self.last_setting_check = Instant::now();
         self.enhancement = read_enhancement(&self.enhancement_path);
-        self.output_trim = read_output_trim(&self.output_trim_path);
     }
 
     pub(crate) fn process_interleaved(&mut self, samples: &mut [f32]) {
         self.refresh_settings();
-        let trim = self.output_trim.gain();
 
         for frame in samples.chunks_exact_mut(2) {
             let mut left = finite_or_zero(frame[0]);
@@ -218,10 +186,10 @@ impl ListeningFinish {
                         * band_sustains[band];
                 }
 
-                // Keep some broadband authority so the accepted detector does
-                // not disappear inside the new sidechain. The sub-band term is
-                // dominant enough to stop high-frequency-only material from
-                // driving the enhancer as strongly as low/mid musical attacks.
+                // Keep a little broadband authority so mixed attacks still
+                // register, but let the sub-band sidechain dominate. This makes
+                // low-frequency onsets hit decisively without simply raising the
+                // entire program all the time.
                 let transient = (BROADBAND_ATTACK_BLEND * base_transient
                     + SUBBAND_ATTACK_BLEND * subband_transient)
                     .clamp(0.0, 1.0);
@@ -239,8 +207,8 @@ impl ListeningFinish {
                 self.reset_detector_history();
             }
 
-            frame[0] = finite_or_zero(left * trim);
-            frame[1] = finite_or_zero(right * trim);
+            frame[0] = finite_or_zero(left);
+            frame[1] = finite_or_zero(right);
         }
     }
 
@@ -299,12 +267,6 @@ fn read_enhancement(path: &Path) -> EnhancementPreset {
         .unwrap_or(EnhancementPreset::On)
 }
 
-fn read_output_trim(path: &Path) -> OutputTrim {
-    fs::read_to_string(path)
-        .map(|text| OutputTrim::from_text(&text))
-        .unwrap_or(OutputTrim::Plus1_5Db)
-}
-
 fn omniphony_state_root() -> PathBuf {
     env::var_os("ProgramData")
         .map(PathBuf::from)
@@ -324,10 +286,9 @@ fn finite_or_zero(sample: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn test_finish(enhancement: EnhancementPreset, trim: OutputTrim) -> ListeningFinish {
+    fn test_finish(enhancement: EnhancementPreset) -> ListeningFinish {
         let mut finish = ListeningFinish::new(48_000);
         finish.enhancement = enhancement;
-        finish.output_trim = trim;
         finish.last_setting_check = Instant::now();
         finish
     }
@@ -346,7 +307,7 @@ mod tests {
             samples[index + 1] = sample;
         }
 
-        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
+        let mut finish = test_finish(EnhancementPreset::On);
         finish.process_interleaved(&mut samples);
         samples
             .iter()
@@ -355,8 +316,8 @@ mod tests {
     }
 
     #[test]
-    fn bypass_with_flat_trim_is_bit_exact_for_finite_audio() {
-        let mut finish = test_finish(EnhancementPreset::Off, OutputTrim::Flat);
+    fn bypass_is_bit_exact_for_finite_audio() {
+        let mut finish = test_finish(EnhancementPreset::Off);
         let mut samples = [0.125_f32, -0.25, 0.5, -0.75, 0.0, -0.0];
         let before = samples.map(f32::to_bits);
         finish.process_interleaved(&mut samples);
@@ -364,15 +325,8 @@ mod tests {
     }
 
     #[test]
-    fn output_trim_is_the_requested_one_point_five_db() {
-        let gain = OutputTrim::Plus1_5Db.gain();
-        let expected = 10.0_f32.powf(1.5 / 20.0);
-        assert!((gain - expected).abs() < 1.0e-7);
-    }
-
-    #[test]
     fn enhancement_uses_one_linked_gain_for_both_ears() {
-        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
+        let mut finish = test_finish(EnhancementPreset::On);
         let mut samples = vec![0.0_f32; 256 * 2];
         samples[120] = 0.4;
         samples[121] = -0.2;
@@ -385,25 +339,27 @@ mod tests {
     }
 
     #[test]
-    fn attack_lift_and_sustain_relief_remain_conservative() {
-        assert!(MAX_ATTACK_LIFT_DB > 1.0);
-        assert!(MAX_ATTACK_LIFT_DB <= 1.2);
-        assert!(MAX_SUSTAIN_RELIEF_DB > 0.18);
-        assert!(MAX_SUSTAIN_RELIEF_DB <= 0.25);
+    fn attack_lift_is_strong_but_still_bounded() {
+        assert!(MAX_ATTACK_LIFT_DB >= 2.5);
+        assert!(MAX_ATTACK_LIFT_DB <= 3.0);
+        assert!(MAX_SUSTAIN_RELIEF_DB >= 0.30);
+        assert!(MAX_SUSTAIN_RELIEF_DB <= 0.40);
         assert!(MAX_SUSTAIN_RELIEF_DB < MAX_ATTACK_LIFT_DB);
     }
 
     #[test]
-    fn high_frequency_only_attack_has_less_detector_authority() {
+    fn kick_band_attack_has_the_most_detector_authority() {
+        let kick_gain = sine_burst_peak_gain(80.0);
         let mid_gain = sine_burst_peak_gain(1_000.0);
         let high_gain = sine_burst_peak_gain(10_000.0);
+        assert!(kick_gain > mid_gain + 0.02);
         assert!(mid_gain > high_gain + 0.02);
         assert!(high_gain > 1.0);
     }
 
     #[test]
     fn enhancement_gain_is_bounded() {
-        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
+        let mut finish = test_finish(EnhancementPreset::On);
         let mut samples = vec![0.0_f32; 1024 * 2];
         for frame in (0..1024).step_by(64) {
             samples[frame * 2] = 1.0;
@@ -416,7 +372,7 @@ mod tests {
 
     #[test]
     fn falling_envelope_gets_small_sustain_relief() {
-        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
+        let mut finish = test_finish(EnhancementPreset::On);
         let steady_frames = 4096usize;
         let tail_frames = 1024usize;
         let mut samples = vec![0.0_f32; (steady_frames + tail_frames) * 2];
@@ -446,7 +402,7 @@ mod tests {
 
     #[test]
     fn bypass_clears_all_frequency_detector_history() {
-        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Flat);
+        let mut finish = test_finish(EnhancementPreset::On);
         let mut samples = vec![0.25_f32; 512 * 2];
         finish.process_interleaved(&mut samples);
         assert!(finish.band_fast_energy.iter().any(|&energy| energy > 0.0));
@@ -468,7 +424,7 @@ mod tests {
 
     #[test]
     fn silence_and_non_finite_input_remain_finite() {
-        let mut finish = test_finish(EnhancementPreset::On, OutputTrim::Plus1_5Db);
+        let mut finish = test_finish(EnhancementPreset::On);
         let mut samples = [0.0_f32, 0.0, f32::NAN, f32::INFINITY];
         finish.process_interleaved(&mut samples);
         assert!(samples.iter().all(|sample| sample.is_finite()));
