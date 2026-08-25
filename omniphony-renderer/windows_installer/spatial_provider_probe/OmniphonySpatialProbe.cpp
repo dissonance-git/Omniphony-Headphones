@@ -324,12 +324,12 @@ public:
         REFIID streamUuid,
         const PROPVARIANT*) override {
         if (!IsEqualIID(streamUuid, __uuidof(ISpatialAudioObjectRenderStream))) {
-            return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+            return SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE;
         }
         ProviderConfig config;
         return LoadProviderConfig(config)
             ? S_OK
-            : SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+            : SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE;
     }
 
     HRESULT STDMETHODCALLTYPE ActivateSpatialAudioStream(
@@ -346,7 +346,7 @@ public:
 
         ProviderConfig config;
         if (!LoadProviderConfig(config)) {
-            return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
+            return SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE;
         }
 
         return CreateOmniphonySpatialProviderObjectStreamFromActivation(
