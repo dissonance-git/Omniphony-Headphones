@@ -97,8 +97,11 @@ jobs:
             'Omniphony Development',
             'AddPackageByUriAsync',
             'ForceUpdateFromAnyVersion',
-            'CreateProcessWithTokenW',
-            'SPATIAL_SETUP_SHELL_TOKEN_MEDIUM',
+            'ShellExecuteExW',
+            'runas',
+            'SPATIAL_SETUP_BOOTSTRAP_MEDIUM_OK',
+            'SPATIAL_SETUP_ADMIN_PHASE_ELEVATED_OK',
+            'SPATIAL_SETUP_CERT_TRUSTED_BY_ADMIN',
             'SPATIAL_SETUP_USER_PHASE_MEDIUM_OK',
             'RegisterMediaExtensionPackage',
             'SPATIAL_SETUP_MEDIA_EXTENSION_REGISTERED',
@@ -112,6 +115,11 @@ jobs:
           )) {
             if ($setupSource -notmatch [regex]::Escape($token)) { throw "Single-file setup contract token missing: $token" }
           }
+          if ($setupSource -match 'CreateProcessWithTokenW') { throw 'Single-file setup still contains the rejected token-spawn de-elevation path.' }
+
+          $cmakeSource = Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_companion\CMakeLists.txt" -Raw
+          if ($cmakeSource -notmatch "level='asInvoker'") { throw 'Single-file setup must start at medium integrity with an asInvoker manifest.' }
+          if ($cmakeSource -match "level='requireAdministrator'") { throw 'Single-file setup must not force the whole process to high integrity.' }
 
           # The setup EXE is a normal PE file followed by exact MSIX + CER payloads and a 32-byte footer.
           # Prove the embedded payload bytes are byte-for-byte identical to the separately validated outputs.
@@ -165,7 +173,7 @@ jobs:
           Write-Host 'SPATIAL_COMPANION_MEDIA_COMPONENT_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_SPATIAL_SUBTYPE_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_MEDIA_EXTENSION_REGISTRATION_PATH_OK 1'
-          Write-Host 'SPATIAL_COMPANION_MEDIUM_INTEGRITY_HANDOFF_PATH_OK 1'
+          Write-Host 'SPATIAL_COMPANION_MEDIUM_BOOTSTRAP_ELEVATED_CERT_CHILD_PATH_OK 1'
           Write-Host 'SPATIAL_COMPANION_MEDIUM_PACKAGED_REGISTRATION_FALLBACK_OK 1'
           Write-Host 'SPATIAL_COMPANION_DEFAULT_ENDPOINT_DISCOVERY_PATH_OK 1'
           Write-Host 'SPATIAL_COMPANION_ONE_COMMAND_PHYSICAL_GATE_OK 1'
