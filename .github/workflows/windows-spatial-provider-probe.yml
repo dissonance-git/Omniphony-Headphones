@@ -62,6 +62,8 @@ jobs:
           if ($text -notmatch 'STATIC_OBJECTS\s+17') { throw 'static object capacity drifted' }
           if ($text -notmatch 'MAX_DYNAMIC_OBJECTS\s+16') { throw 'dynamic object capacity drifted' }
           if ($text -notmatch 'SELECTION_API\s+Windows\.Media\.Audio\.SpatialAudioDeviceConfiguration') { throw 'documented selection API contract missing' }
+          if ($text -notmatch 'SELECTION_CAPABILITY_FLAGS\s+DIAGNOSTIC_ONLY') { throw 'spatial capability flags became a selection veto again' }
+          if ($text -notmatch 'SELECTION_RESULT_AUTHORITY\s+SetDefaultSpatialAudioFormatResult\.Status') { throw 'Windows setter result is no longer the selection authority' }
           if ($text -notmatch 'DIRECT_MMDEVICES_SELECTION_WRITES\s+0') { throw 'direct MMDevices write boundary drifted' }
 
           $capability = & $smoke $dll
