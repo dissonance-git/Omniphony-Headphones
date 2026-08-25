@@ -9,11 +9,7 @@ $currentPath = Join-Path $stateRoot 'current-enabled.txt'
 $eqPresetPath = Join-Path $stateRoot 'eq-preset.txt'
 $legacyEqPath = Join-Path $stateRoot 'personal-eq.txt'
 $enhancementPath = Join-Path $stateRoot 'noire-x-enhancement.txt'
-$outputTrimPath = Join-Path $stateRoot 'output-trim.txt'
-$endpointBackupPath = Join-Path $stateRoot 'endpoint-backup.json'
 $restartAudioPath = Join-Path $PSScriptRoot 'Restart-OmniphonyAudio.ps1'
-$spatialEnablePath = Join-Path $PSScriptRoot 'Enable-OmniphonySpatialProvider.ps1'
-$spatialConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
 $stopPath = Join-Path $stateRoot 'tray.stop'
 
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
@@ -57,25 +53,6 @@ function Get-EqEnabled {
 }
 
 function Get-EnhancementEnabled { return Get-OnOffSetting $enhancementPath $true }
-function Get-OutputTrimEnabled { return Get-OnOffSetting $outputTrimPath $true }
-
-function Get-SpatialProviderEnabled {
-    try {
-        if (-not (Test-Path -LiteralPath $spatialConfigPath)) { return $false }
-        $config = Get-ItemProperty -LiteralPath $spatialConfigPath -ErrorAction Stop
-        return ([int]$config.Enabled -eq 1)
-    } catch { }
-    return $false
-}
-
-function Get-InstalledEndpointId {
-    try {
-        if (-not (Test-Path -LiteralPath $endpointBackupPath -PathType Leaf)) { return '' }
-        $state = ([IO.File]::ReadAllText($endpointBackupPath)) | ConvertFrom-Json
-        return [string]$state.EndpointId
-    } catch { }
-    return ''
-}
 
 function Show-TrayMessage([string]$Text) {
     $notify.BalloonTipTitle = 'Omniphony'
@@ -118,35 +95,18 @@ function Restart-WindowsAudioService([bool]$ShowSuccess = $true) {
     }
 }
 
-function Open-SpatialSoundSettings {
-    try {
-        $endpointId = Get-InstalledEndpointId
-        if (-not [string]::IsNullOrWhiteSpace($endpointId)) {
-            $escaped = [Uri]::EscapeDataString($endpointId)
-            Start-Process -FilePath "ms-settings:sound-properties?endpointId=$escaped"
-            return
-        }
-        Start-Process -FilePath 'ms-settings:sound'
-    } catch {
-        try {
-            Start-Process -FilePath 'ms-settings:sound'
-        } catch {
-            Show-TrayMessage "Could not open Windows Sound settings: $($_.Exception.Message)"
-        }
-    }
-}
-
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = [System.Drawing.SystemIcons]::Application
 $notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $statusItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$statusItem.Text = 'Omniphony Controls'
+$statusItem.Text = 'Omniphony'
 $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
 
 $currentItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$currentItem.Text = 'Enabled'
 [void]$menu.Items.Add($currentItem)
 
 $eqItem = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -154,18 +114,6 @@ $eqItem = New-Object System.Windows.Forms.ToolStripMenuItem
 
 $enhancementItem = New-Object System.Windows.Forms.ToolStripMenuItem
 [void]$menu.Items.Add($enhancementItem)
-
-$outputTrimItem = New-Object System.Windows.Forms.ToolStripMenuItem
-[void]$menu.Items.Add($outputTrimItem)
-
-[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
-
-$spatialProviderItem = New-Object System.Windows.Forms.ToolStripMenuItem
-[void]$menu.Items.Add($spatialProviderItem)
-
-$spatialSettingsItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$spatialSettingsItem.Text = 'Open Windows Spatial sound settings...'
-[void]$menu.Items.Add($spatialSettingsItem)
 
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
@@ -184,12 +132,9 @@ function Update-TrayState {
     $current = Get-CurrentEnabled
     $eq = Get-EqEnabled
     $enhancement = Get-EnhancementEnabled
-    $trim = Get-OutputTrimEnabled
-    $spatial = Get-SpatialProviderEnabled
-    $spatialEnablePresent = Test-Path -LiteralPath $spatialEnablePath -PathType Leaf
 
     $currentItem.Checked = $current
-    $currentItem.Text = if ($current) { 'Stereo Current: On' } else { 'Stereo Current: Off (identity)' }
+    $currentItem.Text = 'Enabled'
 
     $eqItem.Checked = $eq
     $eqItem.Text = if ($eq) { 'Headphone EQ: Noire X' } else { 'Headphone EQ: Off' }
@@ -197,31 +142,11 @@ function Update-TrayState {
     $enhancementItem.Checked = $enhancement
     $enhancementItem.Text = if ($enhancement) { 'Noire X Enhancement: On' } else { 'Noire X Enhancement: Off' }
 
-    $outputTrimItem.Checked = $trim
-    $outputTrimItem.Text = if ($trim) { 'Output trim: +1.5 dB' } else { 'Output trim: 0 dB' }
-
-    $spatialProviderItem.Checked = $spatial
-    if (-not $spatialEnablePresent) {
-        $spatialProviderItem.Enabled = $false
-        $spatialProviderItem.Text = 'Spatial Sound provider: Registration helper missing'
-    } elseif ($spatial) {
-        # Do not unregister from ordinary tray use. Windows may currently have
-        # Omniphony selected, and the provider-selection registry surface is not
-        # yet a proven product contract. Uninstall/manual repair owns removal.
-        $spatialProviderItem.Enabled = $false
-        $spatialProviderItem.Text = 'Spatial Sound provider: Registered (17 static + 16 dynamic)'
-    } else {
-        $spatialProviderItem.Enabled = $true
-        $spatialProviderItem.Text = 'Register Omniphony Spatial Sound provider...'
-    }
-
-    $currentText = if ($current) { 'Current On' } else { 'Current Off' }
+    $enabledText = if ($current) { 'Enabled' } else { 'Disabled' }
     $eqText = if ($eq) { 'EQ On' } else { 'EQ Off' }
     $enhanceText = if ($enhancement) { 'NX On' } else { 'NX Off' }
-    $trimText = if ($trim) { '+1.5dB' } else { '0dB' }
-    $spatialText = if ($spatial) { 'Provider Ready' } else { 'Provider Off' }
-    $statusItem.Text = "Omniphony Controls | $currentText | $spatialText | $eqText | $enhanceText | $trimText"
-    $notify.Text = "Omniphony | $currentText | $spatialText | $enhanceText"
+    $statusItem.Text = "Omniphony | $enabledText | $eqText | $enhanceText"
+    $notify.Text = "Omniphony | $enabledText | $enhanceText"
 }
 
 function Toggle-Current {
@@ -230,7 +155,7 @@ function Toggle-Current {
         $next = -not $previous
         Set-OnOffSetting $currentPath $next 'on'
         Update-TrayState
-        # Current-vs-identity is chosen when the APO graph locks. A graph reset
+        # Enabled-vs-identity is chosen when the APO graph locks. A graph reset
         # makes the switch exact and gives identity zero Omniphony latency.
         if (-not (Restart-WindowsAudioService $false)) {
             Set-OnOffSetting $currentPath $previous 'on'
@@ -239,13 +164,13 @@ function Toggle-Current {
         }
         Update-TrayState
         $message = if ($next) {
-            'Stereo Current enabled.'
+            'Omniphony enabled.'
         } else {
-            'Stereo Current bypassed. Authored surround remains source-faithful.'
+            'Omniphony bypassed. Authored surround remains source-faithful.'
         }
         Show-TrayMessage $message
     } catch {
-        Show-TrayMessage "Could not change Stereo Current: $($_.Exception.Message)"
+        Show-TrayMessage "Could not change Omniphony state: $($_.Exception.Message)"
     }
 }
 
@@ -267,36 +192,9 @@ function Toggle-Enhancement {
     }
 }
 
-function Toggle-OutputTrim {
-    try {
-        Set-OnOffSetting $outputTrimPath (-not (Get-OutputTrimEnabled)) '+1.5'
-        Update-TrayState
-    } catch {
-        Show-TrayMessage "Could not change output trim: $($_.Exception.Message)"
-    }
-}
-
-function Register-SpatialProvider {
-    try {
-        if (Get-SpatialProviderEnabled) {
-            Update-TrayState
-            return
-        }
-        Invoke-ElevatedPowerShellScript $spatialEnablePath
-        Update-TrayState
-        Show-TrayMessage 'Omniphony provider registered. Open Windows Spatial sound settings and select Omniphony.'
-    } catch {
-        Update-TrayState
-        Show-TrayMessage "Could not register Spatial Sound provider: $($_.Exception.Message)"
-    }
-}
-
 $currentItem.Add_Click({ Toggle-Current })
 $eqItem.Add_Click({ Toggle-Eq })
 $enhancementItem.Add_Click({ Toggle-Enhancement })
-$outputTrimItem.Add_Click({ Toggle-OutputTrim })
-$spatialProviderItem.Add_Click({ Register-SpatialProvider })
-$spatialSettingsItem.Add_Click({ Open-SpatialSoundSettings })
 $restartAudioItem.Add_Click({ [void](Restart-WindowsAudioService $true) })
 
 $exitItem.Add_Click({
