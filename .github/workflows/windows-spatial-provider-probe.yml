@@ -59,9 +59,10 @@ jobs:
           $text = $contract -join "`n"
           if ($text -notmatch '\{4BD75423-A66C-4586-B782-1FCBBDF2AE74\}') { throw 'Spatial format GUID drifted' }
           if ($text -notmatch '\{F3CDF827-20C4-405E-A430-8F739343FC89\}') { throw 'Probe COM CLSID drifted' }
-          if ($text -notmatch 'NO_AUDIO_PROCESSING\s+1') { throw 'Probe safety contract missing' }
-          if ($text -notmatch 'NO_MMDEVICES_WRITES\s+1') { throw 'MMDevices safety contract missing' }
-          if ($text -notmatch 'NO_DEFAULT_ENDPOINT_CHANGE\s+1') { throw 'Default-endpoint safety contract missing' }
+          if ($text -notmatch 'STATIC_OBJECTS\s+17') { throw 'static object capacity drifted' }
+          if ($text -notmatch 'MAX_DYNAMIC_OBJECTS\s+16') { throw 'dynamic object capacity drifted' }
+          if ($text -notmatch 'SELECTION_API\s+Windows\.Media\.Audio\.SpatialAudioDeviceConfiguration') { throw 'documented selection API contract missing' }
+          if ($text -notmatch 'DIRECT_MMDEVICES_SELECTION_WRITES\s+0') { throw 'direct MMDevices write boundary drifted' }
 
           $capability = & $smoke $dll
           if ($LASTEXITCODE -ne 0) { throw "ISpatialAudioClient capability smoke failed: $LASTEXITCODE" }
