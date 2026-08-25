@@ -13,7 +13,6 @@ $outputTrimPath = Join-Path $stateRoot 'output-trim.txt'
 $endpointBackupPath = Join-Path $stateRoot 'endpoint-backup.json'
 $restartAudioPath = Join-Path $PSScriptRoot 'Restart-OmniphonyAudio.ps1'
 $spatialEnablePath = Join-Path $PSScriptRoot 'Enable-OmniphonySpatialProvider.ps1'
-$spatialDisablePath = Join-Path $PSScriptRoot 'Disable-OmniphonySpatialProvider.ps1'
 $spatialConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
 $stopPath = Join-Path $stateRoot 'tray.stop'
 
@@ -187,9 +186,7 @@ function Update-TrayState {
     $enhancement = Get-EnhancementEnabled
     $trim = Get-OutputTrimEnabled
     $spatial = Get-SpatialProviderEnabled
-    $spatialHelpersPresent =
-        (Test-Path -LiteralPath $spatialEnablePath -PathType Leaf) -and
-        (Test-Path -LiteralPath $spatialDisablePath -PathType Leaf)
+    $spatialEnablePresent = Test-Path -LiteralPath $spatialEnablePath -PathType Leaf
 
     $currentItem.Checked = $current
     $currentItem.Text = if ($current) { 'Stereo Current: On' } else { 'Stereo Current: Off (identity)' }
@@ -204,20 +201,25 @@ function Update-TrayState {
     $outputTrimItem.Text = if ($trim) { 'Output trim: +1.5 dB' } else { 'Output trim: 0 dB' }
 
     $spatialProviderItem.Checked = $spatial
-    $spatialProviderItem.Enabled = $spatialHelpersPresent
-    if (-not $spatialHelpersPresent) {
-        $spatialProviderItem.Text = 'Spatial Sound provider: Helpers missing'
+    if (-not $spatialEnablePresent) {
+        $spatialProviderItem.Enabled = $false
+        $spatialProviderItem.Text = 'Spatial Sound provider: Registration helper missing'
     } elseif ($spatial) {
-        $spatialProviderItem.Text = 'Spatial Sound provider: Enabled (17 static + 16 dynamic)'
+        # Do not unregister from ordinary tray use. Windows may currently have
+        # Omniphony selected, and the provider-selection registry surface is not
+        # yet a proven product contract. Uninstall/manual repair owns removal.
+        $spatialProviderItem.Enabled = $false
+        $spatialProviderItem.Text = 'Spatial Sound provider: Registered (17 static + 16 dynamic)'
     } else {
-        $spatialProviderItem.Text = 'Spatial Sound provider: Disabled'
+        $spatialProviderItem.Enabled = $true
+        $spatialProviderItem.Text = 'Register Omniphony Spatial Sound provider...'
     }
 
     $currentText = if ($current) { 'Current On' } else { 'Current Off' }
     $eqText = if ($eq) { 'EQ On' } else { 'EQ Off' }
     $enhanceText = if ($enhancement) { 'NX On' } else { 'NX Off' }
     $trimText = if ($trim) { '+1.5dB' } else { '0dB' }
-    $spatialText = if ($spatial) { 'Spatial On' } else { 'Spatial Off' }
+    $spatialText = if ($spatial) { 'Provider Ready' } else { 'Provider Off' }
     $statusItem.Text = "Omniphony Controls | $currentText | $spatialText | $eqText | $enhanceText | $trimText"
     $notify.Text = "Omniphony | $currentText | $spatialText | $enhanceText"
 }
@@ -274,24 +276,18 @@ function Toggle-OutputTrim {
     }
 }
 
-function Toggle-SpatialProvider {
+function Register-SpatialProvider {
     try {
-        $wasEnabled = Get-SpatialProviderEnabled
-        if ($wasEnabled) {
-            Invoke-ElevatedPowerShellScript $spatialDisablePath
-        } else {
-            Invoke-ElevatedPowerShellScript $spatialEnablePath
+        if (Get-SpatialProviderEnabled) {
+            Update-TrayState
+            return
         }
+        Invoke-ElevatedPowerShellScript $spatialEnablePath
         Update-TrayState
-
-        if ($wasEnabled) {
-            Show-TrayMessage 'Spatial Sound provider disabled and unregistered. Windows provider selection was not changed.'
-        } else {
-            Show-TrayMessage 'Spatial Sound provider enabled. Select Omniphony under Spatial sound in Windows settings.'
-        }
+        Show-TrayMessage 'Omniphony provider registered. Open Windows Spatial sound settings and select Omniphony.'
     } catch {
         Update-TrayState
-        Show-TrayMessage "Could not change Spatial Sound provider: $($_.Exception.Message)"
+        Show-TrayMessage "Could not register Spatial Sound provider: $($_.Exception.Message)"
     }
 }
 
@@ -299,7 +295,7 @@ $currentItem.Add_Click({ Toggle-Current })
 $eqItem.Add_Click({ Toggle-Eq })
 $enhancementItem.Add_Click({ Toggle-Enhancement })
 $outputTrimItem.Add_Click({ Toggle-OutputTrim })
-$spatialProviderItem.Add_Click({ Toggle-SpatialProvider })
+$spatialProviderItem.Add_Click({ Register-SpatialProvider })
 $spatialSettingsItem.Add_Click({ Open-SpatialSoundSettings })
 $restartAudioItem.Add_Click({ [void](Restart-WindowsAudioService $true) })
 
