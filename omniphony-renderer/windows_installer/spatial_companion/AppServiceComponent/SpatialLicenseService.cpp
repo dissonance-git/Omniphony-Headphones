@@ -22,12 +22,13 @@ String^ ReadText(ValueSet^ values, String^ key) {
     return value == nullptr ? ref new String(L"") : value->ToString();
 }
 
-void InsertLicenseResponse(ValueSet^ response, int status) {
-    // Windows' SpatialAudioLicenseSrv binary exposes these exact response field
-    // names. Status 0 is the companion's free/non-expiring development policy;
+void InsertLicenseResponse(ValueSet^ response, unsigned int status) {
+    // SpatialAudioLicenseSrv's ETW contract exposes the response status code as
+    // UINT32. Keep the ValueSet wire type aligned with that broker contract.
+    // Status 0 is the companion's free/non-expiring development policy;
     // Windows still retains authority to reject the package, format, or endpoint.
-    response->Insert(L"Status", PropertyValue::CreateInt32(status));
-    response->Insert(L"STATUS", PropertyValue::CreateInt32(status));
+    response->Insert(L"Status", PropertyValue::CreateUInt32(status));
+    response->Insert(L"STATUS", PropertyValue::CreateUInt32(status));
     response->Insert(L"ExpirationDate", PropertyValue::CreateInt64(kDevelopmentExpirationFileTime));
     response->Insert(L"IsAudioRendererCapable", PropertyValue::CreateBoolean(true));
     response->Insert(L"SpeakerProtectionOverride", PropertyValue::CreateBoolean(false));
@@ -80,9 +81,9 @@ void SpatialLicenseService::OnRequestReceived(
 
         auto response = ref new ValueSet();
         if (command == L"GetLicenseInfo" || command == L"GetRuntimeParameters") {
-            InsertLicenseResponse(response, 0);
+            InsertLicenseResponse(response, 0u);
         } else {
-            InsertLicenseResponse(response, 1);
+            InsertLicenseResponse(response, 1u);
         }
 
         const auto status = create_task(request->SendResponseAsync(response)).get();
