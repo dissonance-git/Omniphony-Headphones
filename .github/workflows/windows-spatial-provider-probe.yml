@@ -43,12 +43,14 @@ jobs:
           $ctl = Join-Path $release 'OmniphonySpatialProbeCtl.exe'
           $dll = Join-Path $release 'OmniphonySpatialProbe.dll'
           $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
-          $streamSmoke = Join-Path $release 'OmniphonySpatialStaticStreamSmoke.exe'
+          $staticStreamSmoke = Join-Path $release 'OmniphonySpatialStaticStreamSmoke.exe'
+          $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
           $snapshotScript = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_provider_probe\CaptureSpatialProviderState.ps1"
           if (-not (Test-Path $ctl)) { throw "Missing probe control executable: $ctl" }
           if (-not (Test-Path $dll)) { throw "Missing probe COM DLL: $dll" }
           if (-not (Test-Path $smoke)) { throw "Missing probe capability smoke: $smoke" }
-          if (-not (Test-Path $streamSmoke)) { throw "Missing static stream lifecycle smoke: $streamSmoke" }
+          if (-not (Test-Path $staticStreamSmoke)) { throw "Missing static stream lifecycle smoke: $staticStreamSmoke" }
+          if (-not (Test-Path $objectStreamSmoke)) { throw "Missing dynamic object stream lifecycle smoke: $objectStreamSmoke" }
           if (-not (Test-Path $snapshotScript)) { throw "Missing spatial selection snapshot script: $snapshotScript" }
 
           $contract = & $ctl contract
@@ -69,19 +71,31 @@ jobs:
           if ($capText -notmatch 'SPATIAL_PROVIDER_INTERFACE\s+ISpatialAudioClient') { throw 'ISpatialAudioClient marker missing' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_STATIC_8_1_4_4_OK\s+1') { throw '8.1.4.4 static capability marker missing' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_OBJECT_FORMAT\s+FLOAT32_48000_MONO') { throw 'object format marker missing' }
-          if ($capText -notmatch 'SPATIAL_PROVIDER_MAX_DYNAMIC_OBJECTS\s+0') { throw 'dynamic-capacity boundary drifted' }
+          if ($capText -notmatch 'SPATIAL_PROVIDER_MAX_DYNAMIC_OBJECTS\s+16') { throw 'dynamic-capacity boundary drifted' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_STREAM_AVAILABLE\s+0') { throw 'stream boundary drifted' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_CAPABILITY_SMOKE_OK\s+1') { throw 'capability smoke marker missing' }
 
-          $lifecycle = & $streamSmoke
+          # Keep the original static-only stream contract executable for ABI/
+          # lifecycle compatibility while the live provider advances to the
+          # combined object stream.
+          $staticLifecycle = & $staticStreamSmoke
           if ($LASTEXITCODE -ne 0) { throw "Static Spatial Audio stream lifecycle smoke failed: $LASTEXITCODE" }
-          $lifecycle | Write-Host
-          $lifeText = $lifecycle -join "`n"
-          if ($lifeText -notmatch 'SPATIAL_STATIC_STREAM_COM_OK\s+1') { throw 'static stream COM marker missing' }
-          if ($lifeText -notmatch 'SPATIAL_STATIC_STREAM_DYNAMIC_CAPACITY\s+0') { throw 'static stream dynamic boundary drifted' }
-          if ($lifeText -notmatch 'SPATIAL_STATIC_STREAM_QUANTUM_FRAMES\s+480') { throw 'static stream quantum drifted' }
-          if ($lifeText -notmatch 'SPATIAL_STATIC_STREAM_IMPLICIT_EOS_OK\s+1') { throw 'implicit EOS contract failed' }
-          if ($lifeText -notmatch 'SPATIAL_STATIC_STREAM_LIFECYCLE_SMOKE_OK\s+1') { throw 'static stream lifecycle marker missing' }
+          $staticLifecycle | Write-Host
+          $staticText = $staticLifecycle -join "`n"
+          if ($staticText -notmatch 'SPATIAL_STATIC_STREAM_COM_OK\s+1') { throw 'static stream COM marker missing' }
+          if ($staticText -notmatch 'SPATIAL_STATIC_STREAM_DYNAMIC_CAPACITY\s+0') { throw 'static compatibility stream dynamic boundary drifted' }
+          if ($staticText -notmatch 'SPATIAL_STATIC_STREAM_QUANTUM_FRAMES\s+480') { throw 'static stream quantum drifted' }
+          if ($staticText -notmatch 'SPATIAL_STATIC_STREAM_IMPLICIT_EOS_OK\s+1') { throw 'static implicit EOS contract failed' }
+          if ($staticText -notmatch 'SPATIAL_STATIC_STREAM_LIFECYCLE_SMOKE_OK\s+1') { throw 'static stream lifecycle marker missing' }
+
+          $objectLifecycle = & $objectStreamSmoke
+          if ($LASTEXITCODE -ne 0) { throw "Dynamic Spatial Audio object lifecycle smoke failed: $LASTEXITCODE" }
+          $objectLifecycle | Write-Host
+          $objectText = $objectLifecycle -join "`n"
+          if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_DYNAMIC_CAPACITY_OK\s+1') { throw 'dynamic object capacity contract failed' }
+          if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_STABLE_ID_OK\s+1') { throw 'dynamic stable-ID contract failed' }
+          if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_XYZ_PERSISTENCE_OK\s+1') { throw 'dynamic XYZ persistence contract failed' }
+          if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_RELEASE_RECLAIM_OK\s+1') { throw 'dynamic release/reclaim contract failed' }
 
           # Read-only enumeration may legitimately find no third-party providers
           # on a clean GitHub-hosted runner. It must not crash or require elevation.
@@ -111,6 +125,7 @@ jobs:
           Copy-Item (Join-Path $release 'OmniphonySpatialProbe.dll') $payload -Force
           Copy-Item (Join-Path $release 'OmniphonySpatialProbeSmoke.exe') $payload -Force
           Copy-Item (Join-Path $release 'OmniphonySpatialStaticStreamSmoke.exe') $payload -Force
+          Copy-Item (Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe') $payload -Force
           Copy-Item "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_provider_probe\CaptureSpatialProviderState.ps1" $payload -Force
           Copy-Item "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_provider_probe\README.md" $payload -Force
           Get-ChildItem $payload -File | Select-Object Name, Length
