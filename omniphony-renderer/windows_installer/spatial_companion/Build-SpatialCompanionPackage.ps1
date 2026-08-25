@@ -43,14 +43,16 @@ if ($LASTEXITCODE -ne 0) { throw "AppService component build failed: $LASTEXITCO
 
 $companionExe = Join-Path $NativeBuild 'Release\OmniphonySpatialCompanion.exe'
 $setupStub = Join-Path $NativeBuild 'Release\OmniphonySpatialSetup.exe'
+$appServiceProbe = Join-Path $NativeBuild 'Release\OmniphonySpatialAppServiceProbeV17.exe'
 $serviceOutput = Join-Path $SourceRoot 'AppServiceComponent\x64\Release\OmniphonySpatialLicenseService'
 $serviceDll = Join-Path $serviceOutput 'OmniphonySpatialLicenseService.dll'
 $serviceWinmd = Join-Path $serviceOutput 'OmniphonySpatialLicenseService.winmd'
-foreach ($path in @($companionExe, $setupStub, $serviceDll, $serviceWinmd)) {
+foreach ($path in @($companionExe, $setupStub, $appServiceProbe, $serviceDll, $serviceWinmd)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing package/build payload: $path" }
 }
 
 Copy-Item -LiteralPath $companionExe -Destination $PackageRoot -Force
+Copy-Item -LiteralPath $appServiceProbe -Destination $PackageRoot -Force
 Copy-Item -LiteralPath $serviceDll -Destination $PackageRoot -Force
 Copy-Item -LiteralPath $serviceWinmd -Destination $PackageRoot -Force
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'Package.appxmanifest') -Destination (Join-Path $PackageRoot 'AppxManifest.xml') -Force
