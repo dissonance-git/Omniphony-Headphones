@@ -12,6 +12,8 @@ mod native_bed;
 mod native_bed_ffi;
 mod noire_x_profile;
 mod windows_object_scene;
+mod windows_objects_ffi;
+mod windows_objects_scene;
 mod windows_static_ffi;
 pub mod windows_spatial_contract;
 
@@ -38,7 +40,7 @@ pub(crate) fn ffi_guard<T>(fallback: T, body: impl FnOnce() -> T) -> T {
 }
 
 const ABI_MAJOR: u32 = 0;
-const ABI_MINOR: u32 = 5;
+const ABI_MINOR: u32 = 6;
 const MODE_IDENTITY: u32 = 0;
 const MODE_CURRENT: u32 = 1;
 const PROCESS_BLOCK_MS: usize = 20;
