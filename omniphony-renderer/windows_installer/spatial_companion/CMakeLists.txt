@@ -159,5 +159,4 @@ target_link_libraries(OmniphonySpatialAppServiceProbeV17 PRIVATE windowsapp ole3
 set_target_properties(OmniphonySpatialAppServiceProbeV17 PROPERTIES
     LINK_FLAGS "/MANIFESTUAC:\"level='asInvoker' uiAccess='false'\""
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../../../dist/Omniphony-Spatial-Companion"
 )
