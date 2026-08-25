@@ -11,8 +11,11 @@ set(OMNIPHONY_REALTIME_INCLUDE
 
 add_library(OmniphonySpatialProbe SHARED
     OmniphonySpatialProbe.cpp
+    OmniphonySpatialProviderRuntime.cpp
     OmniphonySpatialStaticStream.cpp
     OmniphonySpatialRealtimeBridge.cpp
+    OmniphonySpatialRawOutputPump.cpp
+    OmniphonySpatialRawOutputSink.cpp
     OmniphonySpatialStereoQueue.cpp
     OmniphonySpatialProbe.def
 )
@@ -20,7 +23,7 @@ target_compile_features(OmniphonySpatialProbe PRIVATE cxx_std_17)
 target_compile_definitions(OmniphonySpatialProbe PRIVATE UNICODE _UNICODE)
 target_compile_options(OmniphonySpatialProbe PRIVATE /W4 /WX /permissive-)
 target_include_directories(OmniphonySpatialProbe PRIVATE "${OMNIPHONY_REALTIME_INCLUDE}")
-target_link_libraries(OmniphonySpatialProbe PRIVATE ole32 uuid)
+target_link_libraries(OmniphonySpatialProbe PRIVATE ole32 uuid advapi32 avrt)
 set_target_properties(OmniphonySpatialProbe PROPERTIES
     PREFIX ""
     OUTPUT_NAME "OmniphonySpatialProbe"
