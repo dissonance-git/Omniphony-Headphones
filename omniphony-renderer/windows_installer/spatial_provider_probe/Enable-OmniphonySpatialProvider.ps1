@@ -85,8 +85,6 @@ $RealtimeDll = (Resolve-Path -LiteralPath $RealtimeDll).Path
 
 $registered = $false
 try {
-    # Runtime is written disabled first. Registration can therefore never make
-    # application streams available until the whole transaction has verified.
     New-Item -Path $ConfigPath -Force | Out-Null
     New-ItemProperty -Path $ConfigPath -Name Enabled -PropertyType DWord -Value 0 -Force | Out-Null
     New-ItemProperty -Path $ConfigPath -Name EndpointId -PropertyType String -Value $endpointId -Force | Out-Null
@@ -99,8 +97,6 @@ try {
     Write-Host 'Verifying provider registration and COM construction...'
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('diagnose')
 
-    # This is the only public-stream gate. MMDevices provider-selection state is
-    # deliberately not written here; Windows Settings owns user selection.
     Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 1
 
     $stateRoot = Split-Path -Parent $ReceiptPath
