@@ -73,6 +73,17 @@ target_include_directories(
 )
 target_link_libraries(OmniphonySpatialObjectStreamSmoke PRIVATE ole32 uuid)
 
+add_executable(OmniphonySpatialObjectRealtimeSmoke
+    OmniphonySpatialObjectRealtimeSmoke.cpp
+)
+target_compile_features(OmniphonySpatialObjectRealtimeSmoke PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialObjectRealtimeSmoke PRIVATE UNICODE _UNICODE)
+target_compile_options(OmniphonySpatialObjectRealtimeSmoke PRIVATE /W4 /WX /permissive-)
+target_include_directories(
+    OmniphonySpatialObjectRealtimeSmoke
+    PRIVATE "${OMNIPHONY_REALTIME_INCLUDE}"
+)
+
 add_executable(OmniphonySpatialRealtimeBridgeSmoke
     OmniphonySpatialRealtimeBridgeSmoke.cpp
     OmniphonySpatialRealtimeBridge.cpp
