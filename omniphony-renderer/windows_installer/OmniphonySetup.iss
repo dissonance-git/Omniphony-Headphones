@@ -14,6 +14,11 @@ AppId={{6A6873B9-1199-4D6B-AC3E-9415E5BC6BB1}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+VersionInfoVersion=0.1.0.0
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription=Omniphony spatial headphone renderer and Windows audio integration
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
 DefaultDirName={autopf}\Omniphony
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -55,6 +60,7 @@ Source: "{#PayloadDir}\support\*"; DestDir: "{app}\support"; Flags: ignoreversio
 Source: "endpoint_apo\Install-OmniphonyWindows.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "endpoint_apo\Uninstall-OmniphonyWindows.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "endpoint_apo\OmniphonyTray.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
+Source: "endpoint_apo\Restart-OmniphonyAudio.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "{#PayloadDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -65,7 +71,7 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ""New-Item -ItemType Directory -Force -Path '{commonappdata}\Omniphony' | Out-Null; Set-Content -LiteralPath '{commonappdata}\Omniphony\tray.stop' -Value stop -Encoding ASCII"""; Flags: runhidden waituntilterminated; RunOnceId: "OmniphonyTrayStop"
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\support\Uninstall-OmniphonyWindows.ps1"" -AppRoot ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "OmniphonyAudioCleanup"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\support\Uninstall-OmniphonyWindows.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "OmniphonyAudioCleanup"
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;

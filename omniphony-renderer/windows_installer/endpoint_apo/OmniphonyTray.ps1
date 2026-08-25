@@ -10,6 +10,7 @@ $eqPresetPath = Join-Path $stateRoot 'eq-preset.txt'
 $legacyEqPath = Join-Path $stateRoot 'personal-eq.txt'
 $enhancementPath = Join-Path $stateRoot 'noire-x-enhancement.txt'
 $outputTrimPath = Join-Path $stateRoot 'output-trim.txt'
+$restartAudioPath = Join-Path $PSScriptRoot 'Restart-OmniphonyAudio.ps1'
 $stopPath = Join-Path $stateRoot 'tray.stop'
 
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
@@ -63,30 +64,13 @@ function Show-TrayMessage([string]$Text) {
 
 function Restart-WindowsAudioService([bool]$ShowSuccess = $true) {
     try {
+        if (-not (Test-Path -LiteralPath $restartAudioPath)) {
+            throw "Restart helper is missing: $restartAudioPath"
+        }
         $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $restartCommand = @'
-$ErrorActionPreference = 'Stop'
-$timeout = [TimeSpan]::FromSeconds(15)
-
-$audio = Get-Service -Name 'Audiosrv' -ErrorAction Stop
-if ($audio.Status -ne 'Stopped') {
-    Stop-Service -Name 'Audiosrv' -Force -ErrorAction Stop
-    (Get-Service -Name 'Audiosrv' -ErrorAction Stop).WaitForStatus('Stopped', $timeout)
-}
-
-$builder = Get-Service -Name 'AudioEndpointBuilder' -ErrorAction Stop
-if ($builder.Status -ne 'Running') {
-    Start-Service -Name 'AudioEndpointBuilder' -ErrorAction Stop
-    (Get-Service -Name 'AudioEndpointBuilder' -ErrorAction Stop).WaitForStatus('Running', $timeout)
-}
-
-Start-Service -Name 'Audiosrv' -ErrorAction Stop
-(Get-Service -Name 'Audiosrv' -ErrorAction Stop).WaitForStatus('Running', $timeout)
-'@
-        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($restartCommand))
         $process = Start-Process -FilePath $powershell `
             -Verb RunAs `
-            -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedCommand) `
+            -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$restartAudioPath`"") `
             -Wait `
             -PassThru
         if ($process.ExitCode -ne 0) {
@@ -106,7 +90,7 @@ $notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $statusItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$statusItem.Text = 'Omniphony'
+$statusItem.Text = 'Omniphony Current Controls'
 $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
 
@@ -157,7 +141,7 @@ function Update-TrayState {
     $eqText = if ($eq) { 'EQ On' } else { 'EQ Off' }
     $enhanceText = if ($enhancement) { 'NX On' } else { 'NX Off' }
     $trimText = if ($trim) { '+1.5dB' } else { '0dB' }
-    $statusItem.Text = "Omniphony | $currentText | $eqText | $enhanceText | $trimText"
+    $statusItem.Text = "Omniphony Current Controls | $currentText | $eqText | $enhanceText | $trimText"
     $notify.Text = "Omniphony | $currentText | $enhanceText | $trimText"
 }
 
