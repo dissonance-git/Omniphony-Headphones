@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define OMNIPHONY_REALTIME_ABI_MAJOR 0
-#define OMNIPHONY_REALTIME_ABI_MINOR 5
+#define OMNIPHONY_REALTIME_ABI_MINOR 6
 
 #define OMNIPHONY_REALTIME_MODE_IDENTITY 0u
 #define OMNIPHONY_REALTIME_MODE_CURRENT 1u
@@ -19,6 +19,7 @@ extern "C" {
 typedef struct OmniphonyRealtimeProcessor OmniphonyRealtimeProcessor;
 typedef struct OmniphonyNativeBedProcessor OmniphonyNativeBedProcessor;
 typedef struct OmniphonySpatialStaticProcessor OmniphonySpatialStaticProcessor;
+typedef struct OmniphonySpatialObjectProcessor OmniphonySpatialObjectProcessor;
 
 typedef struct OmniphonyRealtimeConfig {
     uint32_t sample_rate_hz;
@@ -67,6 +68,28 @@ typedef struct OmniphonySpatialStaticConfig {
     uint32_t object_count;
     const OmniphonySpatialStaticObjectDescriptor *objects;
 } OmniphonySpatialStaticConfig;
+
+/*
+ * ABI 0.6 dynamic-object metadata. `stable_id` must remain unchanged for the
+ * lifetime of one Windows dynamic object and must not be reused for a later
+ * allocation in the same stream. Position is Windows listener-relative XYZ:
+ * +X right, +Y up, +Z behind. Position may change every update quantum and is
+ * consumed continuously rather than quantized to a static speaker role.
+ */
+typedef struct OmniphonySpatialDynamicObjectDescriptor {
+    uint64_t stable_id;
+    float x_right_m;
+    float y_up_m;
+    float z_back_m;
+} OmniphonySpatialDynamicObjectDescriptor;
+
+typedef struct OmniphonySpatialObjectConfig {
+    uint32_t sample_rate_hz;
+    uint32_t frames_per_quantum;
+    uint32_t static_object_count;
+    const OmniphonySpatialStaticObjectDescriptor *static_objects;
+    uint32_t max_dynamic_objects;
+} OmniphonySpatialObjectConfig;
 
 uint32_t omniphony_realtime_abi_major(void);
 uint32_t omniphony_realtime_abi_minor(void);
@@ -160,7 +183,7 @@ uint32_t omniphony_native_bed_channel_mask(
     const OmniphonyNativeBedProcessor *processor);
 
 /*
- * Fixed-topology Windows Spatial Audio static-object path.
+ * Fixed-topology Windows Spatial Audio static-object path retained from ABI 0.5.
  *
  * Creation receives the static role set and the exact listener-relative Windows
  * positions for that stream. The role set is immutable for the processor's
@@ -174,10 +197,6 @@ uint32_t omniphony_native_bed_channel_mask(
  * Output is interleaved stereo float32. Input/output must not alias. The host
  * callback only performs bounded PCM movement and safety fold-down; the source
  * renderer runs on a dedicated worker thread.
- *
- * ABI 0.5 covers STATIC Spatial Audio objects only. Dynamic-object position and
- * lifetime updates are a separate later ABI so a fixed static stream does not
- * smuggle unstable dynamic slot semantics into this contract.
  */
 OmniphonySpatialStaticProcessor *omniphony_spatial_static_create(
     const OmniphonySpatialStaticConfig *config);
@@ -198,6 +217,52 @@ uint32_t omniphony_spatial_static_frames_per_quantum(
     const OmniphonySpatialStaticProcessor *processor);
 uint32_t omniphony_spatial_static_object_count(
     const OmniphonySpatialStaticProcessor *processor);
+
+/*
+ * Combined Windows Spatial Audio object path introduced in ABI 0.6.
+ *
+ * Static descriptors are fixed at creation. `max_dynamic_objects` reserves the
+ * callback/worker transport capacity. Every process call supplies only the
+ * currently active dynamic descriptors, in the same order as
+ * `dynamic_input_planar`. A dynamic descriptor absent from a later quantum is
+ * inactive; a later new object must receive a new stable_id.
+ *
+ * PCM layout:
+ *
+ *   static_input_planar:
+ *     static0[frames] | static1[frames] | ...
+ *
+ *   dynamic_input_planar:
+ *     dynamic0[frames] | dynamic1[frames] | ...
+ *
+ * Static and dynamic objects enter one authored source scene and one binaural
+ * rendering pass. The callback performs bounded copies into preallocated
+ * storage; renderer allocation remains on a dedicated worker thread.
+ */
+OmniphonySpatialObjectProcessor *omniphony_spatial_objects_create(
+    const OmniphonySpatialObjectConfig *config);
+void omniphony_spatial_objects_destroy(
+    OmniphonySpatialObjectProcessor *processor);
+size_t omniphony_spatial_objects_latency_frames(
+    const OmniphonySpatialObjectProcessor *processor);
+uint64_t omniphony_spatial_objects_processed_blocks(
+    const OmniphonySpatialObjectProcessor *processor);
+int32_t omniphony_spatial_objects_process_f32(
+    OmniphonySpatialObjectProcessor *processor,
+    const float *static_input_planar,
+    const OmniphonySpatialDynamicObjectDescriptor *dynamic_objects,
+    uint32_t dynamic_object_count,
+    const float *dynamic_input_planar,
+    float *output_stereo,
+    size_t frames);
+uint32_t omniphony_spatial_objects_sample_rate_hz(
+    const OmniphonySpatialObjectProcessor *processor);
+uint32_t omniphony_spatial_objects_frames_per_quantum(
+    const OmniphonySpatialObjectProcessor *processor);
+uint32_t omniphony_spatial_objects_static_object_count(
+    const OmniphonySpatialObjectProcessor *processor);
+uint32_t omniphony_spatial_objects_max_dynamic_objects(
+    const OmniphonySpatialObjectProcessor *processor);
 
 #ifdef __cplusplus
 }
