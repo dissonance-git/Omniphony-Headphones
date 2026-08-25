@@ -1,11 +1,21 @@
 [CmdletBinding()]
 param(
-    [string]$ControlPath = (Join-Path $PSScriptRoot 'OmniphonySpatialProbeCtl.exe'),
-    [string]$ReceiptPath = (Join-Path $env:ProgramData 'Omniphony\spatial-provider-last.json')
+    [string]$ControlPath = '',
+    [string]$ReceiptPath = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 can evaluate script parameter defaults before
+# $PSScriptRoot is populated. Resolve install-relative defaults only after the
+# param block, matching the enable helper's compatibility boundary.
+if ([string]::IsNullOrWhiteSpace($ControlPath)) {
+    $ControlPath = Join-Path $PSScriptRoot 'OmniphonySpatialProbeCtl.exe'
+}
+if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
+    $ReceiptPath = Join-Path $env:ProgramData 'Omniphony\spatial-provider-last.json'
+}
 
 $ConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
 
