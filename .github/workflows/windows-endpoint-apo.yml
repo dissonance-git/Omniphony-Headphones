@@ -124,11 +124,16 @@ jobs:
             $probe = Join-Path $env:RUNNER_TEMP "$name.manifest.xml"
             Remove-Item $probe -Force -ErrorAction SilentlyContinue
             & $mt "-inputresource:$dll;#2" "-out:$probe" 2>$null
-            if ($LASTEXITCODE -eq 0 -or (Test-Path $probe)) {
+            $mtExit = $LASTEXITCODE
+            if ($mtExit -eq 0 -or (Test-Path $probe)) {
               throw "$name contains an embedded manifest; AudioDG can reject it."
             }
-            Write-Host "APO_MANIFEST_OK file=$name embedded=0"
+            Write-Host "APO_MANIFEST_OK file=$name embedded=0 mt_exit=$mtExit"
           }
+          # mt.exe returning nonzero is the expected evidence when resource #2
+          # is absent. The contract above has already validated that outcome;
+          # do not leak the deliberate probe failure as this step's exit code.
+          $global:LASTEXITCODE = 0
 
       - name: Validate realtime DLL ABI
         shell: pwsh
