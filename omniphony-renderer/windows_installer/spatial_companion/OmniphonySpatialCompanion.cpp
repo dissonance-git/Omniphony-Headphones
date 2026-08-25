@@ -67,6 +67,42 @@ int PrintIdentity() {
     return 0;
 }
 
+int RegisterCurrentMediaExtension() {
+    using RegisterMediaExtensionPackageFn = HRESULT(WINAPI*)(PCWSTR);
+
+    const auto package = Package::Current();
+    const auto familyName = package.Id().FamilyName();
+    HMODULE module = LoadLibraryW(L"CompPkgSup.dll");
+    if (module == nullptr) {
+        const auto error = GetLastError();
+        std::wcout << L"MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t0\n";
+        std::wcerr << L"ERROR\tCompPkgSup.dll unavailable\t" << error << L'\n';
+        return 6;
+    }
+
+    const auto registerMediaExtensionPackage = reinterpret_cast<RegisterMediaExtensionPackageFn>(
+        GetProcAddress(module, "RegisterMediaExtensionPackage"));
+    if (registerMediaExtensionPackage == nullptr) {
+        std::wcout << L"MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t0\n";
+        std::wcout << L"MEDIA_EXTENSION_REGISTER_REQUIRES_WINDOWS_11_24H2\t1\n";
+        FreeLibrary(module);
+        return 6;
+    }
+
+    std::wcout << L"MEDIA_EXTENSION_REGISTER_API_AVAILABLE\t1\n";
+    std::wcout << L"MEDIA_EXTENSION_PACKAGE_FAMILY\t" << familyName.c_str() << L'\n';
+    const HRESULT result = registerMediaExtensionPackage(familyName.c_str());
+    FreeLibrary(module);
+
+    std::wcout << L"MEDIA_EXTENSION_REGISTER_HRESULT\t0x"
+               << std::hex << std::uppercase << static_cast<unsigned long>(result) << std::dec << L'\n';
+    if (FAILED(result)) {
+        return 6;
+    }
+    std::wcout << L"MEDIA_EXTENSION_REGISTERED\t1\n";
+    return 0;
+}
+
 int NotifySpatialFormatChanged() {
     const auto formatConfiguration = SpatialAudioFormatConfiguration::GetDefault();
     formatConfiguration.ReportLicenseChangedAsync(winrt::hstring{kFormatGuid}).get();
@@ -85,7 +121,7 @@ int SelectionStatus(const wchar_t* endpointId) {
 int SelectEndpoint(const wchar_t* endpointId) {
     const auto package = Package::Current();
     std::wcout << L"CALLER_PACKAGE_FAMILY\t" << package.Id().FamilyName().c_str() << L'\n';
-    std::wcout << L"CALLER_OWNS_FORMAT_REQUIRED_BY_WINDOWS\t1\n";
+    std::wcout << L"FORMAT_OWNER_CONTEXT_REQUIRED_BY_WINDOWS\t1\n";
 
     const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
     std::wcout << L"BEFORE\n";
@@ -97,8 +133,10 @@ int SelectEndpoint(const wchar_t* endpointId) {
     std::wcout << L"SET_STATUS\t" << static_cast<int>(status)
                << L"\t" << SelectionStatusText(status) << L'\n';
     if (status != SetDefaultSpatialAudioFormatStatus::Succeeded) {
+        std::wcout << L"WINDOWS_SETTER_ACCEPTED_CONTEXT\t0\n";
         return 7;
     }
+    std::wcout << L"WINDOWS_SETTER_ACCEPTED_CONTEXT\t1\n";
 
     const auto after = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
     std::wcout << L"AFTER\n";
@@ -115,6 +153,7 @@ void Usage() {
     std::wcerr
         << L"usage: OmniphonySpatialCompanion <command> [endpoint-id]\n"
         << L"  identity              prove the process is running with package identity\n"
+        << L"  register              register the package media extension on Windows 11 24H2+\n"
         << L"  notify                report license/configuration change for Omniphony\n"
         << L"  status <endpoint-id>  read spatial selection state from packaged identity\n"
         << L"  select <endpoint-id>  ask Windows to select Omniphony from packaged identity\n";
@@ -133,6 +172,10 @@ int wmain(int argc, wchar_t** argv) {
         const std::wstring command = argv[1];
         if (command == L"identity" && argc == 2) {
             return PrintIdentity();
+        }
+        if (command == L"register" && argc == 2) {
+            PrintIdentity();
+            return RegisterCurrentMediaExtension();
         }
         if (command == L"notify" && argc == 2) {
             PrintIdentity();

@@ -74,10 +74,17 @@ jobs:
             if ($serviceSource -notmatch [regex]::Escape($token)) { throw "License broker response token missing: $token" }
           }
 
+          $companionSource = Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_companion\OmniphonySpatialCompanion.cpp" -Raw
+          foreach ($token in @('RegisterMediaExtensionPackage','MEDIA_EXTENSION_REGISTERED','WINDOWS_SETTER_ACCEPTED_CONTEXT')) {
+            if ($companionSource -notmatch [regex]::Escape($token)) { throw "Packaged ownership diagnostic token missing: $token" }
+          }
+          if ($companionSource -match 'CALLER_OWNS_FORMAT_REQUIRED_BY_WINDOWS') { throw 'Companion still contains an unproven ownership assertion.' }
+
           Write-Host 'SPATIAL_COMPANION_MSIX_CONTRACT_OK 1'
           Write-Host 'SPATIAL_COMPANION_PACKAGE_IDENTITY_OK 1'
           Write-Host 'SPATIAL_COMPANION_MEDIA_COMPONENT_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_SPATIAL_SUBTYPE_DECLARED 1'
+          Write-Host 'SPATIAL_COMPANION_MEDIA_EXTENSION_REGISTRATION_PATH_OK 1'
           Write-Host 'SPATIAL_COMPANION_APP_SERVICE_CONTRACT_OK 1'
           Write-Host 'SPATIAL_COMPANION_EXTERNAL_OWNERSHIP_GATE_UNPROVEN 1'
 
