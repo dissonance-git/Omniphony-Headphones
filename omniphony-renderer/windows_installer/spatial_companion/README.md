@@ -16,6 +16,7 @@ This package therefore provides:
 - a Windows Runtime background component that answers the observed license-broker message shape;
 - a packaged CLI that can register the current media-extension package on Windows 11 24H2+, report license/configuration changes, discover the default multimedia render endpoint through Core Audio, inspect endpoint spatial state, and ask Windows to select Omniphony from package identity;
 - a one-command physical ownership verifier;
+- a single-file development bootstrapper that carries the signed MSIX and its public test certificate inside one EXE;
 - a development build/signing script and CI artifact.
 
 ## Evidence boundary
@@ -28,11 +29,35 @@ The experiment is successful only if a physical machine proves that Windows reco
 
 The production `OmniphonySetup.exe` must not claim this package solves raw Spatial Audio ingress until that physical ownership test passes. Stream availability remains a separate boundary after ownership succeeds.
 
-## Development package
+## Single EXE development test
 
-CI builds a signed development MSIX plus its public development certificate and this README. The certificate is disposable and is only for sideload testing.
+For the physical Windows test, the preferred artifact is now just:
 
-After installing the certificate and MSIX, the app execution alias exposes:
+```text
+OmniphonySpatialSetup.exe
+```
+
+Run that EXE on Windows 11 24H2 or newer with the intended headphones/output selected as the default multimedia render endpoint. The EXE requests administrator elevation because the current development package is signed with a disposable self-signed certificate. It then performs this sequence itself:
+
+```text
+validate embedded bundle
+→ extract embedded signed MSIX + public CER to a temporary directory
+→ add the Omniphony Development public certificate to LocalMachine\TrustedPeople
+→ replace/install Omniphony.SpatialCompanion for the current user
+→ launch the packaged OmniphonySpatialCompanion.exe execution alias
+→ run verify-default
+→ remove the temporary extracted payloads
+```
+
+The bootstrapper never embeds the certificate private key. The public development certificate is retained in `TrustedPeople` because Windows must continue to trust the installed development package. This is a test-distribution path, not the production signing model.
+
+CI verifies that the MSIX and CER embedded in `OmniphonySpatialSetup.exe` are byte-for-byte identical to the separately built and validated package and public certificate. The single EXE automates setup only. It does not manufacture or override the physical endpoint ownership result.
+
+## Development package internals
+
+CI still emits the signed development MSIX plus its public development certificate alongside the single EXE so the bundle can be independently inspected. The certificate is disposable and is only for sideload testing.
+
+After package installation, the app execution alias exposes:
 
 ```text
 OmniphonySpatialCompanion.exe identity
@@ -47,7 +72,7 @@ OmniphonySpatialCompanion.exe verify-default
 
 ## One-command physical ownership gate
 
-On Windows 11 24H2 or newer, with the intended headphones/output selected as the default multimedia render endpoint, run:
+The setup EXE automatically invokes:
 
 ```text
 OmniphonySpatialCompanion.exe verify-default

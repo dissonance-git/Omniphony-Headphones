@@ -20,7 +20,7 @@ $PackageRoot = Join-Path $BuildRoot 'package'
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BuildRoot
 New-Item -ItemType Directory -Force -Path $NativeBuild, $PackageRoot, $OutputDirectory | Out-Null
 
-Write-Host 'Building packaged companion executable...'
+Write-Host 'Building packaged companion executable and single-file bootstrapper...'
 cmake -S $SourceRoot -B $NativeBuild -A x64
 if ($LASTEXITCODE -ne 0) { throw "Companion CMake configure failed: $LASTEXITCODE" }
 cmake --build $NativeBuild --config Release --parallel
@@ -42,11 +42,12 @@ $serviceProject = Join-Path $SourceRoot 'AppServiceComponent\OmniphonySpatialLic
 if ($LASTEXITCODE -ne 0) { throw "AppService component build failed: $LASTEXITCODE" }
 
 $companionExe = Join-Path $NativeBuild 'Release\OmniphonySpatialCompanion.exe'
+$setupStub = Join-Path $NativeBuild 'Release\OmniphonySpatialSetup.exe'
 $serviceOutput = Join-Path $SourceRoot 'AppServiceComponent\x64\Release\OmniphonySpatialLicenseService'
 $serviceDll = Join-Path $serviceOutput 'OmniphonySpatialLicenseService.dll'
 $serviceWinmd = Join-Path $serviceOutput 'OmniphonySpatialLicenseService.winmd'
-foreach ($path in @($companionExe, $serviceDll, $serviceWinmd)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing package payload: $path" }
+foreach ($path in @($companionExe, $setupStub, $serviceDll, $serviceWinmd)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing package/build payload: $path" }
 }
 
 Copy-Item -LiteralPath $companionExe -Destination $PackageRoot -Force
@@ -88,7 +89,9 @@ $makeAppx = Get-ChildItem -Path $kitsBin -Recurse -Filter makeappx.exe -ErrorAct
 if ($null -eq $makeAppx) { throw 'MakeAppx.exe was not found in the Windows SDK.' }
 
 $msix = Join-Path $OutputDirectory 'OmniphonySpatialCompanion.msix'
-Remove-Item -Force -ErrorAction SilentlyContinue $msix
+$cer = Join-Path $OutputDirectory 'OmniphonySpatialCompanion.cer'
+$setupExe = Join-Path $OutputDirectory 'OmniphonySpatialSetup.exe'
+Remove-Item -Force -ErrorAction SilentlyContinue $msix, $cer, $setupExe
 & $makeAppx.FullName pack /d $PackageRoot /p $msix /o
 if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed: $LASTEXITCODE" }
 
@@ -98,7 +101,6 @@ if ($Sign) {
     $passwordText = [Guid]::NewGuid().ToString('N')
     $password = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
     $pfx = Join-Path $BuildRoot 'OmniphonySpatialCompanion.pfx'
-    $cer = Join-Path $OutputDirectory 'OmniphonySpatialCompanion.cer'
     Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password | Out-Null
     Export-Certificate -Cert $cert -FilePath $cer -Type CERT | Out-Null
 
@@ -109,6 +111,33 @@ if ($Sign) {
     if ($null -eq $signTool) { throw 'SignTool.exe was not found in the Windows SDK.' }
     & $signTool.FullName sign /fd SHA256 /f $pfx /p $passwordText $msix
     if ($LASTEXITCODE -ne 0) { throw "SignTool failed: $LASTEXITCODE" }
+
+    Write-Host 'Bundling signed MSIX and public development certificate into one setup executable...'
+    $msixLength = [UInt64](Get-Item -LiteralPath $msix).Length
+    $cerLength = [UInt64](Get-Item -LiteralPath $cer).Length
+    Copy-Item -LiteralPath $setupStub -Destination $setupExe -Force
+    $output = [IO.File]::Open($setupExe, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        foreach ($payload in @($msix, $cer)) {
+            $input = [IO.File]::OpenRead($payload)
+            try { $input.CopyTo($output) } finally { $input.Dispose() }
+        }
+
+        $writer = New-Object IO.BinaryWriter($output, [Text.Encoding]::UTF8, $true)
+        try {
+            $magic = [Text.Encoding]::ASCII.GetBytes('OMNISPATBUNDLE1!')
+            if ($magic.Length -ne 16) { throw 'Single-file bundle magic must be exactly 16 bytes.' }
+            $writer.Write($magic)
+            $writer.Write($msixLength)
+            $writer.Write($cerLength)
+            $writer.Flush()
+        } finally {
+            $writer.Dispose()
+        }
+    } finally {
+        $output.Dispose()
+    }
+
     Remove-Item -Force $pfx
     Remove-Item -Path ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -Force -ErrorAction SilentlyContinue
 }
@@ -118,6 +147,14 @@ Copy-Item -LiteralPath (Join-Path $SourceRoot 'README.md') -Destination (Join-Pa
 $hash = (Get-FileHash -LiteralPath $msix -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "SPATIAL_COMPANION_MSIX $msix"
 Write-Host "SPATIAL_COMPANION_SHA256 $hash"
+if (Test-Path -LiteralPath $setupExe -PathType Leaf) {
+    $setupHash = (Get-FileHash -LiteralPath $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Host "SPATIAL_COMPANION_SINGLE_EXE $setupExe"
+    Write-Host "SPATIAL_COMPANION_SINGLE_EXE_SHA256 $setupHash"
+    Write-Host 'SPATIAL_COMPANION_SINGLE_EXE_AVAILABLE 1'
+} else {
+    Write-Host 'SPATIAL_COMPANION_SINGLE_EXE_AVAILABLE 0'
+}
 Write-Host 'SPATIAL_COMPANION_PACKAGE_IDENTITY Omniphony.SpatialCompanion'
 Write-Host 'SPATIAL_COMPANION_APP_SERVICE OmniphonySpatialLicense'
 Write-Host 'SPATIAL_COMPANION_FORMAT_GUID {4BD75423-A66C-4586-B782-1FCBBDF2AE74}'

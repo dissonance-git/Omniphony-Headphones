@@ -17,3 +17,16 @@ target_link_libraries(OmniphonySpatialCompanion PRIVATE windowsapp ole32)
 set_property(TARGET OmniphonySpatialCompanion PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
+
+add_executable(OmniphonySpatialSetup
+    OmniphonySpatialSetup.cpp
+)
+
+target_compile_features(OmniphonySpatialSetup PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialSetup PRIVATE UNICODE _UNICODE)
+target_compile_options(OmniphonySpatialSetup PRIVATE /W4 /permissive-)
+target_link_libraries(OmniphonySpatialSetup PRIVATE windowsapp crypt32 shlwapi)
+set_target_properties(OmniphonySpatialSetup PROPERTIES
+    LINK_FLAGS "/MANIFESTUAC:\"level='requireAdministrator' uiAccess='false'\""
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+)
