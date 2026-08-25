@@ -6,6 +6,11 @@ namespace {
 class ExplorerPause {
 public:
     ~ExplorerPause() {
+        const wchar_t* commandLine = GetCommandLineW();
+        if (commandLine != nullptr && wcsstr(commandLine, L"--capture") != nullptr) {
+            return;
+        }
+
         DWORD processIds[4]{};
         const DWORD count = GetConsoleProcessList(
             processIds,
