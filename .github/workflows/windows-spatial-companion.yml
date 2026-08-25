@@ -97,8 +97,14 @@ jobs:
             'Omniphony Development',
             'AddPackageByUriAsync',
             'ForceUpdateFromAnyVersion',
+            'RegisterMediaExtensionPackage',
+            'SPATIAL_SETUP_MEDIA_EXTENSION_REGISTERED',
+            'GetDefaultAudioEndpoint',
+            'SPATIAL_SETUP_DEFAULT_RENDER_ENDPOINT_DISCOVERED',
             'OmniphonySpatialCompanion.exe',
-            'verify-default'
+            'notify',
+            'select',
+            'SPATIAL_SETUP_VERIFY_DEFAULT_OK'
           )) {
             if ($setupSource -notmatch [regex]::Escape($token)) { throw "Single-file setup contract token missing: $token" }
           }
@@ -155,6 +161,7 @@ jobs:
           Write-Host 'SPATIAL_COMPANION_MEDIA_COMPONENT_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_SPATIAL_SUBTYPE_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_MEDIA_EXTENSION_REGISTRATION_PATH_OK 1'
+          Write-Host 'SPATIAL_COMPANION_BOOTSTRAP_FULL_TRUST_REGISTRATION_PATH_OK 1'
           Write-Host 'SPATIAL_COMPANION_DEFAULT_ENDPOINT_DISCOVERY_PATH_OK 1'
           Write-Host 'SPATIAL_COMPANION_ONE_COMMAND_PHYSICAL_GATE_OK 1'
           Write-Host 'SPATIAL_COMPANION_APP_SERVICE_CONTRACT_OK 1'
