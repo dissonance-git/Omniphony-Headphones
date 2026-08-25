@@ -99,6 +99,8 @@ var
   ResultCode: Integer;
   PowerShell: String;
   Params: String;
+  SpatialParams: String;
+  SpatialReceipt: String;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -116,6 +118,29 @@ begin
     begin
       RaiseException(
         'Omniphony could not validate attachment to the current Windows output, so setup stopped without claiming success. Diagnostic log: C:\ProgramData\Omniphony\install-last.log'
+      );
+    end;
+
+    { Spatial Sound is an additive product path. Ask Windows to select the exact
+      Omniphony format GUID headlessly and require readback inside the helper.
+      A Windows ownership/support rejection must not destroy a proven stereo/APO
+      install, so record the result and leave the core product installed. }
+    SpatialParams := '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      ExpandConstant('{app}\support\Enable-OmniphonySpatialProvider.ps1') + '"';
+    SpatialReceipt := ExpandConstant('{commonappdata}\Omniphony\spatial-enable-install.txt');
+    ResultCode := -1;
+    if Exec(PowerShell, SpatialParams, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
+       (ResultCode = 0) then
+    begin
+      SaveStringToFile(SpatialReceipt, 'OMNIPHONY_SPATIAL_AUTO_ENABLE=1'#13#10, False);
+    end
+    else
+    begin
+      SaveStringToFile(
+        SpatialReceipt,
+        'OMNIPHONY_SPATIAL_AUTO_ENABLE=0'#13#10 +
+        'EXIT_CODE=' + IntToStr(ResultCode) + #13#10,
+        False
       );
     end;
   end;
