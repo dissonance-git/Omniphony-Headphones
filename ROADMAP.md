@@ -1,341 +1,82 @@
 # Omniphony roadmap
 
-Omniphony's target is one free and open-source spatial renderer for Windows that enhances ordinary stereo, preserves authored surround and height, accepts true spatial scenes when the platform exposes them, and performs the final headphone render itself.
+This document contains only work that is not yet accepted, physically proven, productized, or complete.
 
-> **Preserve the richest source representation available and invent only what is missing.**
+Completed capability belongs in `README.md`, `AGENTS.md`, implementation history, tests, and listening history. Once a roadmap item is accepted or proven, remove it from this file rather than preserving it as a completed phase.
 
-This roadmap tracks product capability, not individual experiments. Renderer fixtures, Windows graph proof, application proof, and listening proof remain distinct evidence states.
-
-## Product invariant
-
-All source types converge on one source-authority model and one final binaural renderer.
-
-```text
-stereo
-→ preserve finished master
-→ infer bounded missing spatial structure
-→ Omniphony
-
-5.1 / 7.1 / conventional height PCM
-→ preserve authored speaker identity and position
-→ infer less
-→ same Omniphony
-
-Windows Spatial Audio static objects
-→ preserve supplied fixed spatial roles
-→ same Omniphony
-
-Windows Spatial Audio dynamic objects
-→ preserve object identity + continuous XYZ
-→ same Omniphony
-
-all paths
-→ one final binaural render
-→ stereo headphone endpoint
-```
-
-`AUTHORED`, `DERIVED`, and `EMPTY` remain the source-authority states. Richer input increases source authority rather than selecting a different product mode.
+The product target remains one open spatial renderer that preserves the richest source representation available, performs one final binaural render, and invents only what the source does not already provide.
 
 ---
 
-## Phase 0: Windows stereo and conventional surround baseline
+## 1. Prove the physical spatial-output path
 
-**State: accepted baseline**
+Run the finite closed-gate spatial egress diagnostic on the exact physical Windows headphone endpoint.
 
-Implemented and accepted:
-
-- headless Windows endpoint deployment;
-- protected stereo Current path;
-- format-changing stream SFX;
-- authored 7.1 shared-client ingress;
-- authored channel-mask mapping into the source scene;
-- one source-aware binaural renderer;
-- exact stereo physical endpoint output;
-- endpoint rollback and recovery floor;
-- conventional 7.1 game use accepted as the production baseline.
-
-Reference path:
+Required evidence:
 
 ```text
-Windows stereo or authored 7.1 PCM
-        ↓
-Omniphony stream SFX
-        ↓
-source-authority mapping
-        ↓
-Current source-aware renderer
-        ↓
-stereo headphone endpoint
+COM-shaped authored static source reaches Omniphony
+→ binaural stereo reaches the bounded egress queue
+→ the real endpoint event clock drains audio through IAudioRenderClient
+→ producer drops remain zero
+→ underrun behavior is measured
+→ provider registration remains untouched
+→ public provider selection remains untouched
 ```
 
-Do not reopen this phase merely to gather redundant telemetry unless a later regression makes the conventional path uncertain.
-
----
-
-## Phase 1: Conventional authored height PCM
-
-**State: renderer/APO support exists; application-level proof remains secondary**
-
-The native-bed path already regression-tests authored 7.1.4 processing. Preserve useful conventional height layouts when an application actually opens them.
-
-Important boundary:
-
-> **Do not treat 8.1.4.4 as the next conventional WAVEFORMATEXTENSIBLE PCM milestone.**
-
-Microsoft exposes the complete 17-role 8.1.4.4 vocabulary through Windows Spatial Audio static `AudioObjectType` objects. Conventional PCM remains a compatibility path; the full spatial target belongs to the object API.
-
-Phase 1 therefore remains bounded:
-
-```text
-5.1 / 7.1 / supported height PCM
-→ authored mask identity
-→ canonical source scene
-→ Omniphony
-```
-
-No synthetic lower speakers or back-center channels may be promoted to `AUTHORED` simply to fill the canonical frame.
-
----
-
-## Phase 2: Windows Spatial Sound provider seam
-
-**State: immediate frontier. Capability, internal static stream, COM-shaped static quantum transport into Current, C++ realtime bridge, RAW-mode APO single-render bypass, Current-to-egress queue handoff, read-only endpoint preflight, inert RAW output initialization, endpoint-owned cadence adaptation, and a closed-gate endpoint-event output pump are implemented in source. The queue and pump compile and pass registry-free CI smokes. A finite physical egress diagnostic is implemented and compiled, but has not yet been run on the real endpoint. Public provider activation remains closed.**
-
-This is the critical platform milestone.
-
-Microsoft's public application contract is `ISpatialAudioClient`. Spatial applications can submit:
-
-- up to 17 predefined static spatial roles, forming an 8.1.4.4 vocabulary;
-- dynamic objects with arbitrary positions that can change over time;
-- object PCM independently of the final headphone/speaker render format.
-
-The active Windows spatial renderer is abstracted from the application, which is exactly the product position Omniphony ultimately wants to occupy.
-
-Target topology:
-
-```text
-spatial application
-        ↓
-Windows Spatial Audio object API
-        ↓
-Omniphony spatial provider
-        ↓
-canonical static scene + dynamic object layer
-        ↓
-Omniphony binaural renderer
-        ↓
-preallocated stereo cadence adapter
-        ↓
-endpoint-event RAW stereo egress
-        ↓
-Omniphony APOs transparent in RAW mode
-        ↓
-physical headphone endpoint
-```
-
-### P0: endpoint capability
-
-Already implemented as read-only probing:
-
-- activate `ISpatialAudioClient` on the endpoint;
-- query native static-object mask;
-- query object formats;
-- query dynamic-object capacity;
-- inspect static object positions.
-
-This proves endpoint capabilities only. It does not prove that Omniphony can become the selected provider.
-
-A separate read-only `IAudioClient3` RAW output probe inspects the intended physical endpoint without initializing or starting a render stream. It records endpoint identity, stereo float32 / 48 kHz support, shared-engine period constraints, and whether 480 frames happens to be a legal engine period. The 480 result is diagnostic only. Omniphony's renderer quantum must not become an unnecessary physical-device compatibility requirement.
-
-The source also contains an **inert** event-driven RAW output lifecycle. Given one exact physical endpoint ID it can initialize a shared RAW stereo stream, choose the endpoint-reported default legal period unless an exact legal period is requested, acquire `IAudioRenderClient`, bind the Windows sample-ready event, inspect the actual buffer size, and then remain deliberately unstarted.
-
-A preallocated single-producer/single-consumer stereo queue bridges the two cadence domains. The producer remains fixed at Omniphony's 480-frame Current quantum while the endpoint consumer drains whatever legal period Windows owns. Its realtime operations allocate nothing and never block: whole producer blocks are rejected on overflow, underrun tails are explicitly zero-filled, and both conditions are observable.
-
-The installed APO side has an explicit RAW contract. Both the endpoint and stream APO capture the Windows audio processing mode at initialization. In `AUDIO_SIGNALPROCESSINGMODE_RAW`, they do not load Current. The endpoint APO becomes an identity effect, while the stream APO suppresses its normal 7.1 preferred-input expansion and accepts only an identity stereo float32 pair. A dedicated smoke encodes bit transparency, silent-buffer transparency, zero Omniphony latency, no `omniphony_realtime.dll` load, and 7.1 rejection in RAW mode.
-
-These are the source-level conditions required before a future provider may place already-rendered binaural stereo back onto the physical endpoint without double-rendering it.
-
-### P1: provider enumeration
-
-The repository contains a bounded provider-registration probe under:
-
-```text
-omniphony-renderer/windows_installer/spatial_provider_probe/
-```
-
-Its first real-machine question remains deliberately small:
-
-> Can an independently registered Omniphony spatial format appear in the Windows Spatial sound selector?
-
-The current candidate registration seam is:
-
-```text
-HKLM\SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder\{format-guid}
-```
-
-This is not a Microsoft-documented third-party provider API. It is an experimental boundary and must remain labeled as such.
-
-Provider enumeration is no longer the only useful physical experiment. Before asking Windows to select the provider, the output half can now be proved independently with a finite closed-gate egress diagnostic that performs no provider registration or selection.
-
-### P2: provider activation
-
-**Implementation state:** the COM provider exposes a standards-shaped `ISpatialAudioClient` capability object. It advertises the complete 17-role static vocabulary, one mono float32 / 48 kHz object format, a 480-frame capability quantum, and zero dynamic-object capacity.
-
-The repository also contains an internal static-only `ISpatialAudioObjectRenderStream` lifecycle. Its activation helper accepts the documented `VT_BLOB` form used by `ISpatialAudioClient::ActivateSpatialAudioStream` and validates:
-
-- exact activation-structure size;
-- `ISpatialAudioObjectRenderStream` interface identity;
-- object format;
-- requested static mask;
-- zero dynamic-object capacity.
-
-Behind that COM-shaped stream, `omniphony_realtime.dll` exposes a fixed-topology static-object ABI. The Windows-facing side copies planar mono object quanta through preallocated rings while a dedicated worker owns `WindowsStaticObjectPipeline` and the existing source-aware Current renderer. Directional Windows positions remain authored geometry; LFE remains non-directional.
-
-The C++ bridge dynamically loads that ABI from an explicit absolute DLL path, verifies the realtime ABI before processor creation, keeps the processor alive only while its supplying module remains loaded, and composes directly with the internal COM-shaped stream. Each completed update quantum is snapshotted into the immutable role order, with object volume and partial end-of-stream semantics applied before transport:
-
-```text
-COM-shaped static object quantum
-→ immutable static role order
-→ C++ realtime bridge
-→ omniphony_realtime.dll
-→ WindowsStaticObjectPipeline
-→ existing source-aware Current renderer
-→ 480-frame binaural stereo quantum
-→ preallocated stereo queue
-```
-
-The composed COM → Current → queue path is registry-free, compiled, and smoke-tested. It remains behind the public gate. It proves source-side input and rendering wiring in isolation; it does not prove that Windows will enumerate/select the provider or that returned stereo reaches the physical endpoint.
-
-The closed-gate output pump now implements the endpoint consumer shape used by Microsoft's event-driven WASAPI renderer sample:
-
-```text
-pre-roll silence
-→ IAudioClient::Start
-→ wait on exact endpoint sample-ready event
-→ IAudioClient::GetCurrentPadding
-→ writable = endpoint buffer - padding
-→ IAudioRenderClient::GetBuffer(writable)
-→ drain queue directly into endpoint stereo buffer
-→ zero-fill any underrun tail
-→ IAudioRenderClient::ReleaseBuffer
-```
-
-The output pump has no device discovery on its event path. It uses the exact endpoint selected during control-path setup, exposes drain/real/silence frame counters, fails closed on endpoint errors, and introduces no second free-running playback timer.
-
-A finite `OmniphonySpatialClosedGateEgressProbe` composes the complete source-side chain with that pump. It synthesizes low-level FrontLeft and TopFrontLeft static objects, sends them through the internal COM stream and Current, queues the binaural result, then uses an MMCSS `Pro Audio` endpoint-event worker to drain one explicit physical endpoint for a bounded duration. It reports queue drops and underruns. CI compiles the probe but deliberately never runs the audible endpoint test.
-
-The public provider is therefore still intentionally closed. `IsSpatialAudioStreamAvailable` and `ActivateSpatialAudioStream` continue to return `SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE`. The next evidence step is to run the finite closed-gate egress diagnostic on the real machine. Only after that output path is physically proven should provider enumeration/selection and public stream activation proceed.
-
-A useful open-source prior exists in `ThreeDeeJay/MSSOAL`, which implements a COM object shaped as `ISpatialAudioClient` plus `ISpatialAudioObjectRenderStream` and `ISpatialAudioObject`. Its registration tool independently identified the same `Spatial\Encoder` surface using Process Monitor observations. MSSOAL describes its provider work as a proof of concept rather than a working product, so it remains a mechanism quarry rather than Windows proof.
-
-Its stream implementation is useful for one architecture warning: it documents a move away from an independent render-thread clock toward synchronous object-buffer submission because an earlier two-clock design accumulated drift and stutter. SciSpace literature on low-latency audio and data-flow scheduling points in the same general direction: bounded buffering and explicit scheduling boundaries are preferable to letting independently timed stages drift without compensation.
-
-For Omniphony, that makes the output law:
-
-> **The physical endpoint event cadence owns downstream consumption. Omniphony keeps its own fixed render quantum upstream and crosses the boundary through bounded preallocated buffering rather than forcing both periods to be identical.**
-
-The queue and pump now encode that law in source and compile under the Windows diagnostic gate. Audible correctness remains an engineering hypothesis until the finite physical egress probe is run on the real endpoint.
-
-Treat MSSOAL as a mechanism quarry, not proof:
-
-- reuse interface shape and lifecycle ideas where correct;
-- independently test every Windows boundary;
-- do not inherit claims about Windows Sonic, object counts, or rendering internals without primary evidence;
-- do not adopt OpenAL Soft as Omniphony's renderer merely because MSSOAL uses it.
+This proof must distinguish source-side correctness, renderer correctness, queue/cadence correctness, and physical endpoint playback. A successful synthetic or registry-free smoke is not a substitute for real endpoint evidence.
 
 Gate:
 
-```text
-internal static COM lifecycle exists
-≠ static-object realtime ABI reaches Current in isolation
-≠ C++ bridge drives that ABI in isolation
-≠ COM-shaped update quanta reach Current in isolation
-≠ Current stereo reaches the egress queue in isolation
-≠ RAW-mode Omniphony APOs are source-level transparent
-≠ preallocated 480→variable-period stereo queue works in isolation
-≠ closed-gate endpoint-event pump compiles and passes no-device contract smoke
-≠ finite physical egress probe compiles
-≠ finite physical egress probe actually reaches the real endpoint
-≠ Windows enumerates Omniphony
-≠ Windows activates/selects its COM provider
-≠ public spatial stream activates
-≠ applications feed objects through the complete path
-```
+> Authored static spatial content reaches the real headphone endpoint through Omniphony exactly once while the public Spatial Sound provider remains closed.
 
-Each transition needs separate evidence.
+---
 
-### P3: static object stream
+## 2. Prove Windows Spatial Sound provider enumeration and activation
 
-**Implementation state:** registry-free COM lifecycle, activation marshalling, immutable static-role quantum assembly, object volume/EOS handling, realtime bridge transport, Current worker handoff, Current-to-egress queue handoff, RAW-mode double-render prevention, exact-endpoint output initialization, variable-period clock adaptation, and an endpoint-event output pump exist in source. The queue/pump compile and pass registry-free diagnostics. A finite physical egress probe is implemented and compiled. Real endpoint playback and real Windows provider proof remain pending.**
+After physical egress is proven independently, determine whether Windows can safely enumerate and activate Omniphony as a selectable Spatial Sound provider.
 
-The internal COM stream already models:
+The provider-registration surface is undocumented and must remain experimental until physically verified. Do not generalize from registry shape, MSSOAL, Process Monitor observations, or successful COM construction alone.
 
-- static role activation;
-- duplicate-role rejection;
-- unavailable-role rejection;
-- fixed static positions;
-- object buffers and update ordering;
-- per-object volume;
-- implicit end-of-stream semantics;
-- role reactivation;
-- start / stop / reset lifecycle;
-- zero dynamic-object capacity.
+Required work:
 
-The realtime/output side now provides:
+- register only Omniphony-owned provider state;
+- verify appearance in the Windows Spatial sound selector;
+- verify selection without damaging ordinary stereo playback;
+- verify COM activation from the Windows provider path;
+- verify failure leaves the previous provider state recoverable;
+- keep public stream activation fail-closed until output transport is proven end to end;
+- record every provider/selection mutation so uninstall and rollback can restore prior state exactly.
 
-- a fixed immutable stream topology;
-- canonical role descriptors and authoritative Windows positions;
-- planar object PCM input;
-- preallocated callback-facing rings;
-- a dedicated Current worker;
-- time-aligned safety fold-down on worker starvation;
-- stereo binaural output;
-- processed-block and latency observability;
-- preallocated SPSC stereo egress queue;
-- variable endpoint-period consumption;
-- padding-aware `IAudioRenderClient` drain;
-- startup silence pre-roll;
-- queue drop/underrun and endpoint drain counters;
-- explicit Start/Stop/Reset lifecycle behind the closed gate.
+Gate:
 
-The source-side static path guarantees:
+> Windows can enumerate, select, activate, and safely deselect Omniphony without leaving the machine on a provider that cannot render.
 
-1. one descriptor order is derived from the activation static mask before processing;
-2. that topology remains fixed for the stream lifetime;
-3. completed COM update quanta are assembled into planar PCM in that exact order;
-4. inactive or ended static roles become silence rather than mutating topology;
-5. per-object volume and partial end-of-stream semantics are applied before handoff;
-6. DLL discovery and renderer construction happen before update processing, not inside the OS-facing update call;
-7. Current's complete 480-frame stereo result can be enqueued without blocking or allocating;
-8. once Current has produced binaural stereo, Windows RAW processing mode leaves the Omniphony endpoint and stream APOs transparent rather than invoking Current again;
-9. the physical endpoint's event cadence, not a second provider timer, owns downstream consumption;
-10. endpoint errors fail closed and the public provider gate remains unavailable.
+---
 
-The next decisive **physical** step is no longer to invent more output machinery. It is to run the finite closed-gate egress probe on the exact Windows endpoint and record:
+## 3. Receive a real static Windows Spatial Audio object
+
+Cross the boundary from internal/static test machinery to an object supplied through the actually selected Windows Spatial Audio provider path.
+
+Preserve:
 
 ```text
-COM-shaped static source reaches Current
-Current stereo reaches queue
-endpoint event clock fires
-IAudioRenderClient drains real frames
-queue dropped frames = 0
-queue underrun behavior measured
-provider registration = 0
-provider selection = 0
-public provider gate = closed
+static role identity
+PCM
+source authority
+object volume
+update timing
+lifetime / EOS semantics
+exact authored role position
 ```
 
-A successful result proves the output half independently of the undocumented Spatial Sound provider registration seam. It still does not prove that Windows can enumerate or select Omniphony as a provider.
+Do not route real objects through stereo inference. Do not reconstruct metadata after another renderer has already collapsed the scene.
 
-Then return to the provider seam and receive one real static object through the selected provider while preserving:
+First gate:
 
-- object/static role identity;
-- PCM;
-- source authority;
-- update timing;
-- exact role position.
+> One real static object supplied above or below the listener reaches Omniphony as authored spatial truth and is rendered once to the real endpoint.
 
-Scale to the complete 17-role vocabulary:
+Then scale to the complete static vocabulary:
 
 ```text
 horizontal: FL FR C LFE SL SR BL BR BC
@@ -343,142 +84,71 @@ upper:      TFL TFR TBL TBR
 lower:      BFL BFR BBL BBR
 ```
 
-Gate:
+Final static gate:
 
-> A static source placed above or below the listener reaches Omniphony as authored spatial truth, survives the provider-to-Current-to-egress transport, and is rendered once by Omniphony to the real headphone endpoint.
+> The full 17-role static vocabulary survives Windows ingress, Omniphony rendering, cadence adaptation, and physical egress without role substitution, duplicate spatialization, or inferred replacement.
 
-### P4: dynamic XYZ object stream
+---
 
-Receive a real dynamic object and preserve:
+## 4. Receive dynamic XYZ objects
+
+Add true dynamic-object capacity only when identity and continuous geometry can be preserved through the complete Windows path.
+
+Required semantics:
 
 ```text
-object identity
+stable object identity
 audio buffer
-x / y / z
+continuous x / y / z
 volume
 lifetime
 motion trajectory
-other supplied authoritative metadata
+update timing
+other authoritative host metadata
 ```
 
-Do not snap dynamic objects to the 17 static anchors. The static frame and dynamic layer are parallel source representations.
-
-Dynamic capacity remains truthfully zero until this path exists.
+Do not snap dynamic objects to the static 17-role frame. Static roles and continuous objects remain parallel source representations.
 
 Gate:
 
-> A moving object can cross arbitrary 3-D space while its identity and continuous position survive into the Omniphony renderer.
-
-### P5: real spatial application/game
-
-Prove the path with a real application using Windows Spatial Audio.
-
-No game injection, hooks, anti-cheat-sensitive methods, or reconstruction of metadata from already-binaural stereo.
-
-The result must distinguish:
-
-```text
-application produced static objects
-application produced dynamic objects
-Windows selected Omniphony
-Omniphony received those objects
-object PCM reached Current
-Current's binaural stereo reached the real endpoint
-Omniphony performed the single final binaural render
-```
-
-### Provider installation gate
-
-Spatial-provider deployment must join the existing installer as a transaction rather than as an optimistic registry write.
-
-The staging half of that future transaction exists as an inert primitive. `Stage-OmniphonySpatialProvider.ps1` creates immutable content-addressed generations beneath the Omniphony install root. Generation identity is derived from the complete sorted package hash set, not only the provider/runtime DLLs.
-
-For a new candidate the staging primitive now:
-
-- requires a 64-bit PowerShell host on 64-bit Windows so Program Files and future registry views cannot silently redirect;
-- rejects unsafe source/managed-tree path nesting;
-- copies the exact package into a temporary generation directory;
-- verifies that the immutable generation contains exactly the expected files and no unexpected subdirectories;
-- SHA-256 verifies every copied file;
-- runs provider capability, static-stream, realtime-bridge, and stereo clock-domain queue smokes from the temporary candidate;
-- moves the verified candidate into its final immutable generation path;
-- re-verifies the exact file set and hashes from the final path;
-- re-runs provider capability, static-stream, realtime-bridge, and clock-domain queue smokes from the final path;
-- stages both `OmniphonySpatialRawOutputProbe.exe` and `OmniphonySpatialRawOutputSinkProbe.exe` for later physical-endpoint preflight;
-- atomically writes a `staged-generation.json` manifest with the full package digest, per-file hashes, architecture state, cadence-adapter verification, and verification state;
-- records explicitly that provider registration and selection were not mutated.
-
-The active pump and audible finite physical egress probe are **not** ordinary installer payload yet. They remain development evidence tools until physical closed-gate output has been measured successfully.
-
-An existing generation is verified rather than modified.
-
-This generation model is intentional:
-
-- never overwrite an in-use COM provider DLL;
-- never mutate a generation that has already been verified;
-- let upgrades stage beside the current provider;
-- preserve the previous generation for rollback while any process may still hold it loaded;
-- make repair idempotent by re-verifying an identical generation rather than recopying it.
-
-Required activation order once end-to-end provider transport is ready:
-
-```text
-stage immutable generation                              source primitive exists
-→ verify exact file set + hashes + final smokes        source primitive exists
-→ verify installed APO RAW bypass contract             source smoke exists
-→ verify 480→variable-period clock adapter             source smoke exists
-→ run read-only RAW endpoint capability preflight      source primitive exists
-→ initialize + close inert RAW output lifecycle        source primitive exists
-→ run finite closed-gate physical egress diagnostic    source exists; physical proof pending
-→ record prior provider and selection state
-→ switch only Omniphony-owned registration to candidate generation
-→ verify COM activation and capability contract
-→ verify public stream output path through proven egress
-→ enable/select only after end-to-end transport is proven
-→ verify ordinary stereo/non-spatial audio still works
-→ commit active-generation state
-```
-
-Failure and uninstall must restore any provider state Omniphony changed, restore the previous Omniphony generation when an activation fails, unregister only Omniphony-owned keys, retain in-use old generations until they can be retired safely, and leave the physical audio driver untouched.
-
-The installer must never leave Windows selected on a provider that accepts a stream but cannot render it.
+> A real moving object crosses arbitrary 3-D space while its identity, audio, position, and motion continuity survive into the final Omniphony render.
 
 ---
 
-## Phase 3: Canonical object scene and source authority
+## 5. Prove a real spatial application or game end to end
 
-**State: semantic foundation implemented; native application-to-provider transport pending**
+Use a real application that submits Windows Spatial Audio objects and prove the complete product path without hooks, injection, anti-cheat-sensitive interception, or reconstruction from already-binaural stereo.
 
-The canonical scene is a semantic skeleton, not the renderer lattice:
+The evidence must distinguish:
 
 ```text
-8.1.4.4 static source scene
-        +
-continuous dynamic objects
-        ↓
-source authority / provenance
-        ↓
-Omniphony rendering geometry
+application produced spatial objects
+→ Windows selected Omniphony
+→ Omniphony received the authored objects
+→ object PCM and geometry reached the renderer
+→ Omniphony performed the single final binaural render
+→ the physical headphone endpoint received that result
 ```
 
-Required invariants:
+Test at least:
 
-- `AUTHORED` always outranks `DERIVED`;
-- dynamic XYZ remains continuous;
-- object identity is stable across updates;
-- LFE remains non-directional unless the source representation explicitly says otherwise;
-- absent source roles remain `EMPTY` rather than silently inferred;
-- stereo-derived support never contaminates an authored object scene.
+- static horizontal placement;
+- elevation;
+- front/back placement;
+- moving dynamic sources when available;
+- LFE/non-directional behavior where applicable;
+- application pause/resume and stream restart;
+- coexistence with ordinary non-spatial applications.
+
+Gate:
+
+> A real spatial title can use Omniphony as its selected Windows headphone renderer with no second virtualization pass.
 
 ---
 
-## Phase 4: Perceptual parity and superiority
+## 6. Establish perceptual parity and superiority on equivalent authored scenes
 
-**State: begins after object ingress**
-
-Do not retune Current to compensate for spatial information that Windows has not yet delivered.
-
-Once Omniphony receives equivalent source geometry, compare it against established headphone spatial renderers using controlled source scenes.
+Once real object ingress exists, compare Omniphony against established headphone spatial renderers using source-equivalent scenes rather than unequal stereo reconstructions.
 
 Primary dimensions:
 
@@ -486,295 +156,302 @@ Primary dimensions:
 - front/back discrimination;
 - elevation certainty;
 - moving-source continuity;
-- externalization;
+- frontal externalization;
 - radial distance;
 - source extent;
 - center solidity;
 - transient localization;
 - envelopment without directional smear;
-- timbre, impact, groove, and bass integrity.
+- timbre;
+- bass integrity;
+- impact and groove;
+- long-session naturalness.
 
-The goal is not to imitate another renderer's coloration. It is to determine whether any remaining perceptual deficit comes from the binaural renderer after source geometry has been equalized.
+Testing law:
 
----
+- level-match comparisons when loudness could bias preference;
+- separate localization from tonal preference;
+- separate source geometry from room/externalization effects;
+- preserve a winning baseline before each sound-changing experiment;
+- use literature plus mature open implementations before every substantive sound change;
+- physical listening remains the promotion authority.
 
-## Phase 5: HRTF quality and personalization
+Gate:
 
-**State: research-backed future layer**
-
-Peer-reviewed spatial-hearing work consistently separates horizontal binaural cues from sagittal/elevation spectral cues. Research also shows that listener-specific HRTFs can materially improve localization, especially where pinna-dependent spectral structure matters, while generic HRTFs often retain much of the lateral localization information.
-
-Roadmap order:
-
-1. establish strong generic HRTF behavior;
-2. support multiple interchangeable datasets;
-3. add objective/perceptual HRTF selection;
-4. investigate morphology-assisted personalization;
-5. support measured individualized HRTFs where available.
-
-Do not make a personalized HRTF mandatory for Omniphony to work well.
-
-Useful research starting points:
-
-- Baumgartner, Majdak & Laback, *Modeling sound-source localization in sagittal planes for human listeners*, JASA (2014), DOI `10.1121/1.4887447`.
-- Romigh & Simpson, *Do you hear where I hear?: isolating the individualized sound localization cues*, Frontiers in Neuroscience (2014), DOI `10.3389/FNINS.2014.00370`.
-- Dick & Herre, *Predicting the Precision of Elevation Localization Based on Head Related Transfer Functions*, ICASSP (2019), DOI `10.1109/ICASSP.2019.8682313`.
-- Planinec et al., *The Accuracy of Dynamic Sound Source Localization and Recognition Ability of Individual Head-Related Transfer Functions in Binaural Audio Systems with Head Tracking*, Applied Sciences (2023), DOI `10.3390/app13095254`.
+> Remaining deficits can be attributed to the binaural renderer itself because source geometry and source authority are controlled.
 
 ---
 
-## Phase 6: Externalization, distance, and room
+## 7. Complete frontal externalization, distance, and room behavior
 
-**State: research-backed future layer**
+Finish the transition from strong frontal occupancy to convincing frontal distance and acoustic depth.
 
-Externalization is not merely stronger reverb. Research points to interactions among binaural coherence, early reflections/room information, listener HRTF, source direction, and motion.
+Immediate work:
 
-Priorities:
+- physically A/B the current front-depth candidate against the accepted frontal-occupancy baseline;
+- keep it only if the front moves outward without becoming wetter, softer, echoey, spectrally colored, or less precise;
+- measure whether directional early-field changes alter transient localization or center stability;
+- refine front-specific early-reflection timing and geometry only when listening evidence identifies a remaining deficit.
 
-- preserve direct-source localization before adding room support;
-- test early-reflection and interaural-coherence effects independently;
-- model near-field distance separately from far-field externalization;
-- keep source extent distinct from room size;
-- prevent room support from smearing transient directionality.
+Then separate the larger perceptual problems:
 
-Useful research starting points:
+### Far-field externalization
 
-- Leclère, Lavandier & Perrin, *On the externalization of sound sources with headphones without reference to a real source*, JASA (2019), DOI `10.1121/1.5128325`.
-- Landschoot & Jot, *Binaural externalization processing method for object-based audio rendering*, JASA (2023), DOI `10.1121/10.0018389`.
+Investigate bounded combinations of:
+
+- early-reflection structure;
+- direct-to-early energy relationship;
+- binaural coherence;
+- direction-dependent room evidence;
+- HRTF interaction;
+- restrained late-field support.
+
+Do not buy externalization with indiscriminate late reverb or synthetic width.
+
+### Radial distance
+
+Treat perceived distance as distinct from front/back direction and room size.
+
+Future work should investigate:
+
+- near-field HRTF / ILD behavior;
+- direct-to-reverberant evidence;
+- air absorption where physically justified;
+- distance-dependent source extent;
+- near-field versus far-field parameterization.
+
+### Source extent
+
+Keep apparent source size separate from room size and diffuseness. A larger source must not automatically become a blurrier source.
+
+Gate:
+
+> Frontal sources occupy stable external space with useful distance variation while direct musical structure, bass pressure, transients, center solidity, and side/rear envelopment remain intact.
 
 ---
 
-## Phase 7: Optional head tracking
+## 8. Turn HRTF flexibility into listener personalization
 
-**State: optional future capability, not a prerequisite**
+Move from available HRTF mechanisms to a coherent listener-facing selection and personalization system.
 
-Peer-reviewed work supports head tracking as a strong externalization/localization cue. Experienced multichannel listeners also report that head tracking can improve the illusion of a fixed acoustic scene, while some dislike it for music or mobile listening.
+Future work:
 
-Therefore head tracking should be:
+1. define objective and perceptual comparison scenes for HRTF choice;
+2. support repeatable A/B selection between datasets without changing unrelated DSP;
+3. determine whether a small set of generic HRTFs can cover meaningful listener variation;
+4. map morphology or compact listener measurements to useful HRTF/PRTF parameters where research supports it;
+5. provide a clean workflow for measured individualized SOFA data;
+6. preserve a strong generic default so personalization is optional;
+7. keep headphone EQ, hearing-asymmetry compensation, and HRTF choice as separate profile layers.
 
-- optional;
-- low-latency;
-- renderer-level rather than source-destructive;
-- useful for games, XR, film, and stationary virtual-room listening;
-- disableable for listeners/content where a head-locked presentation is preferred.
+Gate:
 
-Research examples include dynamic-binaural and head-tracking studies by Mehra et al., Fallahi et al., and later localization work.
-
-Practitioner evidence from QuadraphonicQuad is useful here because it exposes context dependence that a single lab task can miss.
+> A listener can select or supply a better-fitting HRTF with measurable/localizable benefit and without turning personalization into a mandatory calibration ritual.
 
 ---
 
-## Phase 8: Already-binaural detection and double-render prevention
+## 9. Add trustworthy already-binaural source policy
 
-**State: required before automatic mixed-source policy; provider RAW egress now has a separate explicit bypass contract**
+Automatic mixed-source handling must distinguish ordinary stereo from stereo that already contains a spatial headphone render.
 
-A two-channel signal is not automatically ordinary stereo. If another spatial renderer has already produced binaural output, Omniphony must not apply a second HRTF field blindly.
+Channel count alone is not sufficient.
 
-Required future policy:
+Future work:
+
+- identify provenance-bearing signals available from hosts and media containers;
+- prefer explicit metadata/session provenance over waveform guessing;
+- define behavior for known already-binaural media;
+- validate any permitted non-spatial correction separately from spatial processing;
+- investigate signal-based detection only if it reaches a confidence level that makes false double-rendering acceptably rare;
+- expose a deterministic override when automatic classification is uncertain.
+
+Target policy:
 
 ```text
 ordinary stereo
-→ Current inference/enhancement
+→ Current inference / enhancement
 
-known already-binaural spatial stereo
+known already-binaural stereo
 → spatial bypass
-or explicitly validated non-spatial correction only
+→ optional validated non-spatial output correction only
+
+unknown stereo
+→ conservative deterministic policy
 ```
 
-Automated switching requires a trustworthy signal. Channel count alone is insufficient.
+Gate:
 
-The provider path is not heuristic: when Omniphony itself has just produced the final binaural stereo, RAW processing mode is an explicit provenance-bearing egress contract and both Omniphony APOs are required to remain transparent.
+> Omniphony does not blindly apply a second HRTF render to content already rendered for headphones.
 
 ---
 
-## Phase 9: Windows product hardening
+## 10. Productize optional head tracking
 
-Spatial-provider installation safety begins during Phase 2 rather than waiting until the end. Full product hardening follows once spatial-object ingress works:
+Turn renderer-level head-pose capability into a reliable optional product feature rather than a lab input.
+
+Future work:
+
+- define supported sensor transports and discovery;
+- establish latency and update-rate budgets;
+- validate recentering and coordinate conventions across devices;
+- handle sensor dropout and reconnection without scene jumps;
+- provide smoothing that does not create perceptible lag;
+- test stationary room anchoring against head-locked music preference;
+- keep tracking optional per listener and content type;
+- ensure tracking never mutates source authority or authored motion.
+
+Gate:
+
+> Head tracking can stabilize a virtual acoustic scene under real head motion without audible discontinuities, excessive latency, or making non-tracked listening second-class.
+
+---
+
+## 11. Harden Omniphony for Windows as a product
+
+Complete reliability, safety, compatibility, installation, and recovery work needed for unattended daily use.
+
+Required areas:
+
+### Audio lifecycle
 
 - endpoint hotplug and DAC power cycling;
-- device/default-output changes;
-- stream restart and application relaunch behavior;
-- sample-rate/format compatibility;
-- endpoint-period variation without changing the renderer quantum;
-- queue overflow/underrun and latency hardening;
-- object-capacity changes;
-- static/dynamic object lifecycle abuse tests;
-- RAW-mode APO bypass regression and bit-transparency checks;
-- endpoint-event worker priority and starvation testing;
-- application compatibility matrix;
-- clean coexistence with non-spatial applications;
-- safe provider selection, rollback, upgrade, repair, and uninstall;
+- default-device changes;
+- sample-rate and format changes;
+- endpoint-period variation;
+- stream restart and application relaunch;
+- suspend/resume;
+- service restart;
+- queue overflow/underrun behavior under load;
+- realtime worker starvation and recovery;
+- static/dynamic object lifecycle abuse cases.
+
+### Spatial-provider lifecycle
+
+- safe provider selection and deselection;
+- transactional activation;
+- rollback after failed activation;
+- repair and upgrade from previous generations;
 - immutable content-addressed provider generations;
-- locked-file / in-use COM binary retirement without in-place replacement;
-- stale provider-key detection without touching unrelated providers;
+- retirement of in-use COM binaries without in-place replacement;
+- stale Omniphony provider-key detection without touching unrelated providers;
 - active/staged/previous generation manifests with exact hashes;
-- upgrade from conventional-APO-only installs without reinstalling the physical driver;
-- signed deployment research where useful.
+- clean uninstall that restores any provider state Omniphony changed.
 
-The product experience should stay small:
+### Security and deployment
 
-```text
-install Omniphony
-→ choose it as the spatial renderer when applicable
-→ Windows audio uses it
-```
+- minimize opaque/elevated installer behavior;
+- preserve transparent service/control operations;
+- investigate signing and reputation strategy;
+- verify release artifacts by exact source revision and hashes;
+- maintain deterministic anti-stale packaging discipline.
 
-The tray/UI remains configuration only; it must never become the audio host.
+### Compatibility
+
+Build an application matrix covering:
+
+- ordinary stereo music players;
+- browsers;
+- communication apps;
+- authored 5.1 / 7.1 / height content;
+- Windows Spatial Audio applications;
+- games using static objects;
+- games using dynamic objects;
+- already-binaural media;
+- exclusive/shared/RAW modes where relevant.
+
+Gate:
+
+> Omniphony can remain installed as ordinary system audio software without requiring the user to nurse the audio graph.
 
 ---
 
-## Phase 10: Portable open spatial renderer
+## 12. Publish a stable portable spatial-scene API
 
-After the Windows provider is mature, expose a stable portable scene API so other hosts can supply the same semantics directly.
+After the Windows object path and source-authority semantics are physically proven, expose the renderer through a stable host-neutral API.
 
-Possible future hosts:
+The public scene contract should represent:
+
+```text
+authored static channels / roles
+continuous objects
+Ambisonics / HOA where supplied
+stereo with bounded derived support
+already-binaural bypass provenance
+listener pose
+listener/profile selection
+output-format and latency contract
+```
+
+Windows concepts must remain in the Windows adapter rather than leaking into the portable core.
+
+Future hosts may include:
 
 - Linux audio systems;
 - macOS;
 - game engines;
-- XR stacks;
+- XR runtimes;
 - media players;
 - DAWs;
 - research tools.
 
-The Windows object API is one ingress adapter, not the definition of Omniphony's renderer.
+Gate:
+
+> A non-Windows host can feed the same source-authority semantics into the same renderer without inheriting WASAPI, WDK, registry, tray, or Windows service machinery.
 
 ---
 
-## Research-derived renderer priorities
+## 13. Public-release gate
 
-The research and practitioner record suggests this order after native object ingress:
+A public release should follow demonstrated product behavior rather than source completeness alone.
+
+Minimum release evidence:
 
 ```text
-1. source geometry and identity
-2. ITD / ILD horizontal localization
-3. pinna/spectral elevation + front/back cues
-4. motion continuity
-5. externalization / early reflections / coherence
-6. distance and near-field behavior
-7. HRTF personalization
-8. optional head tracking
+real Windows Spatial Sound provider selection
++ real static-object ingress
++ real dynamic-object ingress where advertised
++ one-render physical egress proof
++ real spatial application/game proof
++ ordinary stereo and authored PCM regression safety
++ already-binaural double-render protection policy
++ installer / upgrade / rollback / uninstall safety
++ compatibility matrix
++ controlled listening validation
++ reproducible release artifact identity
 ```
 
-This ordering prevents a common failure mode: using room effects or synthetic width to hide weak localization.
-
-QuadraphonicQuad discussions also reinforce two practical requirements:
-
-- binaural playback must be judged independently from a speaker-array mix because different renderers can diverge substantially;
-- head tracking and personalization are valuable tools but should remain optional and content/context aware.
+Do not advertise capabilities whose final physical/application boundary has not been crossed.
 
 ---
 
 ## Critical path
 
-The shortest route from the accepted Windows baseline to the full product is now:
+The shortest future path is:
 
 ```text
-stereo + 7.1 Windows baseline                    ✅
+prove closed-gate physical spatial egress
         ↓
-retain conventional 7.1.4 compatibility
+prove provider enumeration + safe activation
         ↓
-provider capability object                       source implemented
-        ↓
-static stream lifecycle + activation marshalling source implemented
-        ↓
-static object → Current realtime worker          source implemented
-        ↓
-C++ realtime DLL bridge                          source implemented
-        ↓
-COM-shaped quantum → bridge → Current            source implemented
-        ↓
-Current stereo → SPSC egress queue               compiled + smoke-tested
-        ↓
-RAW-mode Omniphony APO single-render bypass      source implemented
-        ↓
-immutable provider generation staging            source implemented
-        ↓
-RAW physical-output capability preflight         source implemented
-        ↓
-event-driven RAW output sink initialization      source implemented, preflight remains unstarted
-        ↓
-480-frame → endpoint-period stereo queue          compiled + smoke-tested
-        ↓
-endpoint-event RAW output pump                    compiled + fail-closed smoke-tested
-        ↓
-finite closed-gate physical egress probe          compiled; physical run pending
-        ↓
-prove real endpoint receives Current output once
-        ↓
-prove Omniphony Spatial Sound provider enumeration
-        ↓
-prove provider COM activation/selection on real Windows
-        ↓
-open public stream activation gate
-        ↓
-receive one static Windows Spatial Audio object
+receive one real static Windows spatial object
         ↓
 receive the full 17-role static vocabulary
         ↓
-receive one moving dynamic XYZ object
+receive continuous dynamic XYZ objects
         ↓
-receive a real application's spatial scene
+prove a real spatial application/game end to end
         ↓
-render that scene once through Omniphony
+run controlled renderer parity tests on equivalent source scenes
         ↓
-controlled A/B against established spatial renderers
+finish frontal externalization / distance behavior
         ↓
-localization / HRTF / externalization refinement
+productize HRTF personalization + optional head tracking
         ↓
-personalization + optional head tracking
+complete already-binaural policy and Windows hardening
         ↓
-product hardening and public release
+publish a stable portable scene API
+        ↓
+public release
 ```
 
-The next decisive source milestone has been crossed: the endpoint-event drain exists and compiles without opening the public provider.
-
-The next decisive **physical** milestone is:
-
-> **Run the finite closed-gate egress probe on the exact physical Windows endpoint and prove that COM-shaped authored static objects reach Current, Current's binaural stereo reaches the queue, the endpoint event clock drains real frames through `IAudioRenderClient`, producer drops remain zero, and the provider remains completely unregistered/unselected.**
-
-The next decisive end-to-end provider milestone remains:
-
-> **A source is authored above the listener, reaches Omniphony as an actual Windows spatial object rather than an inference, crosses the existing static-object Current worker and proven RAW egress path, and Omniphony alone delivers the final headphone render to the real endpoint.**
-
----
-
-## Evidence sources
-
-### Platform contract
-
-- Microsoft Spatial Sound overview: https://learn.microsoft.com/windows/win32/coreaudio/spatial-sound
-- Microsoft spatial-object rendering: https://learn.microsoft.com/windows/win32/coreaudio/render-spatial-sound-using-spatial-audio-objects
-- `ISpatialAudioClient`: https://learn.microsoft.com/windows/win32/api/spatialaudioclient/nn-spatialaudioclient-ispatialaudioclient
-- `ISpatialAudioClient::IsSpatialAudioStreamAvailable`: https://learn.microsoft.com/windows/win32/api/spatialaudioclient/nf-spatialaudioclient-ispatialaudioclient-isspatialaudiostreamavailable
-- `ISpatialAudioClient::ActivateSpatialAudioStream`: https://learn.microsoft.com/windows/win32/api/spatialaudioclient/nf-spatialaudioclient-ispatialaudioclient-activatespatialaudiostream
-- `SpatialAudioObjectRenderStreamActivationParams`: https://learn.microsoft.com/windows/win32/api/spatialaudioclient/ns-spatialaudioclient-spatialaudioobjectrenderstreamactivationparams
-- `AudioObjectType`: https://learn.microsoft.com/windows/win32/api/spatialaudioclient/ne-spatialaudioclient-audioobjecttype
-- Microsoft Windows Audio Session WASAPI renderer sample: https://github.com/microsoft/Windows-universal-samples/tree/main/Samples/WindowsAudioSession
-- Microsoft SysVAD SwapAPO sample, including RAW-mode SFX bypass: https://github.com/microsoft/Windows-driver-samples/tree/main/audio/sysvad/APO/SwapAPO
-
-### Realtime scheduling / clocking research quarry
-
-- Burroughs, Parkin & Tzanetakis, *Flexible Scheduling for DataFlow Audio Processing* (ICMC 2006): supports multiple simultaneous control/timing rates while retaining efficient block audio processing.
-- Zhao et al., *Minimizing Latency and Data Memory Requirement for Real-time Chain-Structured Synchronous Dataflow* (SIES 2007), DOI `10.1109/SIES.2007.4297348`: explicitly treats source/processing/sink tasks with buffers and optimizes latency against buffer size.
-- *ANIRA: An Architecture for Neural Network Inference in Real-Time Audio Applications* (2024/2025): decouples heavyweight processing from the callback with explicit latency management.
-- Cucinotta, Faggioli & Bagnoli, *Low-Latency Audio on Linux by Means of Real-Time Scheduling* (2011): emphasizes scheduling guarantees for tight audio timing constraints under system load.
-- Yonghao Wang, *Low Latency Audio Processing* (2018 dissertation): analyzes buffering and OS scheduling as core latency/predictability constraints.
-
-These sources support bounded callback work, explicit buffering, and separation of timing domains. They do not by themselves prove the undocumented Windows provider/output seam or determine Omniphony's exact buffer size.
-
-### Open-source implementation quarry
-
-- MSSOAL / experimental OpenAL Spatial Audio provider: https://github.com/ThreeDeeJay/MSSOAL
-- OpenAL Soft: https://github.com/kcat/openal-soft
-- Microsoft Windows audio samples: https://github.com/microsoft/Windows-universal-samples/tree/main/Samples/SpatialSound
-- Microsoft Xbox ATG Advanced Spatial Sounds: https://github.com/microsoft/Xbox-ATG-Samples/tree/main/UWPSamples/Audio/AdvancedSpatialSoundsUWP
-
-### Practitioner listening / production evidence
-
-- QuadraphonicQuad Object-based Surround forum: https://quadraphonicquad.com/forums/object-based-surround.178/
-- Headphone spatial-listening discussion: https://quadraphonicquad.com/threads/question-about-surround-spatial-listening-using-headphones.38489/
-- Spatial Audio and head tracking discussion: https://quadraphonicquad.com/threads/spatial-audio-and-head-tracking.32111/
-- Binaural monitoring/head-tracking discussion: https://quadraphonicquad.com/threads/binaural-monitoring-of-surround-mixes-with-head-tracking-pick-your-budget.37048/
-
-Forum reports are experiential evidence, not substitutes for the Windows API contract or controlled psychoacoustic studies.
+When any step is accepted or physically proven, remove it from this roadmap and advance the first remaining item to the top.
