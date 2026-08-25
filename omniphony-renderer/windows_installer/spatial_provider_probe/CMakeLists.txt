@@ -37,11 +37,11 @@ add_executable(OmniphonySpatialProbeCtl
 target_compile_features(OmniphonySpatialProbeCtl PRIVATE cxx_std_17)
 target_compile_definitions(OmniphonySpatialProbeCtl PRIVATE UNICODE _UNICODE)
 target_compile_options(OmniphonySpatialProbeCtl PRIVATE /W4 /WX /permissive-)
-target_link_libraries(OmniphonySpatialProbeCtl PRIVATE ole32 uuid advapi32)
+target_link_libraries(OmniphonySpatialProbeCtl PRIVATE ole32 uuid advapi32 windowsapp)
 
-# Headless product selector. This uses the documented Windows.Media.Audio
-# SpatialAudioDeviceConfiguration GUID API instead of private numeric endpoint
-# properties, and always reads Windows state back before claiming success.
+# Standalone development diagnostic for the same documented headless-selection
+# API. The installed product uses OmniphonySpatialProbeCtl so no extra tray or
+# user-facing selector binary is required.
 add_executable(OmniphonySpatialSelectCtl
     OmniphonySpatialSelectCtl.cpp
 )
