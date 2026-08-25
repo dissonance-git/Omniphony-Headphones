@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 
 namespace {
@@ -97,7 +98,7 @@ void DumpInspectable(const std::wstring& path, const IInspectable& value, int de
         return;
     }
 
-    if (const auto property = value.try_as<IPropertyValue>()) {
+    if (value.try_as<IPropertyValue>()) {
         std::wcout << L"POST_SETUP_MEDIA_PROPERTY\t" << path << L"\t" << ScalarText(value) << L'\n';
         return;
     }
