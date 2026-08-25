@@ -8,11 +8,14 @@ if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $env:ProgramF
 
 $baselineUninstaller = Join-Path $here 'Uninstall-OmniphonyAPO.ps1'
 $ctl = Join-Path $here 'OmniphonyApoCtl.exe'
+$spatialDisable = Join-Path $here 'Disable-OmniphonySpatialProvider.ps1'
 $stateRoot = Join-Path $env:ProgramData 'Omniphony'
 $endpointBackupPath = Join-Path $stateRoot 'endpoint-backup.json'
 $legacyStreamBackupPath = Join-Path $stateRoot 'stream-backup.json'
 $installedNativeApo = Join-Path (Join-Path $AppRoot 'APO') 'OmniphonyStreamAPO.dll'
 $nativeApoClsid = '{07D403D9-8A98-43EF-8C28-8651756D83BE}'
+$spatialFormatGuid = '{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
+$spatialProviderClsid = '{F3CDF827-20C4-405E-A430-8F739343FC89}'
 
 function Set-AudioServiceRunning([bool]$Running) {
     $service = Get-Service -Name AudioSrv -ErrorAction Stop
@@ -33,6 +36,20 @@ function Remove-HklmTree([string]$Path) {
         [Microsoft.Win32.RegistryView]::Registry64)
     try { $base.DeleteSubKeyTree($Path, $false) } finally { $base.Dispose() }
 }
+
+# Close and unregister the optional Spatial Sound provider before its installed
+# DLL/control files disappear. Older/interrupted packages may not contain the
+# helper, so the exact Omniphony-owned registry trees are also removed below.
+if (Test-Path -LiteralPath $spatialDisable -PathType Leaf) {
+    try {
+        & $spatialDisable
+    } catch {
+        Write-Warning "Spatial provider disable helper failed; continuing with exact owned-key cleanup: $($_.Exception.Message)"
+    }
+}
+Remove-HklmTree 'SOFTWARE\Omniphony\SpatialProvider'
+Remove-HklmTree "SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder\$spatialFormatGuid"
+Remove-HklmTree "SOFTWARE\Classes\CLSID\$spatialProviderClsid"
 
 $endpointId = ''
 if (Test-Path -LiteralPath $endpointBackupPath) {
@@ -80,4 +97,4 @@ try {
 if (Test-Path -LiteralPath $legacyStreamBackupPath) {
     Remove-Item -LiteralPath $legacyStreamBackupPath -Force -ErrorAction SilentlyContinue
 }
-Write-Host 'Omniphony Windows audio integration removed; native-surround and stereo Current endpoint effects were removed safely.'
+Write-Host 'Omniphony Windows audio integration removed; optional Spatial Sound provider, native-surround, and stereo Current endpoint effects were removed safely.'
