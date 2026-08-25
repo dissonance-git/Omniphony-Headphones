@@ -42,7 +42,7 @@ $serviceProject = Join-Path $SourceRoot 'AppServiceComponent\OmniphonySpatialLic
 if ($LASTEXITCODE -ne 0) { throw "AppService component build failed: $LASTEXITCODE" }
 
 $companionExe = Join-Path $NativeBuild 'Release\OmniphonySpatialCompanion.exe'
-$serviceOutput = Join-Path $SourceRoot 'AppServiceComponent\x64\Release'
+$serviceOutput = Join-Path $SourceRoot 'AppServiceComponent\x64\Release\OmniphonySpatialLicenseService'
 $serviceDll = Join-Path $serviceOutput 'OmniphonySpatialLicenseService.dll'
 $serviceWinmd = Join-Path $serviceOutput 'OmniphonySpatialLicenseService.winmd'
 foreach ($path in @($companionExe, $serviceDll, $serviceWinmd)) {
