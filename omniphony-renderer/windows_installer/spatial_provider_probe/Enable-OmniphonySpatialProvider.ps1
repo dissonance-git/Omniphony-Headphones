@@ -2,7 +2,6 @@
 param(
     [string]$ProviderDll = '',
     [string]$ControlPath = '',
-    [string]$SelectorPath = '',
     [string]$RealtimeDll = '',
     [string]$RestartAudioPath = '',
     [string]$EndpointStatePath = '',
@@ -21,9 +20,6 @@ if ([string]::IsNullOrWhiteSpace($ProviderDll)) {
 if ([string]::IsNullOrWhiteSpace($ControlPath)) {
     $ControlPath = Join-Path $PSScriptRoot 'OmniphonySpatialProbeCtl.exe'
 }
-if ([string]::IsNullOrWhiteSpace($SelectorPath)) {
-    $SelectorPath = Join-Path $PSScriptRoot 'OmniphonySpatialSelectCtl.exe'
-}
 if ([string]::IsNullOrWhiteSpace($RealtimeDll)) {
     $RealtimeDll = Join-Path (Split-Path -Parent $PSScriptRoot) 'APO\omniphony_realtime.dll'
 }
@@ -38,7 +34,6 @@ if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
 }
 
 $ConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
-$EncoderPath = 'HKLM:\SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder\{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
 $FormatGuid = '{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
 $ComClsid = '{F3CDF827-20C4-405E-A430-8F739343FC89}'
 
@@ -91,7 +86,7 @@ function Write-Receipt([bool]$SelectionVerified) {
         EndpointName = $endpointName
         ProviderDll = $ProviderDll
         RealtimeDll = $RealtimeDll
-        SelectorPath = $SelectorPath
+        ControlPath = $ControlPath
         FormatGuid = $FormatGuid
         ComClsid = $ComClsid
         SelectionApi = 'Windows.Media.Audio.SpatialAudioDeviceConfiguration'
@@ -105,7 +100,7 @@ function Write-Receipt([bool]$SelectionVerified) {
 
 Assert-Elevated
 
-foreach ($path in @($ProviderDll, $ControlPath, $SelectorPath, $RealtimeDll, $RestartAudioPath, $EndpointStatePath)) {
+foreach ($path in @($ProviderDll, $ControlPath, $RealtimeDll, $RestartAudioPath, $EndpointStatePath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required Omniphony spatial-provider file is missing: $path"
     }
@@ -120,7 +115,6 @@ if ([string]::IsNullOrWhiteSpace($endpointId)) {
 
 $ProviderDll = (Resolve-Path -LiteralPath $ProviderDll).Path
 $ControlPath = (Resolve-Path -LiteralPath $ControlPath).Path
-$SelectorPath = (Resolve-Path -LiteralPath $SelectorPath).Path
 $RealtimeDll = (Resolve-Path -LiteralPath $RealtimeDll).Path
 $RestartAudioPath = (Resolve-Path -LiteralPath $RestartAudioPath).Path
 
@@ -137,13 +131,6 @@ try {
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('register', $ProviderDll)
     $registered = $true
 
-    # Complete the standard Spatial\Encoder metadata used by third-party
-    # providers. This is provider metadata only, not endpoint selection.
-    if (-not (Test-Path -LiteralPath $EncoderPath)) {
-        throw "Omniphony Spatial\Encoder key was not created: $EncoderPath"
-    }
-    New-ItemProperty -Path $EncoderPath -Name IconPath -PropertyType String -Value "$ProviderDll,0" -Force | Out-Null
-
     Write-Host 'Verifying provider registration and COM construction...'
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('diagnose')
 
@@ -151,7 +138,7 @@ try {
     Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 1
 
     Write-Host "Selecting Omniphony headlessly for: $endpointName"
-    $null = Invoke-NativeChecked -Path $SelectorPath -Arguments @('select', $endpointId)
+    $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('selection-select', $endpointId)
     $selectionCommitted = $true
 
     # Force the audio graph to reopen so ActiveSpatialAudioFormat catches up to
@@ -159,7 +146,7 @@ try {
     & $RestartAudioPath
 
     Write-Host 'Verifying Windows active spatial format...'
-    $null = Invoke-NativeChecked -Path $SelectorPath -Arguments @('verify', $endpointId)
+    $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('selection-verify', $endpointId)
 
     Write-Receipt $true
 
