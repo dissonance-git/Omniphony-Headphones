@@ -23,8 +23,12 @@ add_executable(OmniphonySpatialSetup
 )
 
 target_compile_features(OmniphonySpatialSetup PRIVATE cxx_std_17)
-target_compile_definitions(OmniphonySpatialSetup PRIVATE UNICODE _UNICODE)
+target_compile_definitions(OmniphonySpatialSetup PRIVATE UNICODE _UNICODE NOMINMAX)
 target_compile_options(OmniphonySpatialSetup PRIVATE /W4 /permissive-)
+target_precompile_headers(OmniphonySpatialSetup PRIVATE
+    <winrt/Windows.ApplicationModel.h>
+    <winrt/Windows.Foundation.Collections.h>
+)
 target_link_libraries(OmniphonySpatialSetup PRIVATE windowsapp crypt32 shlwapi)
 set_target_properties(OmniphonySpatialSetup PROPERTIES
     LINK_FLAGS "/MANIFESTUAC:\"level='requireAdministrator' uiAccess='false'\""
