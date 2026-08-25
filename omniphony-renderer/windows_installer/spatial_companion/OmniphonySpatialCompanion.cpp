@@ -8,6 +8,7 @@
 #include <winrt/base.h>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Media.Audio.h>
 
 #include <cstdint>
@@ -21,6 +22,8 @@
 namespace {
 
 using winrt::Windows::ApplicationModel::Package;
+using winrt::Windows::Foundation::Collections::IPropertySet;
+using winrt::Windows::Foundation::Collections::IVector;
 using winrt::Windows::Media::Audio::SetDefaultSpatialAudioFormatStatus;
 using winrt::Windows::Media::Audio::SpatialAudioDeviceConfiguration;
 using winrt::Windows::Media::Audio::SpatialAudioFormatConfiguration;
@@ -177,6 +180,130 @@ int PrintIdentity() {
     std::wcout << L"SPATIAL_FORMAT_GUID\t" << kFormatGuid << L'\n';
     PrintProcessTrustDiagnostics();
     return 0;
+}
+
+std::wstring PropertyValueText(const winrt::Windows::Foundation::IInspectable& value) {
+    if (!value) {
+        return L"<null>";
+    }
+    const auto property = value.try_as<winrt::Windows::Foundation::IPropertyValue>();
+    if (!property) {
+        return L"<inspectable>";
+    }
+
+    using winrt::Windows::Foundation::PropertyType;
+    switch (property.Type()) {
+    case PropertyType::String:
+        return std::wstring(property.GetString().c_str());
+    case PropertyType::Guid:
+        return std::wstring(winrt::to_hstring(property.GetGuid()).c_str());
+    case PropertyType::Boolean:
+        return property.GetBoolean() ? L"true" : L"false";
+    case PropertyType::Int32:
+        return std::to_wstring(property.GetInt32());
+    case PropertyType::UInt32:
+        return std::to_wstring(property.GetUInt32());
+    case PropertyType::Int64:
+        return std::to_wstring(property.GetInt64());
+    case PropertyType::UInt64:
+        return std::to_wstring(property.GetUInt64());
+    case PropertyType::Single:
+        return std::to_wstring(property.GetSingle());
+    case PropertyType::Double:
+        return std::to_wstring(property.GetDouble());
+    default:
+        return L"<property-type-" + std::to_wstring(static_cast<int>(property.Type())) + L">";
+    }
+}
+
+bool ContainsInsensitive(const std::wstring& haystack, const std::wstring& needle) {
+    if (needle.empty() || haystack.size() < needle.size()) {
+        return false;
+    }
+    std::wstring haystackLower = haystack;
+    std::wstring needleLower = needle;
+    std::transform(haystackLower.begin(), haystackLower.end(), haystackLower.begin(), towlower);
+    std::transform(needleLower.begin(), needleLower.end(), needleLower.begin(), towlower);
+    return haystackLower.find(needleLower) != std::wstring::npos;
+}
+
+int ProbeMediaComponentPackageInfo(const wchar_t* category, bool trustedOnly) {
+    using GetMediaComponentPackageInfoFn = HRESULT(WINAPI*)(bool, HSTRING, void**);
+
+    HMODULE module = LoadLibraryW(L"CompPkgSup.dll");
+    if (module == nullptr) {
+        const DWORD error = GetLastError();
+        std::wcout << L"MEDIA_COMPONENT_QUERY_API_AVAILABLE\t0\n";
+        std::wcout << L"MEDIA_COMPONENT_QUERY_LOAD_ERROR\t" << error << L'\n';
+        return 11;
+    }
+
+    const auto getInfo = reinterpret_cast<GetMediaComponentPackageInfoFn>(
+        GetProcAddress(module, "GetMediaComponentPackageInfo"));
+    if (getInfo == nullptr) {
+        std::wcout << L"MEDIA_COMPONENT_QUERY_API_AVAILABLE\t0\n";
+        FreeLibrary(module);
+        return 11;
+    }
+
+    std::wcout << L"MEDIA_COMPONENT_QUERY_API_AVAILABLE\t1\n";
+    std::wcout << L"MEDIA_COMPONENT_QUERY_CATEGORY\t" << category << L'\n';
+    std::wcout << L"MEDIA_COMPONENT_QUERY_TRUSTED_ONLY\t" << (trustedOnly ? 1 : 0) << L'\n';
+
+    winrt::hstring categoryValue{category};
+    void* rawVector = nullptr;
+    const HRESULT hr = getInfo(trustedOnly, winrt::get_abi(categoryValue), &rawVector);
+    FreeLibrary(module);
+
+    std::wcout << L"MEDIA_COMPONENT_QUERY_HRESULT\t0x"
+               << std::hex << std::uppercase << static_cast<std::uint32_t>(hr)
+               << std::dec << L'\n';
+    if (FAILED(hr) || rawVector == nullptr) {
+        std::wcout << L"MEDIA_COMPONENT_QUERY_RESULT_AVAILABLE\t0\n";
+        return FAILED(hr) ? 11 : 0;
+    }
+
+    IVector<IPropertySet> packages{rawVector, winrt::take_ownership_from_abi};
+    std::wcout << L"MEDIA_COMPONENT_QUERY_RESULT_AVAILABLE\t1\n";
+    std::wcout << L"MEDIA_COMPONENT_QUERY_COUNT\t" << packages.Size() << L'\n';
+
+    const std::wstring targetFamily = Package::Current().Id().FamilyName().c_str();
+    bool omniphonyFound = false;
+    std::uint32_t matchCount = 0;
+    for (std::uint32_t index = 0; index < packages.Size(); ++index) {
+        const auto properties = packages.GetAt(index);
+        bool entryMatches = false;
+        for (const auto& pair : properties) {
+            const std::wstring value = PropertyValueText(pair.Value());
+            if (ContainsInsensitive(value, targetFamily) || ContainsInsensitive(value, kFormatGuid)) {
+                entryMatches = true;
+            }
+        }
+        if (!entryMatches) {
+            continue;
+        }
+
+        omniphonyFound = true;
+        ++matchCount;
+        std::wcout << L"MEDIA_COMPONENT_OMNIPHONY_ENTRY_INDEX\t" << index << L'\n';
+        for (const auto& pair : properties) {
+            std::wcout << L"MEDIA_COMPONENT_OMNIPHONY_PROPERTY\t"
+                       << pair.Key().c_str() << L"\t" << PropertyValueText(pair.Value()) << L'\n';
+        }
+    }
+
+    std::wcout << L"MEDIA_COMPONENT_OMNIPHONY_FOUND\t" << (omniphonyFound ? 1 : 0) << L'\n';
+    std::wcout << L"MEDIA_COMPONENT_OMNIPHONY_MATCH_COUNT\t" << matchCount << L'\n';
+    return 0;
+}
+
+void ProbeMediaComponentTrustMetadata() {
+    std::wcout << L"MEDIA_COMPONENT_TRUST_PROBE_BEGIN\t1\n";
+    ProbeMediaComponentPackageInfo(L"MediaPlayback", false);
+    ProbeMediaComponentPackageInfo(L"MediaPlayback", true);
+    ProbeMediaComponentPackageInfo(L"windows.mediaPlayback", false);
+    ProbeMediaComponentPackageInfo(L"windows.mediaPlayback", true);
+    std::wcout << L"MEDIA_COMPONENT_TRUST_PROBE_END\t1\n";
 }
 
 int RegisterCurrentMediaExtension(HRESULT* registrationResult = nullptr) {
@@ -339,6 +466,8 @@ int ActivateRegisterThroughAumid() {
 }
 
 int RegisterWithActivationFallback() {
+    ProbeMediaComponentTrustMetadata();
+
     HRESULT directResult = E_FAIL;
     const int directExit = RegisterCurrentMediaExtension(&directResult);
     if (directExit == 0) {
@@ -467,7 +596,7 @@ void Usage() {
     std::wcerr
         << L"usage: OmniphonySpatialCompanion <command> [endpoint-id]\n"
         << L"  identity              prove the process is running with package/application identity\n"
-        << L"  register              register media extension, retrying through AUMID activation on access denial\n"
+        << L"  register              inspect media-component trust, then register with AUMID fallback\n"
         << L"  notify                report license/configuration change for Omniphony\n"
         << L"  status <endpoint-id>  read spatial selection state from packaged identity\n"
         << L"  select <endpoint-id>  ask Windows to select Omniphony from packaged identity\n"
