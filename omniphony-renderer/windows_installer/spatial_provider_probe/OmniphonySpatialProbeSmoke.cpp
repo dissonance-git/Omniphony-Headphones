@@ -13,6 +13,7 @@ namespace {
 
 constexpr GUID kProbeClsid = {
     0xf3cdf827, 0x20c4, 0x405e, {0xa4, 0x30, 0x8f, 0x73, 0x93, 0x43, 0xfc, 0x89}};
+constexpr UINT32 kExpectedDynamicObjects = 16;
 
 constexpr std::uint32_t Bits(AudioObjectType type) noexcept {
     return static_cast<std::uint32_t>(type);
@@ -134,7 +135,7 @@ int wmain(int argc, wchar_t** argv) {
 
     UINT32 dynamicCount = 999;
     hr = spatial->GetMaxDynamicObjectCount(&dynamicCount);
-    if (FAILED(hr) || dynamicCount != 0) {
+    if (FAILED(hr) || dynamicCount != kExpectedDynamicObjects) {
         spatial->Release();
         FreeLibrary(module);
         return Fail(L"GetMaxDynamicObjectCount", FAILED(hr) ? hr : E_FAIL);
@@ -212,7 +213,7 @@ int wmain(int argc, wchar_t** argv) {
     std::wcout << L"SPATIAL_PROVIDER_INTERFACE ISpatialAudioClient\n";
     std::wcout << L"SPATIAL_PROVIDER_STATIC_8_1_4_4_OK 1\n";
     std::wcout << L"SPATIAL_PROVIDER_OBJECT_FORMAT FLOAT32_48000_MONO\n";
-    std::wcout << L"SPATIAL_PROVIDER_MAX_DYNAMIC_OBJECTS 0\n";
+    std::wcout << L"SPATIAL_PROVIDER_MAX_DYNAMIC_OBJECTS " << kExpectedDynamicObjects << L"\n";
     std::wcout << L"SPATIAL_PROVIDER_STREAM_AVAILABLE 0\n";
     std::wcout << L"SPATIAL_PROVIDER_CAPABILITY_SMOKE_OK 1\n";
     return 0;
