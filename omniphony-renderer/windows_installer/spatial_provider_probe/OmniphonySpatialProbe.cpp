@@ -10,6 +10,7 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <utility>
 
 #include "OmniphonySpatialProviderRuntime.h"
 #include "OmniphonySpatialRoles.h"
@@ -21,6 +22,7 @@ constexpr GUID kProbeClsid = {
 
 constexpr UINT32 kObjectSampleRate = 48'000;
 constexpr UINT32 kObjectFramesPerBuffer = 480;
+constexpr UINT32 kMaxDynamicObjects = 16;
 constexpr wchar_t kProviderConfigPath[] = L"SOFTWARE\\Omniphony\\SpatialProvider";
 
 volatile LONG g_liveReferences = 0;
@@ -284,9 +286,7 @@ public:
         if (!value) {
             return E_POINTER;
         }
-        // Dynamic XYZ is intentionally not advertised until its continuous
-        // identity/position transport reaches the same live provider path.
-        *value = 0;
+        *value = kMaxDynamicObjects;
         return S_OK;
     }
 
@@ -349,7 +349,7 @@ public:
             return SPTLAUDCLNT_E_STREAM_IS_NOT_AVAILABLE;
         }
 
-        return CreateOmniphonySpatialProviderStaticStreamFromActivation(
+        return CreateOmniphonySpatialProviderObjectStreamFromActivation(
             activationParams,
             riid,
             config.realtimeDll.c_str(),
