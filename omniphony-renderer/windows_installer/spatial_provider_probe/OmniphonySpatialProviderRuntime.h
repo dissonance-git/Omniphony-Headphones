@@ -9,15 +9,17 @@
 #include <windows.h>
 #include <propidl.h>
 
-// Creates the live static-object provider stream used only when the installed
-// Omniphony provider runtime is explicitly enabled. The activation blob remains
-// the Windows-owned SpatialAudioObjectRenderStreamActivationParams contract.
+// Creates the live Windows Spatial Audio object stream used only when the
+// installed Omniphony provider runtime is explicitly enabled. The activation
+// blob remains the Windows-owned SpatialAudioObjectRenderStreamActivationParams
+// contract.
 //
-// The factory binds one application-supplied static object stream to the existing
-// Current renderer, a bounded stereo cadence queue, and one exact physical RAW
-// headphone endpoint. Dynamic objects remain unavailable until their continuous
-// XYZ transport has a truthful realtime ABI of its own.
-HRESULT CreateOmniphonySpatialProviderStaticStreamFromActivation(
+// Static roles and dynamic objects share one source-authoritative renderer and
+// one binaural output pass. Dynamic objects retain stable stream-local identity
+// and continuous listener-relative XYZ instead of being quantized to the static
+// 17-role bed. The final stereo stream crosses the bounded cadence queue and one
+// exact physical RAW headphone endpoint.
+HRESULT CreateOmniphonySpatialProviderObjectStreamFromActivation(
     const PROPVARIANT* activationParams,
     REFIID riid,
     const wchar_t* realtimeDllPath,
