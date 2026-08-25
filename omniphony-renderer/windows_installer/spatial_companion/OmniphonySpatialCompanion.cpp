@@ -11,7 +11,9 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Media.Audio.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -222,8 +224,12 @@ bool ContainsInsensitive(const std::wstring& haystack, const std::wstring& needl
     }
     std::wstring haystackLower = haystack;
     std::wstring needleLower = needle;
-    std::transform(haystackLower.begin(), haystackLower.end(), haystackLower.begin(), towlower);
-    std::transform(needleLower.begin(), needleLower.end(), needleLower.begin(), towlower);
+    std::transform(
+        haystackLower.begin(), haystackLower.end(), haystackLower.begin(),
+        [](wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+    std::transform(
+        needleLower.begin(), needleLower.end(), needleLower.begin(),
+        [](wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
     return haystackLower.find(needleLower) != std::wstring::npos;
 }
 
@@ -252,7 +258,10 @@ int ProbeMediaComponentPackageInfo(const wchar_t* category, bool trustedOnly) {
 
     winrt::hstring categoryValue{category};
     void* rawVector = nullptr;
-    const HRESULT hr = getInfo(trustedOnly, winrt::get_abi(categoryValue), &rawVector);
+    const HRESULT hr = getInfo(
+        trustedOnly,
+        reinterpret_cast<HSTRING>(winrt::get_abi(categoryValue)),
+        &rawVector);
     FreeLibrary(module);
 
     std::wcout << L"MEDIA_COMPONENT_QUERY_HRESULT\t0x"
