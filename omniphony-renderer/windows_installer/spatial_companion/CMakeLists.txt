@@ -38,6 +38,7 @@ set_target_properties(OmniphonySpatialSetup PROPERTIES
 
 add_executable(OmniphonySpatialEndpointProbe
     OmniphonySpatialEndpointProbe.cpp
+    ExplorerPause.cpp
 )
 target_compile_features(OmniphonySpatialEndpointProbe PRIVATE cxx_std_17)
 target_compile_definitions(OmniphonySpatialEndpointProbe PRIVATE UNICODE _UNICODE NOMINMAX)
