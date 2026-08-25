@@ -189,12 +189,12 @@ public:
             return E_FAIL;
         }
 
+        // Do not signal the borrowed application event synchronously from Start.
+        // The periodic source timer owns every update notification. This keeps a
+        // failed SetEvent in the worker's observable async-failure path and keeps
+        // Start itself fully rollback-safe.
         running_ = true;
-        if (!SetEvent(clientEvent_)) {
-            asyncResult_.store(LastErrorOrFail(), std::memory_order_release);
-            SetEvent(stopEvent_);
-        }
-        return AsyncResult();
+        return S_OK;
     }
 
     HRESULT STDMETHODCALLTYPE Stop() override {
