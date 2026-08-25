@@ -2,7 +2,9 @@
 param(
     [string]$ProviderDll = '',
     [string]$ControlPath = '',
+    [string]$SelectorPath = '',
     [string]$RealtimeDll = '',
+    [string]$RestartAudioPath = '',
     [string]$EndpointStatePath = '',
     [string]$ReceiptPath = ''
 )
@@ -12,15 +14,21 @@ $ErrorActionPreference = 'Stop'
 
 # Windows PowerShell 5.1 can evaluate script parameter defaults before
 # $PSScriptRoot is populated. Resolve install-relative defaults only after the
-# param block so the shipped tray helper works on stock Windows PowerShell.
+# param block so the shipped helper works on stock Windows PowerShell.
 if ([string]::IsNullOrWhiteSpace($ProviderDll)) {
     $ProviderDll = Join-Path $PSScriptRoot 'OmniphonySpatialProbe.dll'
 }
 if ([string]::IsNullOrWhiteSpace($ControlPath)) {
     $ControlPath = Join-Path $PSScriptRoot 'OmniphonySpatialProbeCtl.exe'
 }
+if ([string]::IsNullOrWhiteSpace($SelectorPath)) {
+    $SelectorPath = Join-Path $PSScriptRoot 'OmniphonySpatialSelectCtl.exe'
+}
 if ([string]::IsNullOrWhiteSpace($RealtimeDll)) {
     $RealtimeDll = Join-Path (Split-Path -Parent $PSScriptRoot) 'APO\omniphony_realtime.dll'
+}
+if ([string]::IsNullOrWhiteSpace($RestartAudioPath)) {
+    $RestartAudioPath = Join-Path $PSScriptRoot 'Restart-OmniphonyAudio.ps1'
 }
 if ([string]::IsNullOrWhiteSpace($EndpointStatePath)) {
     $EndpointStatePath = Join-Path $env:ProgramData 'Omniphony\endpoint-backup.json'
@@ -30,6 +38,9 @@ if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
 }
 
 $ConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
+$EncoderPath = 'HKLM:\SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder\{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
+$FormatGuid = '{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
+$ComClsid = '{F3CDF827-20C4-405E-A430-8F739343FC89}'
 
 function Assert-Elevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -64,9 +75,37 @@ function Invoke-NativeChecked {
     return [string[]]$lines
 }
 
+function Write-Receipt([bool]$SelectionVerified) {
+    $stateRoot = Split-Path -Parent $ReceiptPath
+    if ($stateRoot) {
+        New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+    }
+    $receipt = [ordered]@{
+        SchemaVersion = 2
+        TimestampUtc = [DateTime]::UtcNow.ToString('o')
+        Enabled = $true
+        StaticObjects = $true
+        DynamicObjects = $true
+        MaxDynamicObjects = 16
+        EndpointId = $endpointId
+        EndpointName = $endpointName
+        ProviderDll = $ProviderDll
+        RealtimeDll = $RealtimeDll
+        SelectorPath = $SelectorPath
+        FormatGuid = $FormatGuid
+        ComClsid = $ComClsid
+        SelectionApi = 'Windows.Media.Audio.SpatialAudioDeviceConfiguration'
+        SelectionChangedByScript = $true
+        SelectionVerified = $SelectionVerified
+        WindowsSettingsRequired = $false
+        UndocumentedEndpointFormatWrites = $false
+    }
+    $receipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ReceiptPath -Encoding UTF8
+}
+
 Assert-Elevated
 
-foreach ($path in @($ProviderDll, $ControlPath, $RealtimeDll, $EndpointStatePath)) {
+foreach ($path in @($ProviderDll, $ControlPath, $SelectorPath, $RealtimeDll, $RestartAudioPath, $EndpointStatePath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required Omniphony spatial-provider file is missing: $path"
     }
@@ -81,66 +120,80 @@ if ([string]::IsNullOrWhiteSpace($endpointId)) {
 
 $ProviderDll = (Resolve-Path -LiteralPath $ProviderDll).Path
 $ControlPath = (Resolve-Path -LiteralPath $ControlPath).Path
+$SelectorPath = (Resolve-Path -LiteralPath $SelectorPath).Path
 $RealtimeDll = (Resolve-Path -LiteralPath $RealtimeDll).Path
+$RestartAudioPath = (Resolve-Path -LiteralPath $RestartAudioPath).Path
 
 $registered = $false
+$selectionCommitted = $false
 try {
+    # Keep the public renderer fail-closed until registration has been verified.
     New-Item -Path $ConfigPath -Force | Out-Null
     New-ItemProperty -Path $ConfigPath -Name Enabled -PropertyType DWord -Value 0 -Force | Out-Null
     New-ItemProperty -Path $ConfigPath -Name EndpointId -PropertyType String -Value $endpointId -Force | Out-Null
     New-ItemProperty -Path $ConfigPath -Name RealtimeDll -PropertyType String -Value $RealtimeDll -Force | Out-Null
 
-    Write-Host 'Registering Omniphony-owned Spatial\Encoder and COM state...'
+    Write-Host 'Registering Omniphony Spatial Sound provider...'
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('register', $ProviderDll)
     $registered = $true
+
+    # Complete the standard Spatial\Encoder metadata used by third-party
+    # providers. This is provider metadata only, not endpoint selection.
+    if (-not (Test-Path -LiteralPath $EncoderPath)) {
+        throw "Omniphony Spatial\Encoder key was not created: $EncoderPath"
+    }
+    New-ItemProperty -Path $EncoderPath -Name IconPath -PropertyType String -Value "$ProviderDll,0" -Force | Out-Null
 
     Write-Host 'Verifying provider registration and COM construction...'
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('diagnose')
 
+    # The provider must be live before Windows is asked to make it active.
     Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 1
 
-    $stateRoot = Split-Path -Parent $ReceiptPath
-    if ($stateRoot) {
-        New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
-    }
-    $receipt = [ordered]@{
-        SchemaVersion = 1
-        TimestampUtc = [DateTime]::UtcNow.ToString('o')
-        Enabled = $true
-        StaticObjects = $true
-        DynamicObjects = $true
-        MaxDynamicObjects = 16
-        EndpointId = $endpointId
-        EndpointName = $endpointName
-        ProviderDll = $ProviderDll
-        RealtimeDll = $RealtimeDll
-        FormatGuid = '{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
-        ComClsid = '{F3CDF827-20C4-405E-A430-8F739343FC89}'
-        NoMMDevicesWrites = $true
-        SelectionChangedByScript = $false
-    }
-    $receipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ReceiptPath -Encoding UTF8
+    Write-Host "Selecting Omniphony headlessly for: $endpointName"
+    $null = Invoke-NativeChecked -Path $SelectorPath -Arguments @('select', $endpointId)
+    $selectionCommitted = $true
+
+    # Force the audio graph to reopen so ActiveSpatialAudioFormat catches up to
+    # the new verified default format instead of relying on Settings or cache.
+    & $RestartAudioPath
+
+    Write-Host 'Verifying Windows active spatial format...'
+    $null = Invoke-NativeChecked -Path $SelectorPath -Arguments @('verify', $endpointId)
+
+    Write-Receipt $true
 
     Write-Host ''
     Write-Host 'OMNIPHONY_SPATIAL_PROVIDER_ENABLED 1'
+    Write-Host 'OMNIPHONY_SPATIAL_SELECTION_VERIFIED 1'
     Write-Host "Endpoint: $endpointName"
-    Write-Host 'Windows provider selection was not modified.'
-    Write-Host 'Select Omniphony from Windows Spatial sound when you want an application to use the provider.'
+    Write-Host 'Windows Settings is not required for Omniphony routing.'
     Write-Host "Receipt: $ReceiptPath"
 } catch {
-    try {
-        if (Test-Path -LiteralPath $ConfigPath) {
-            Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 0 -ErrorAction SilentlyContinue
-        }
-    } catch {}
+    $failure = $_
 
-    if ($registered -and (Test-Path -LiteralPath $ControlPath -PathType Leaf)) {
+    if ($selectionCommitted) {
+        # Do not unregister a provider after Windows has accepted it as the
+        # endpoint default. That could strand Windows on a missing COM class.
+        # Leave the provider live and record that active readback is pending.
+        try { Write-Receipt $false } catch {}
+        Write-Warning 'Windows accepted Omniphony as the default spatial format, so provider registration was retained for safety.'
+    } else {
         try {
-            $previousPreference = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            & $ControlPath unregister 2>&1 | ForEach-Object { Write-Warning "rollback: $_" }
-            $ErrorActionPreference = $previousPreference
+            if (Test-Path -LiteralPath $ConfigPath) {
+                Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 0 -ErrorAction SilentlyContinue
+            }
         } catch {}
+
+        if ($registered -and (Test-Path -LiteralPath $ControlPath -PathType Leaf)) {
+            try {
+                $previousPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                & $ControlPath unregister 2>&1 | ForEach-Object { Write-Warning "rollback: $_" }
+                $ErrorActionPreference = $previousPreference
+            } catch {}
+        }
     }
-    throw
+
+    throw $failure
 }
