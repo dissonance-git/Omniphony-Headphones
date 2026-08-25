@@ -209,6 +209,8 @@ void PrintContract() {
     std::wcout << L"STATIC_OBJECTS\t17\n";
     std::wcout << L"MAX_DYNAMIC_OBJECTS\t16\n";
     std::wcout << L"SELECTION_API\tWindows.Media.Audio.SpatialAudioDeviceConfiguration\n";
+    std::wcout << L"SELECTION_CAPABILITY_FLAGS\tDIAGNOSTIC_ONLY\n";
+    std::wcout << L"SELECTION_RESULT_AUTHORITY\tSetDefaultSpatialAudioFormatResult.Status\n";
     std::wcout << L"DIRECT_MMDEVICES_SELECTION_WRITES\t0\n";
 }
 
@@ -483,10 +485,6 @@ int SelectionStatus(const wchar_t* endpointId, bool requireOmniphony) {
     if (!requireOmniphony) {
         return 0;
     }
-    if (!config.IsSpatialAudioSupported() ||
-        !config.IsSpatialAudioFormatSupported(winrt::hstring{kFormatGuid})) {
-        return kExitSelectionUnsupported;
-    }
     if (!IsOmniphonyFormat(config.DefaultSpatialAudioFormat()) ||
         !IsOmniphonyFormat(config.ActiveSpatialAudioFormat())) {
         return kExitSelectionReadback;
@@ -499,12 +497,7 @@ int SelectEndpoint(const wchar_t* endpointId) {
     const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
     std::wcout << L"BEFORE\n";
     PrintSelectionState(config);
-
-    if (!config.IsSpatialAudioSupported() ||
-        !config.IsSpatialAudioFormatSupported(winrt::hstring{kFormatGuid})) {
-        std::wcerr << L"ERROR\tOmniphony is not reported as supported on this endpoint.\n";
-        return kExitSelectionUnsupported;
-    }
+    std::wcout << L"CAPABILITY_FLAGS\tDIAGNOSTIC_ONLY\n";
 
     if (!IsOmniphonyFormat(config.DefaultSpatialAudioFormat())) {
         const auto result = config.SetDefaultSpatialAudioFormatAsync(winrt::hstring{kFormatGuid}).get();
