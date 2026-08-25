@@ -14,22 +14,23 @@
 #include <system_error>
 #include <thread>
 
+#include "OmniphonySpatialObjectRealtimeBridge.h"
 #include "OmniphonySpatialProviderRuntime.h"
 #include "OmniphonySpatialRawOutputPump.h"
-#include "OmniphonySpatialRealtimeBridge.h"
 #include "OmniphonySpatialStereoQueue.h"
 
 namespace {
 
 constexpr std::size_t kProviderQueueFrames = 480u * 8u;
 constexpr LONG kSourcePeriodMilliseconds = 10;
+constexpr UINT32 kProviderMaxDynamicObjects = 16;
 
 HRESULT LastErrorOrFail() noexcept {
     const DWORD error = GetLastError();
     return HRESULT_FROM_WIN32(error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : error);
 }
 
-bool ValidStaticActivationBlob(
+bool ValidActivationBlob(
     const PROPVARIANT* activationParams,
     SpatialAudioObjectRenderStreamActivationParams& params) noexcept {
     if (!activationParams ||
@@ -41,13 +42,13 @@ bool ValidStaticActivationBlob(
 
     std::memcpy(&params, activationParams->blob.pBlobData, sizeof(params));
     return params.EventHandle != nullptr &&
-           params.MinDynamicObjectCount == 0 &&
-           params.MaxDynamicObjectCount == 0;
+           params.MinDynamicObjectCount <= params.MaxDynamicObjectCount &&
+           params.MaxDynamicObjectCount <= kProviderMaxDynamicObjects;
 }
 
-class ProviderStaticRenderStream final : public ISpatialAudioObjectRenderStream {
+class ProviderObjectRenderStream final : public ISpatialAudioObjectRenderStream {
 public:
-    ProviderStaticRenderStream(
+    ProviderObjectRenderStream(
         ISpatialAudioObjectRenderStream* inner,
         std::shared_ptr<OmniphonySpatialStereoQueue> queue,
         HANDLE clientEvent) noexcept
@@ -57,7 +58,7 @@ public:
         OmniphonySpatialProviderModuleAddRef();
     }
 
-    ~ProviderStaticRenderStream() {
+    ~ProviderObjectRenderStream() {
         (void)Stop();
         pump_.Close();
         if (inner_) {
@@ -158,7 +159,7 @@ public:
         }
 
         LARGE_INTEGER due{};
-        due.QuadPart = -100'000LL; // 10 ms in 100 ns units.
+        due.QuadPart = -100'000LL;
         if (!SetWaitableTimer(
                 sourceTimer_,
                 &due,
@@ -189,10 +190,6 @@ public:
             return E_FAIL;
         }
 
-        // Do not signal the borrowed application event synchronously from Start.
-        // The periodic source timer owns every update notification. This keeps a
-        // failed SetEvent in the worker's observable async-failure path and keeps
-        // Start itself fully rollback-safe.
         running_ = true;
         return S_OK;
     }
@@ -354,7 +351,7 @@ private:
     std::atomic<ULONG> references_{1};
     ISpatialAudioObjectRenderStream* inner_ = nullptr;
     std::shared_ptr<OmniphonySpatialStereoQueue> queue_;
-    HANDLE clientEvent_ = nullptr; // Borrowed from Windows activation params.
+    HANDLE clientEvent_ = nullptr;
     HANDLE stopEvent_ = nullptr;
     HANDLE sourceTimer_ = nullptr;
     OmniphonySpatialRawOutputPump pump_;
@@ -367,7 +364,7 @@ private:
 
 } // namespace
 
-HRESULT CreateOmniphonySpatialProviderStaticStreamFromActivation(
+HRESULT CreateOmniphonySpatialProviderObjectStreamFromActivation(
     const PROPVARIANT* activationParams,
     REFIID riid,
     const wchar_t* realtimeDllPath,
@@ -386,7 +383,7 @@ HRESULT CreateOmniphonySpatialProviderStaticStreamFromActivation(
     }
 
     SpatialAudioObjectRenderStreamActivationParams params{};
-    if (!ValidStaticActivationBlob(activationParams, params)) {
+    if (!ValidActivationBlob(activationParams, params)) {
         return E_INVALIDARG;
     }
 
@@ -402,7 +399,7 @@ HRESULT CreateOmniphonySpatialProviderStaticStreamFromActivation(
     }
 
     ISpatialAudioObjectRenderStream* inner = nullptr;
-    HRESULT result = CreateOmniphonyStaticProbeStreamWithRealtimeBridgeAndQueue(
+    HRESULT result = CreateOmniphonySpatialObjectStreamWithRealtimeBridgeAndQueue(
         params,
         realtimeDllPath,
         queue,
@@ -412,9 +409,9 @@ HRESULT CreateOmniphonySpatialProviderStaticStreamFromActivation(
         return FAILED(result) ? result : E_FAIL;
     }
 
-    ProviderStaticRenderStream* created = nullptr;
+    ProviderObjectRenderStream* created = nullptr;
     try {
-        created = new ProviderStaticRenderStream(inner, queue, params.EventHandle);
+        created = new ProviderObjectRenderStream(inner, queue, params.EventHandle);
     }
     catch (const std::bad_alloc&) {
         inner->Release();
