@@ -37,8 +37,10 @@ jobs:
           $dist = "$env:GITHUB_WORKSPACE\dist\Omniphony-Spatial-Companion"
           $msix = Join-Path $dist 'OmniphonySpatialCompanion.msix'
           $cer = Join-Path $dist 'OmniphonySpatialCompanion.cer'
+          $readme = Join-Path $dist 'README.md'
           if (-not (Test-Path $msix)) { throw "Missing MSIX: $msix" }
           if (-not (Test-Path $cer)) { throw "Missing development certificate: $cer" }
+          if (-not (Test-Path $readme)) { throw "Missing physical-test instructions: $readme" }
 
           $kitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
           $makeAppx = Get-ChildItem -Path $kitsBin -Recurse -Filter makeappx.exe |
@@ -75,16 +77,28 @@ jobs:
           }
 
           $companionSource = Get-Content -LiteralPath "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_companion\OmniphonySpatialCompanion.cpp" -Raw
-          foreach ($token in @('RegisterMediaExtensionPackage','MEDIA_EXTENSION_REGISTERED','WINDOWS_SETTER_ACCEPTED_CONTEXT')) {
+          foreach ($token in @(
+            'RegisterMediaExtensionPackage',
+            'MEDIA_EXTENSION_REGISTERED',
+            'GetDefaultAudioEndpoint',
+            'DEFAULT_RENDER_ENDPOINT_DISCOVERED',
+            'WINDOWS_SETTER_ACCEPTED_CONTEXT',
+            'SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK'
+          )) {
             if ($companionSource -notmatch [regex]::Escape($token)) { throw "Packaged ownership diagnostic token missing: $token" }
           }
           if ($companionSource -match 'CALLER_OWNS_FORMAT_REQUIRED_BY_WINDOWS') { throw 'Companion still contains an unproven ownership assertion.' }
+
+          $readmeSource = Get-Content -LiteralPath $readme -Raw
+          if ($readmeSource -notmatch 'OmniphonySpatialCompanion\.exe verify-default') { throw 'One-command physical ownership test is missing from artifact README.' }
 
           Write-Host 'SPATIAL_COMPANION_MSIX_CONTRACT_OK 1'
           Write-Host 'SPATIAL_COMPANION_PACKAGE_IDENTITY_OK 1'
           Write-Host 'SPATIAL_COMPANION_MEDIA_COMPONENT_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_SPATIAL_SUBTYPE_DECLARED 1'
           Write-Host 'SPATIAL_COMPANION_MEDIA_EXTENSION_REGISTRATION_PATH_OK 1'
+          Write-Host 'SPATIAL_COMPANION_DEFAULT_ENDPOINT_DISCOVERY_PATH_OK 1'
+          Write-Host 'SPATIAL_COMPANION_ONE_COMMAND_PHYSICAL_GATE_OK 1'
           Write-Host 'SPATIAL_COMPANION_APP_SERVICE_CONTRACT_OK 1'
           Write-Host 'SPATIAL_COMPANION_EXTERNAL_OWNERSHIP_GATE_UNPROVEN 1'
 

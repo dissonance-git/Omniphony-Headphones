@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <mmdeviceapi.h>
 
 #include <winrt/base.h>
 #include <winrt/Windows.ApplicationModel.h>
@@ -112,6 +113,35 @@ int NotifySpatialFormatChanged() {
     return 0;
 }
 
+std::wstring DefaultRenderEndpointId() {
+    winrt::com_ptr<IMMDeviceEnumerator> enumerator;
+    winrt::check_hresult(CoCreateInstance(
+        __uuidof(MMDeviceEnumerator),
+        nullptr,
+        CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator),
+        enumerator.put_void()));
+
+    winrt::com_ptr<IMMDevice> device;
+    winrt::check_hresult(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, device.put()));
+
+    LPWSTR rawEndpointId = nullptr;
+    winrt::check_hresult(device->GetId(&rawEndpointId));
+    std::wstring endpointId;
+    if (rawEndpointId != nullptr) {
+        endpointId.assign(rawEndpointId);
+        CoTaskMemFree(rawEndpointId);
+    }
+    if (endpointId.empty()) {
+        throw winrt::hresult_error(E_FAIL, L"Default render endpoint returned an empty device ID.");
+    }
+
+    std::wcout << L"DEFAULT_RENDER_ROLE\teMultimedia\n";
+    std::wcout << L"DEFAULT_RENDER_ENDPOINT_DISCOVERED\t1\n";
+    std::wcout << L"DEFAULT_RENDER_ENDPOINT_ID\t" << endpointId << L'\n';
+    return endpointId;
+}
+
 int SelectionStatus(const wchar_t* endpointId) {
     const auto config = SpatialAudioDeviceConfiguration::GetForDeviceId(winrt::hstring{endpointId});
     PrintSelectionState(config);
@@ -149,6 +179,41 @@ int SelectEndpoint(const wchar_t* endpointId) {
     return 0;
 }
 
+int VerifyDefaultEndpoint() {
+    std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_BEGIN\t1\n";
+    PrintIdentity();
+
+    int result = RegisterCurrentMediaExtension();
+    if (result != 0) {
+        std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK\t0\n";
+        return result;
+    }
+
+    result = NotifySpatialFormatChanged();
+    if (result != 0) {
+        std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK\t0\n";
+        return result;
+    }
+
+    const auto endpointId = DefaultRenderEndpointId();
+    std::wcout << L"VERIFY_DEFAULT_STATUS_BEFORE\n";
+    result = SelectionStatus(endpointId.c_str());
+    if (result != 0) {
+        std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK\t0\n";
+        return result;
+    }
+
+    std::wcout << L"VERIFY_DEFAULT_SELECT\n";
+    result = SelectEndpoint(endpointId.c_str());
+    if (result != 0) {
+        std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK\t0\n";
+        return result;
+    }
+
+    std::wcout << L"SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK\t1\n";
+    return 0;
+}
+
 void Usage() {
     std::wcerr
         << L"usage: OmniphonySpatialCompanion <command> [endpoint-id]\n"
@@ -156,7 +221,8 @@ void Usage() {
         << L"  register              register the package media extension on Windows 11 24H2+\n"
         << L"  notify                report license/configuration change for Omniphony\n"
         << L"  status <endpoint-id>  read spatial selection state from packaged identity\n"
-        << L"  select <endpoint-id>  ask Windows to select Omniphony from packaged identity\n";
+        << L"  select <endpoint-id>  ask Windows to select Omniphony from packaged identity\n"
+        << L"  verify-default        run the ownership gate against the default multimedia render endpoint\n";
 }
 
 } // namespace
@@ -188,6 +254,9 @@ int wmain(int argc, wchar_t** argv) {
         if (command == L"select" && argc == 3) {
             PrintIdentity();
             return SelectEndpoint(argv[2]);
+        }
+        if (command == L"verify-default" && argc == 2) {
+            return VerifyDefaultEndpoint();
         }
         Usage();
         return 2;

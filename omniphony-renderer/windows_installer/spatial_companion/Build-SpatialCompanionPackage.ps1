@@ -113,10 +113,13 @@ if ($Sign) {
     Remove-Item -Path ("Cert:\CurrentUser\My\" + $cert.Thumbprint) -Force -ErrorAction SilentlyContinue
 }
 
+Copy-Item -LiteralPath (Join-Path $SourceRoot 'README.md') -Destination (Join-Path $OutputDirectory 'README.md') -Force
+
 $hash = (Get-FileHash -LiteralPath $msix -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "SPATIAL_COMPANION_MSIX $msix"
 Write-Host "SPATIAL_COMPANION_SHA256 $hash"
 Write-Host 'SPATIAL_COMPANION_PACKAGE_IDENTITY Omniphony.SpatialCompanion'
 Write-Host 'SPATIAL_COMPANION_APP_SERVICE OmniphonySpatialLicense'
 Write-Host 'SPATIAL_COMPANION_FORMAT_GUID {4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
+Write-Host 'SPATIAL_COMPANION_VERIFY_COMMAND OmniphonySpatialCompanion.exe verify-default'
 Write-Host 'SPATIAL_COMPANION_EXTERNAL_OWNERSHIP_GATE_UNPROVEN 1'

@@ -12,7 +12,7 @@ add_executable(OmniphonySpatialCompanion
 target_compile_features(OmniphonySpatialCompanion PRIVATE cxx_std_17)
 target_compile_definitions(OmniphonySpatialCompanion PRIVATE UNICODE _UNICODE)
 target_compile_options(OmniphonySpatialCompanion PRIVATE /W4 /permissive-)
-target_link_libraries(OmniphonySpatialCompanion PRIVATE windowsapp)
+target_link_libraries(OmniphonySpatialCompanion PRIVATE windowsapp ole32)
 
 set_property(TARGET OmniphonySpatialCompanion PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
