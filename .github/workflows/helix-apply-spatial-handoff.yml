@@ -45,7 +45,7 @@ jobs:
           if (-not $text.Contains($oldLink)) { throw 'Stream APO link line drifted' }
           $newLink = $oldLink.TrimEnd(')') + ' windowsapp)'
           $text = $text.Replace($oldLink, $newLink)
-          Set-Content -LiteralPath $cmake -Value $text -Encoding UTF8
+          [System.IO.File]::WriteAllText($cmake, $text, [System.Text.UTF8Encoding]::new($false))
 
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'patch produced whitespace errors' }
