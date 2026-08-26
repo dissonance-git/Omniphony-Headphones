@@ -15,6 +15,7 @@ use orender_engine::{
 };
 use renderer::source_frame::SourceFrameRenderer;
 use renderer::source_scene::{SourceLaneKind, SourceSceneEvidence};
+use scene_contract::authored_scene::{AuthoredObjectBlock, SampleSpan};
 use scene_contract::stable_source_slots::StableSourceSlots;
 use std::f32::consts::PI;
 
@@ -76,7 +77,7 @@ pub(crate) struct WindowsSpatialObjectPipeline {
     peak_guard: StereoLookaheadPeakGuard,
     sample_pos: u64,
     dynamic_slots: StableSourceSlots,
-    previous_dynamic_slots: Vec<Option<u64>>,
+    previous_dynamic_blocks: Vec<Option<AuthoredObjectBlock>>,
     dynamic_ids: Vec<u64>,
     dynamic_slot_to_input: Vec<Option<usize>>,
     active_lanes: Vec<bool>,
@@ -107,7 +108,7 @@ impl WindowsSpatialObjectPipeline {
             peak_guard: StereoLookaheadPeakGuard::new(sample_rate_hz),
             sample_pos: 0,
             dynamic_slots: StableSourceSlots::new(max_dynamic_objects),
-            previous_dynamic_slots: vec![None; max_dynamic_objects],
+            previous_dynamic_blocks: vec![None; max_dynamic_objects],
             dynamic_ids: Vec::with_capacity(max_dynamic_objects),
             dynamic_slot_to_input: vec![None; max_dynamic_objects],
             active_lanes: Vec::with_capacity(16 + max_dynamic_objects),
@@ -122,13 +123,11 @@ impl WindowsSpatialObjectPipeline {
         if frames == 0 {
             return Err("spatial object silence quantum has zero frames".to_string());
         }
-        self.previous_dynamic_slots
-            .copy_from_slice(self.dynamic_slots.slots());
         self.dynamic_slots
             .reconcile(&[])
             .map_err(|error| format!("dynamic slot release failed: {error:?}"))?;
-        for (slot, previous) in self.previous_dynamic_slots.iter().copied().enumerate() {
-            if previous.is_some() {
+        for (slot, previous) in self.previous_dynamic_blocks.iter_mut().enumerate() {
+            if previous.take().is_some() {
                 // process_silence is used only when this stream has no static
                 // objects, so dynamic slot zero is renderer lane zero.
                 self.renderer.reset_channel_runtime_state(slot);
@@ -226,16 +225,17 @@ impl WindowsSpatialObjectPipeline {
         }
         directional_static.sort_by_key(|object| object.role.canonical_scene_index());
 
-        self.previous_dynamic_slots
-            .copy_from_slice(self.dynamic_slots.slots());
         self.dynamic_ids.clear();
         self.dynamic_ids
             .extend(dynamic_objects.iter().map(|object| object.stable_id));
         self.dynamic_slots
             .reconcile(&self.dynamic_ids)
             .map_err(|error| format!("dynamic slot reconciliation failed: {error:?}"))?;
-        let dynamic_span = self.dynamic_slots.active_span_len();
-        self.dynamic_slot_to_input[..dynamic_span].fill(None);
+        // Renderer width is negotiated once for the stream. Inactive dynamic
+        // lanes remain silent instead of shrinking the channel topology when
+        // an object ends, so unrelated persistent lanes keep their DSP history.
+        let dynamic_span = self.dynamic_slots.capacity();
+        self.dynamic_slot_to_input.fill(None);
         for (input_index, object) in dynamic_objects.iter().enumerate() {
             let slot = self
                 .dynamic_slots
@@ -272,9 +272,18 @@ impl WindowsSpatialObjectPipeline {
         }
 
         let static_count = directional_static.len();
+        let frame_count_u32 = u32::try_from(frames)
+            .map_err(|_| "spatial object quantum exceeds u32 frame span".to_string())?;
         for slot in 0..dynamic_span {
+            let previous_block = self.previous_dynamic_blocks[slot];
             let slot_id = self.dynamic_slots.slots()[slot];
+
             let Some(id) = slot_id else {
+                if previous_block.is_some() {
+                    self.renderer
+                        .reset_channel_runtime_state(static_count + slot);
+                }
+                self.previous_dynamic_blocks[slot] = None;
                 self.sources.push(SourceSceneEvidence {
                     lane_kind: SourceLaneKind::DrySource,
                     source_id: 0,
@@ -290,11 +299,24 @@ impl WindowsSpatialObjectPipeline {
             let input_index = self.dynamic_slot_to_input[slot]
                 .ok_or_else(|| format!("active dynamic slot {slot} has no input object"))?;
             let object = &dynamic_objects[input_index];
+            let position = object.omniphony_metric_position();
 
-            // Reusing a physical slot for a different identity must clear only
-            // that lane's convolution/ramp history. Surviving objects retain
-            // their state even when another object ends or provider order moves.
-            if self.previous_dynamic_slots[slot] != Some(id) {
+            // The Windows object update is lowered onto the canonical source
+            // sample timeline. Continuous adjacent blocks for the same stable
+            // identity interpolate across the current span; first admission,
+            // identity replacement, or a timeline gap does not invent motion.
+            let current_block = AuthoredObjectBlock::new(
+                id,
+                SampleSpan::new(self.sample_pos, frame_count_u32),
+                position,
+                frame_count_u32,
+            )
+            .map_err(|error| format!("dynamic object {id} block invalid: {error}"))?;
+            let plan = current_block.plan_from(previous_block);
+
+            if previous_block
+                .is_some_and(|previous| previous.stable_id != id)
+            {
                 self.renderer
                     .reset_channel_runtime_state(static_count + slot);
             }
@@ -303,18 +325,17 @@ impl WindowsSpatialObjectPipeline {
                 lane_kind: SourceLaneKind::DrySource,
                 source_id: id,
                 persistent_part_id: Some(id),
-                authored_position: Some(object.omniphony_metric_position()),
+                authored_position: Some(position),
                 confidence: 1.0,
                 ..SourceSceneEvidence::default()
             });
             self.active_lanes.push(true);
-
-            let ramp = if self.previous_dynamic_slots[slot] == Some(id) {
-                frames.min(u32::MAX as usize) as u32
-            } else {
-                0
-            };
-            self.presentation_ramp_frames.push(ramp);
+            self.presentation_ramp_frames.push(
+                plan.interpolation
+                    .map(|interpolation| interpolation.span.frame_count)
+                    .unwrap_or(0),
+            );
+            self.previous_dynamic_blocks[slot] = Some(current_block);
         }
 
         let source_count = directional_static.len() + dynamic_span;
@@ -421,6 +442,62 @@ mod tests {
         assert_eq!(slots.slot_for(3), Some(1));
         assert_eq!(slots.slot_for(11), Some(0));
         assert_eq!(slots.active_span_len(), 2);
+    }
+
+    #[test]
+    fn canonical_dynamic_blocks_ramp_only_on_adjacent_same_identity() {
+        let first = AuthoredObjectBlock::new(
+            7,
+            SampleSpan::new(0, 480),
+            [0.0, 1.0, 0.0],
+            480,
+        )
+        .unwrap();
+        let second = AuthoredObjectBlock::new(
+            7,
+            SampleSpan::new(480, 480),
+            [1.0, 1.0, 0.0],
+            480,
+        )
+        .unwrap();
+        assert_eq!(
+            second
+                .plan_from(Some(first))
+                .interpolation
+                .unwrap()
+                .span
+                .frame_count,
+            480
+        );
+
+        let gapped = AuthoredObjectBlock::new(
+            7,
+            SampleSpan::new(1_440, 480),
+            [2.0, 1.0, 0.0],
+            480,
+        )
+        .unwrap();
+        assert!(gapped.plan_from(Some(first)).interpolation.is_none());
+
+        let replacement = AuthoredObjectBlock::new(
+            8,
+            SampleSpan::new(480, 480),
+            [2.0, 1.0, 0.0],
+            480,
+        )
+        .unwrap();
+        assert!(replacement.plan_from(Some(first)).interpolation.is_none());
+    }
+
+    #[test]
+    fn negotiated_dynamic_capacity_stays_constant_when_active_span_shrinks() {
+        let mut slots = StableSourceSlots::new(4);
+        slots.reconcile(&[1, 2, 3]).unwrap();
+        slots.reconcile(&[1]).unwrap();
+
+        assert_eq!(slots.active_span_len(), 1);
+        assert_eq!(slots.capacity(), 4);
+        assert_eq!(slots.slots(), &[Some(1), None, None, None]);
     }
 
     #[test]
