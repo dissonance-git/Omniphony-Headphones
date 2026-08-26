@@ -185,7 +185,7 @@ int ElevatedChild(const std::wstring& familyName, const std::wstring& resultPath
 int LaunchElevatedChild(const std::wstring& familyName, const std::wstring& resultPath) {
     const std::wstring self = SelfPath();
     const std::wstring parameters =
-        L"--elevated \"" + familyName + L"\" \"" + resultPath + L"\"";
+        L"--elevated \"" + familyName + L"\" \"" + resultPath + L"\" --capture";
 
     SHELLEXECUTEINFOW execute{};
     execute.cbSize = sizeof(execute);
