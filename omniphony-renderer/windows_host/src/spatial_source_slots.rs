@@ -14,6 +14,7 @@
 
 use bridge_api::RChannelLabel;
 use renderer::source_scene::{SourceLaneKind, SourceSceneEvidence};
+use renderer::stable_source_slots::{StableSourceSlotError, StableSourceSlots};
 
 use crate::spatial_ingress::{
     WindowsSpatialIngressError, WindowsSpatialIngressQuantum, WindowsStaticObjectRole,
@@ -66,7 +67,7 @@ impl WindowsSpatialSlottedSourceFrame<'_> {
 /// object count, so ordinary object spawn/despawn never changes renderer width.
 pub struct WindowsSpatialSourceSlots {
     static_labels: Vec<RChannelLabel>,
-    dynamic_slots: Vec<Option<u64>>,
+    dynamic_slots: StableSourceSlots,
 }
 
 impl WindowsSpatialSourceSlots {
@@ -96,16 +97,16 @@ impl WindowsSpatialSourceSlots {
 
         Ok(Self {
             static_labels,
-            dynamic_slots: vec![None; max_dynamic_objects],
+            dynamic_slots: StableSourceSlots::new(max_dynamic_objects),
         })
     }
 
     pub fn source_count(&self) -> usize {
-        self.static_labels.len() + self.dynamic_slots.len()
+        self.static_labels.len() + self.dynamic_slots.capacity()
     }
 
     pub fn max_dynamic_objects(&self) -> usize {
-        self.dynamic_slots.len()
+        self.dynamic_slots.capacity()
     }
 
     /// Lower one active-object quantum into the stream's fixed renderer slots.
@@ -139,42 +140,37 @@ impl WindowsSpatialSourceSlots {
             .count();
         if active_dynamic_count > self.dynamic_slots.len() {
             return Err(WindowsSpatialSourceSlotError::DynamicCapacityExceeded {
-                capacity: self.dynamic_slots.len(),
+                capacity: self.dynamic_slots.capacity(),
                 active: active_dynamic_count,
             });
         }
 
-        // Release slots whose Windows object ended this quantum. Windows object
-        // lifetime is allowed to end independently of the rest of the stream;
-        // renderer lane topology is not.
-        for slot in &mut self.dynamic_slots {
-            let Some(id) = *slot else { continue };
-            let still_active = active
-                .source_keys
-                .iter()
-                .any(|key| *key == WindowsSpatialSourceKey::Dynamic(id));
-            if !still_active {
-                *slot = None;
-            }
-        }
-
-        // Existing IDs keep their lanes even if provider enumeration order
-        // changes. Newly activated IDs take the lowest free reserved slot.
-        for key in &active.source_keys {
-            let WindowsSpatialSourceKey::Dynamic(id) = *key else {
-                continue;
-            };
-            if self.dynamic_slots.contains(&Some(id)) {
-                continue;
-            }
-            let Some(slot) = self.dynamic_slots.iter_mut().find(|slot| slot.is_none()) else {
-                return Err(WindowsSpatialSourceSlotError::DynamicCapacityExceeded {
-                    capacity: self.dynamic_slots.len(),
-                    active: active_dynamic_count,
-                });
-            };
-            *slot = Some(id);
-        }
+        let active_dynamic_ids = active
+            .source_keys
+            .iter()
+            .filter_map(|key| match *key {
+                WindowsSpatialSourceKey::Dynamic(id) => Some(id),
+                WindowsSpatialSourceKey::Static(_) => None,
+            })
+            .collect::<Vec<_>>();
+        self.dynamic_slots
+            .reconcile(&active_dynamic_ids)
+            .map_err(|error| match error {
+                StableSourceSlotError::ReservedIdZero => {
+                    WindowsSpatialSourceSlotError::ReservedDynamicIdZero
+                }
+                StableSourceSlotError::DuplicateId(id) => {
+                    WindowsSpatialSourceSlotError::Ingress(
+                        WindowsSpatialIngressError::DuplicateDynamicId(id),
+                    )
+                }
+                StableSourceSlotError::CapacityExceeded { capacity, active } => {
+                    WindowsSpatialSourceSlotError::DynamicCapacityExceeded {
+                        capacity,
+                        active,
+                    }
+                }
+            })?;
 
         let source_count = self.source_count();
         let mut slot_keys = Vec::with_capacity(source_count);
@@ -186,6 +182,7 @@ impl WindowsSpatialSourceSlots {
         );
         slot_keys.extend(
             self.dynamic_slots
+                .slots()
                 .iter()
                 .copied()
                 .map(|id| id.map(WindowsSpatialSourceKey::Dynamic)),
@@ -211,10 +208,9 @@ impl WindowsSpatialSourceSlots {
                 WindowsSpatialSourceKey::Dynamic(id) => {
                     let dynamic_index = self
                         .dynamic_slots
-                        .iter()
-                        .position(|configured| *configured == Some(id))
+                        .slot_for(id)
                         .ok_or(WindowsSpatialSourceSlotError::DynamicCapacityExceeded {
-                            capacity: self.dynamic_slots.len(),
+                            capacity: self.dynamic_slots.capacity(),
                             active: active_dynamic_count,
                         })?;
                     self.static_labels.len() + dynamic_index

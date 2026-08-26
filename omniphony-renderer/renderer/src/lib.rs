@@ -23,6 +23,7 @@ pub mod source_frame;
 pub(crate) mod source_identity;
 pub mod source_scene;
 pub mod source_scene_event;
+pub mod stable_source_slots;
 pub mod spatial_renderer;
 pub mod spatial_vbap;
 pub mod speaker_layout;
