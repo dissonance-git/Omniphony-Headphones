@@ -113,13 +113,13 @@ The accepted default Windows music presentation is now protected. Do not reopen 
 
 Build the next spatial gains first where the source has supplied more truth:
 
-- make object state explicitly sample-timeline aware, including stable identity, start time, duration, interpolation interval, discontinuity/reset behavior, and seek recovery;
-- preserve continuous XYZ rather than quantizing dynamic objects to the static role frame;
-- add authored radial distance as geometry rather than treating distance as gain alone;
-- evaluate physically motivated near-field cues such as acoustic parallax, ear-specific geometry, distance-dependent ILD, and bounded near/far spectral behavior;
-- keep radial-distance processing out of the protected stereo-master path unless a separate stereo candidate later earns promotion;
-- build an offline authored-scene conformance lane using ADM/BW64-style object, direct-speaker, and HOA semantics so scene interpretation can be tested independently of Windows provider availability;
-- compare source-equivalent scenes against standards/reference renderers where practical before attributing a deficit to binaural rendering.
+- consume the canonical sample-time object/block contract in every rich-source adapter, including real Windows dynamic-object ingress, seek/recovery, lifetime/EOS, and explicit discontinuity handling;
+- preserve continuous metric XYZ and authored radial distance through adapter, scene, render-policy, and binaural boundaries without normalizing objects onto a unit shell;
+- extend the portable authored-scene conformance lane with ADM/BW64-facing adapters and reference fixtures for object, direct-speaker, and HOA semantics so source interpretation can be tested independently of Windows provider availability;
+- compare ADM-style timing and scene behavior against established reference renderers where practical, including fractional block boundaries and interpolation/jump semantics;
+- evaluate physically motivated near-field cues such as acoustic parallax, ear-specific geometry, distance-dependent ILD, and bounded near/far spectral behavior, with smooth convergence toward far-field behavior rather than an audible mode boundary;
+- keep radial-distance and near-field candidates independently switchable and out of the protected stereo-master path unless a separate stereo candidate later earns promotion;
+- compare source-equivalent scenes against standards/reference renderers before attributing a deficit to binaural rendering.
 
 Any sound-changing distance/HRTF candidate must remain independently switchable and revertible until engineering validation and physical listening both pass.
 
@@ -192,11 +192,13 @@ The current `--shared-7.1` health path must be hardened so a multichannel endpoi
 
 ## 12. Publish a stable portable spatial-scene API
 
-After Windows object ingress and source-authority semantics are physically proven, expose a stable host-neutral API for authored static roles, continuous objects, Ambisonics/HOA where supplied, stereo-derived support, already-binaural provenance, listener pose/profile, and output/latency contracts.
+Harden the existing host-neutral scene contract into a stable external host API only after Windows object ingress and source-authority semantics are physically proven.
 
-Windows concepts must remain in the Windows adapter.
+The published API must cover authored static roles, continuous objects, exact source-time semantics, metric geometry/radial distance, bounded source identity, Ambisonics/HOA where supplied, stereo-derived support, already-binaural provenance, listener pose/profile, and output/latency contracts.
 
-**Gate:** a non-Windows host can feed the same source-authority semantics into the same renderer without inheriting WASAPI, WDK, registry, tray, or service machinery.
+Windows concepts must remain in the Windows adapter, and renderer DSP internals must not become part of the public scene ABI merely because the current implementation consumes them.
+
+**Gate:** a non-Windows host can feed the same source-authority semantics into the same renderer without inheriting WASAPI, WDK, registry, tray, service, or renderer-internal scene machinery.
 
 ---
 
