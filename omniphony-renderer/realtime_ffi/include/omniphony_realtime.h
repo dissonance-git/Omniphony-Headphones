@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define OMNIPHONY_REALTIME_ABI_MAJOR 0
-#define OMNIPHONY_REALTIME_ABI_MINOR 6
+#define OMNIPHONY_REALTIME_ABI_MINOR 7
 
 #define OMNIPHONY_REALTIME_MODE_IDENTITY 0u
 #define OMNIPHONY_REALTIME_MODE_CURRENT 1u
@@ -255,6 +255,16 @@ int32_t omniphony_spatial_objects_process_f32(
     const float *dynamic_input_planar,
     float *output_stereo,
     size_t frames);
+
+/*
+ * ABI 0.7 logical stream reset. Call only from a non-realtime control path
+ * while the Spatial Audio stream is stopped. Clears source-sample time,
+ * dynamic identity/slot history, renderer state, transport rings, delayed
+ * safety audio, headphone EQ, and output protection state while preserving the
+ * stream's negotiated static role set and dynamic capacity.
+ */
+int32_t omniphony_spatial_objects_reset(
+    OmniphonySpatialObjectProcessor *processor);
 uint32_t omniphony_spatial_objects_sample_rate_hz(
     const OmniphonySpatialObjectProcessor *processor);
 uint32_t omniphony_spatial_objects_frames_per_quantum(
