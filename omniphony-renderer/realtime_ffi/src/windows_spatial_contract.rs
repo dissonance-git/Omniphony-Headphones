@@ -127,13 +127,9 @@ impl WindowsSpatialPosition {
         }
     }
 
-    /// Convert Windows axes to Omniphony source-scene axes.
+    /// Convert Windows axes to the portable metric source-scene axes.
     ///
     /// Omniphony: +X right, +Y forward, +Z up.
-    pub const fn to_omniphony_xyz(self) -> [f32; 3] {
-        [self.x_right_m, -self.z_back_m, self.y_up_m]
-    }
-
     pub fn to_omniphony_metric_xyz(self) -> MetricPosition {
         [
             self.x_right_m as f64,
@@ -160,14 +156,6 @@ pub struct WindowsStaticObject<'a> {
 }
 
 impl<'a> WindowsStaticObject<'a> {
-    pub fn omniphony_position(&self) -> Option<[f32; 3]> {
-        if !self.role.is_directional() {
-            return None;
-        }
-        self.windows_position
-            .map(WindowsSpatialPosition::to_omniphony_xyz)
-    }
-
     pub fn omniphony_metric_position(&self) -> Option<MetricPosition> {
         if !self.role.is_directional() {
             return None;
@@ -190,10 +178,6 @@ pub struct WindowsDynamicObject<'a> {
 }
 
 impl<'a> WindowsDynamicObject<'a> {
-    pub const fn omniphony_position(&self) -> [f32; 3] {
-        self.windows_position.to_omniphony_xyz()
-    }
-
     pub fn omniphony_metric_position(&self) -> MetricPosition {
         self.windows_position.to_omniphony_metric_xyz()
     }
@@ -241,19 +225,19 @@ mod tests {
     #[test]
     fn windows_axes_convert_without_bed_quantization() {
         assert_eq!(
-            WindowsSpatialPosition::new(1.0, 0.0, 0.0).to_omniphony_xyz(),
+            WindowsSpatialPosition::new(1.0, 0.0, 0.0).to_omniphony_metric_xyz(),
             [1.0, 0.0, 0.0]
         );
         assert_eq!(
-            WindowsSpatialPosition::new(0.0, 1.0, 0.0).to_omniphony_xyz(),
+            WindowsSpatialPosition::new(0.0, 1.0, 0.0).to_omniphony_metric_xyz(),
             [0.0, 0.0, 1.0]
         );
         assert_eq!(
-            WindowsSpatialPosition::new(0.0, 0.0, -1.0).to_omniphony_xyz(),
+            WindowsSpatialPosition::new(0.0, 0.0, -1.0).to_omniphony_metric_xyz(),
             [0.0, 1.0, 0.0]
         );
         assert_eq!(
-            WindowsSpatialPosition::new(0.0, 0.0, 1.0).to_omniphony_xyz(),
+            WindowsSpatialPosition::new(0.0, 0.0, 1.0).to_omniphony_metric_xyz(),
             [0.0, -1.0, 0.0]
         );
     }
@@ -280,9 +264,9 @@ mod tests {
         };
         assert_eq!(first.stable_id, second.stable_id);
         assert_eq!(first.mono_pcm, second.mono_pcm);
-        assert_ne!(first.omniphony_position(), second.omniphony_position());
-        assert_eq!(first.omniphony_position(), [-0.75, 1.5, 0.2]);
-        assert_eq!(second.omniphony_position(), [0.9, -0.4, -0.1]);
+        assert_ne!(first.omniphony_metric_position(), second.omniphony_metric_position());
+        assert_eq!(first.omniphony_metric_position(), [-0.75, 1.5, 0.2]);
+        assert_eq!(second.omniphony_metric_position(), [0.9, -0.4, -0.1]);
     }
 
     #[test]
@@ -293,7 +277,7 @@ mod tests {
             windows_position: Some(WindowsSpatialPosition::new(9.0, 9.0, 9.0)),
             mono_pcm: &pcm,
         };
-        assert_eq!(object.omniphony_position(), None);
+        assert_eq!(object.omniphony_metric_position(), None);
     }
 
     #[test]
@@ -304,6 +288,6 @@ mod tests {
             windows_position: Some(WindowsSpatialPosition::new(0.6, -0.7, 0.8)),
             mono_pcm: &pcm,
         };
-        assert_eq!(object.omniphony_position(), Some([0.6, -0.8, -0.7]));
+        assert_eq!(object.omniphony_metric_position(), Some([0.6, -0.8, -0.7]));
     }
 }
