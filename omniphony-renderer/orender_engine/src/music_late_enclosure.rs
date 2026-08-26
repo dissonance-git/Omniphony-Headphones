@@ -13,9 +13,11 @@
 //!
 //! Below 300 Hz the late field is deliberately coherent at the ears: one seventh
 //! orthogonal FDN output is low-passed and shared by L/R. Above 300 Hz the six
-//! directional buses are high-passed before HRTF rendering. This preserves the
-//! physically useful low-frequency interaural coherence of the inherited FDN
-//! while allowing the upper late field to close into a real binaural sphere.
+//! directional buses are high-passed before HRTF rendering. Because these are
+//! orthogonal stochastic FDN readouts rather than two coherent speaker bands,
+//! the crossover is a single 2nd-order Butterworth pair: its LP/HP squared
+//! magnitudes sum to unity, so the transition preserves late-field power instead
+//! of creating the 3 dB hole an LR4 pair would produce for incoherent branches.
 //!
 //! This is intentionally a tiny closure layer, not a new reverb effect. Its
 //! level, RT60 and predelay match the retained Current model's already-reduced
@@ -257,8 +259,8 @@ pub(crate) struct HrtfLateEnclosure {
     axes: [AxisHrtfBus; AXES],
     xover_lp: BiquadCoeffs,
     xover_hp: BiquadCoeffs,
-    low_state: [BiquadState; 2],
-    high_state: [[BiquadState; 2]; AXES],
+    low_state: BiquadState,
+    high_state: [BiquadState; AXES],
 }
 
 impl HrtfLateEnclosure {
@@ -303,17 +305,17 @@ impl HrtfLateEnclosure {
                 .sum::<f32>();
             let (axis_raw, coherent_raw) = self.fdn.process(input);
 
-            // Shared low-frequency field: LR4 low-pass, identical at both ears.
-            let low1 = biquad(coherent_raw, lp, &mut self.low_state[0]);
-            let low = biquad(low1, lp, &mut self.low_state[1]) * CURRENT_LATE_LEVEL;
+            // Shared low-frequency field: BW2 low-pass, identical at both ears.
+            let low = biquad(coherent_raw, lp, &mut self.low_state) * CURRENT_LATE_LEVEL;
             let o = frame * 2;
             out[o] += low;
             out[o + 1] += low;
 
-            // Directional upper late field: LR4 high-pass before six full HRTFs.
+            // Directional upper late field: power-complementary BW2 high-pass
+            // before six full HRTFs. The six readouts are orthogonal, so their
+            // total variance is normalized by 1/sqrt(AXES).
             for axis in 0..AXES {
-                let high1 = biquad(axis_raw[axis], hp, &mut self.high_state[axis][0]);
-                let high = biquad(high1, hp, &mut self.high_state[axis][1]) * axis_gain;
+                let high = biquad(axis_raw[axis], hp, &mut self.high_state[axis]) * axis_gain;
                 let (l, r) = self.axes[axis].process(high);
                 out[o] += l;
                 out[o + 1] += r;
@@ -347,6 +349,34 @@ mod tests {
             for j in i + 1..AXES {
                 assert_eq!(dot(&AXIS_SIGNS[i], &AXIS_SIGNS[j]), 0.0);
             }
+        }
+    }
+
+    #[test]
+    fn coherence_crossover_is_power_complementary() {
+        let sample_rate = 48_000u32;
+        let lp = butterworth2_lp(COHERENCE_XOVER_HZ, sample_rate);
+        let hp = butterworth2_hp(COHERENCE_XOVER_HZ, sample_rate);
+
+        for freq in [100.0f32, 300.0, 1_000.0] {
+            let mut lp_state = BiquadState::default();
+            let mut hp_state = BiquadState::default();
+            let mut input_power = 0.0f64;
+            let mut split_power = 0.0f64;
+            for i in 0..48_000usize {
+                let x = (std::f32::consts::TAU * freq * i as f32 / sample_rate as f32).sin();
+                let low = biquad(x, lp, &mut lp_state);
+                let high = biquad(x, hp, &mut hp_state);
+                if i >= 24_000 {
+                    input_power += (x as f64) * (x as f64);
+                    split_power += (low as f64) * (low as f64) + (high as f64) * (high as f64);
+                }
+            }
+            let ratio = split_power / input_power;
+            assert!(
+                (0.995..=1.005).contains(&ratio),
+                "incoherent crossover power changed at {freq} Hz: {ratio}"
+            );
         }
     }
 
