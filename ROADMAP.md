@@ -107,32 +107,23 @@ Level-match where needed, separate localization from tonal preference, separate 
 
 ---
 
-## 7. Complete frontal externalization, distance, and room behavior
+## 7. Extend authored scenes beyond the protected baseline
 
-The immediate perceptual problem is frontal depth/externalization, not more frontal quantity.
+The accepted default Windows music presentation is now protected. Do not reopen its early/late-field balance, bass foundation, transient behavior, center authority, or default route merely to add capability.
 
-The physically accepted dense first-order measured-HRTF late-field projection is now integrated into `main`. Keep its late level, decay, predelay, protected-master relationship, and working Windows host route fixed while evaluating the next mechanism.
+Build the next spatial gains first where the source has supplied more truth:
 
-The current bounded candidate increases early-reflection HRTF directional resolution from six global final-wall averages to ten deterministic direction clusters. It preserves the existing image-source delay/tone banks, first-/second-order tap gains, transient law, total reflection-power bookkeeping, and late field. Clustering is initialized once from static source-wall geometry; the realtime loop only follows precomputed routes.
+- make object state explicitly sample-timeline aware, including stable identity, start time, duration, interpolation interval, discontinuity/reset behavior, and seek recovery;
+- preserve continuous XYZ rather than quantizing dynamic objects to the static role frame;
+- add authored radial distance as geometry rather than treating distance as gain alone;
+- evaluate physically motivated near-field cues such as acoustic parallax, ear-specific geometry, distance-dependent ILD, and bounded near/far spectral behavior;
+- keep radial-distance processing out of the protected stereo-master path unless a separate stereo candidate later earns promotion;
+- build an offline authored-scene conformance lane using ADM/BW64-style object, direct-speaker, and HOA semantics so scene interpretation can be tested independently of Windows provider availability;
+- compare source-equivalent scenes against standards/reference renderers where practical before attributing a deficit to binaural rendering.
 
-The ten-bus choice is intentional rather than a round-number expansion: on the current source-wall geometry it materially reduces weighted directional quantization error versus the six-wall baseline while using every cluster, whereas a twelve-bus trial added effectively redundant capacity. Focused early-field tests and the full source-aware spatial suite have passed. Physical listening remains the promotion gate; engineering success alone does not establish perceptual improvement.
+Any sound-changing distance/HRTF candidate must remain independently switchable and revertible until engineering validation and physical listening both pass.
 
-Immediate sequence:
-
-```text
-accepted dense late field stays fixed
-→ finish Windows/installer engineering validation of the ten-cluster early candidate
-→ compare ten-cluster early field against the accepted dense-late baseline
-→ require no loss of bass, transient ownership, center solidity, clarity, motion, or route reliability
-→ keep / revise / revert from physical listening
-→ only then revisit second-order share or transient excitation
-```
-
-Investigate bounded front-specific early-field structure, HRTF interaction, direct-to-early/reverberant evidence, binaural coherence, radial-distance cues, near-field behavior, and source extent without sacrificing directness, bass, transients, center solidity, or side/rear envelopment.
-
-Do not buy externalization with indiscriminate late reverb, synthetic width, or another copied wet path.
-
-**Gate:** the higher-resolution early field beats the accepted dense-late baseline in clean-route physical listening, preserves the protected musical invariants, and remains reliable on the real Windows endpoint. If it does not, revert or revise it rather than increasing wet energy to hide the deficit.
+**Gate:** an authored moving object preserves identity, PCM, sample-time motion, XYZ and radial distance through the renderer while the protected default stereo baseline remains unchanged.
 
 ---
 
@@ -169,13 +160,15 @@ unknown stereo → conservative deterministic policy
 
 ---
 
-## 10. Productize optional head tracking
+## 10. Plan optional head tracking for broader publication
 
-Turn renderer-level head-pose capability into a reliable optional product feature. Define supported transports, latency/update budgets, recentering and coordinate conventions, dropout/reconnect behavior, smoothing, and tracked-vs-head-locked listening policy.
+Head tracking is not part of the protected reference listening path and is not required for ordinary Omniphony use.
 
-Tracking must never mutate source authority or authored motion.
+Preserve the existing renderer-level head-pose capability and plan a future publication-facing integration layer with supported transports, latency/update budgets, recentering and coordinate conventions, dropout/reconnect behavior, smoothing, and tracked-vs-head-locked listening policy. Mature tracker ecosystems such as OpenTrack are preferred integration points over making Omniphony responsible for camera/IMU tracking itself.
 
-**Gate:** head tracking stabilizes a virtual acoustic scene under real motion without discontinuities, excessive latency, or making non-tracked listening second-class.
+Tracking must remain optional, must never mutate source authority or authored motion, and must not make non-tracked listening second-class.
+
+**Gate:** before advertising head tracking publicly, a supported tracker path stabilizes a virtual acoustic scene under real motion without discontinuities or excessive latency. This gate does not block the current non-tracked product path.
 
 ---
 
@@ -238,15 +231,15 @@ prove closed-gate physical spatial egress
 → prove provider enumeration + safe activation
 → receive one real static object
 → receive full static vocabulary
-→ receive dynamic XYZ objects
+→ receive dynamic XYZ objects with sample-time continuity
 → prove a real spatial application/game
-→ controlled renderer comparisons
-→ physically validate higher-resolution early-field direction clustering
-→ finish frontal externalization / distance
-→ HRTF personalization + optional head tracking
+→ offline authored-scene conformance + controlled renderer comparisons
+→ authored radial-distance / near-field rendering
+→ HRTF personalization
 → already-binaural policy + Windows hardening
 → stable portable scene API
 → public release
+→ optional head-tracking integration when advertised
 ```
 
 When a gate is crossed, delete it here. If it established a durable law, fold that law into the appropriate living contract or executable regression. Git history is the only project chronology.
