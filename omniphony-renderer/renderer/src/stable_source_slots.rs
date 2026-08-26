@@ -48,13 +48,6 @@ impl StableSourceSlots {
     }
 
     pub fn reconcile(&mut self, active_ids: &[u64]) -> Result<(), StableSourceSlotError> {
-        if active_ids.len() > self.slots.len() {
-            return Err(StableSourceSlotError::CapacityExceeded {
-                capacity: self.slots.len(),
-                active: active_ids.len(),
-            });
-        }
-
         for (index, &id) in active_ids.iter().enumerate() {
             if id == 0 {
                 return Err(StableSourceSlotError::ReservedIdZero);
@@ -62,6 +55,12 @@ impl StableSourceSlots {
             if active_ids[..index].contains(&id) {
                 return Err(StableSourceSlotError::DuplicateId(id));
             }
+        }
+        if active_ids.len() > self.slots.len() {
+            return Err(StableSourceSlotError::CapacityExceeded {
+                capacity: self.slots.len(),
+                active: active_ids.len(),
+            });
         }
 
         // Release only identities that actually ended.
@@ -129,10 +128,7 @@ mod tests {
         );
         assert_eq!(
             slots.reconcile(&[7, 7]).unwrap_err(),
-            StableSourceSlotError::CapacityExceeded {
-                capacity: 1,
-                active: 2,
-            }
+            StableSourceSlotError::DuplicateId(7)
         );
 
         let mut two = StableSourceSlots::new(2);

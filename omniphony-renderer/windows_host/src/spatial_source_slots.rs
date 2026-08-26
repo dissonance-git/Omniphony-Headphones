@@ -138,7 +138,7 @@ impl WindowsSpatialSourceSlots {
             .iter()
             .filter(|key| matches!(key, WindowsSpatialSourceKey::Dynamic(_)))
             .count();
-        if active_dynamic_count > self.dynamic_slots.len() {
+        if active_dynamic_count > self.dynamic_slots.capacity() {
             return Err(WindowsSpatialSourceSlotError::DynamicCapacityExceeded {
                 capacity: self.dynamic_slots.capacity(),
                 active: active_dynamic_count,
