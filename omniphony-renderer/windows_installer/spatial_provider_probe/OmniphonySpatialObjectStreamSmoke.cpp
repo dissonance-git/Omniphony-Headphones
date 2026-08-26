@@ -39,6 +39,11 @@ WAVEFORMATEX ObjectFormat() {
 
 class RecordingTransport final : public OmniphonySpatialObjectQuantumTransport {
 public:
+    HRESULT Reset() noexcept override {
+        ++resets_;
+        return S_OK;
+    }
+
     HRESULT Process(
         const float* staticInputPlanar,
         const OmniphonySpatialDynamicObjectDescriptor* dynamicObjects,
@@ -65,6 +70,7 @@ public:
     }
 
     std::size_t Calls() const noexcept { return calls_; }
+    std::size_t Resets() const noexcept { return resets_; }
     const std::vector<float>& StaticPlanar() const noexcept { return staticPlanar_; }
     const std::vector<OmniphonySpatialDynamicObjectDescriptor>& Dynamic() const noexcept {
         return dynamicDescriptors_;
@@ -76,6 +82,7 @@ private:
     std::vector<OmniphonySpatialDynamicObjectDescriptor> dynamicDescriptors_;
     std::vector<float> dynamicPlanar_;
     std::size_t calls_ = 0;
+    std::size_t resets_ = 0;
 };
 
 HRESULT FillObject(ISpatialAudioObject* object, UINT32 frames, float value) {
@@ -320,6 +327,25 @@ int wmain() {
         return Fail(L"Stop", hr);
     }
 
+    hr = stream->Reset();
+    if (FAILED(hr) || transport->Resets() != 1) {
+        movingC->Release();
+        movingA->Release();
+        front->Release();
+        stream->Release();
+        return Fail(L"Reset-propagates-discontinuity", FAILED(hr) ? hr : E_FAIL);
+    }
+
+    active = TRUE;
+    hr = movingA->IsActive(&active);
+    if (FAILED(hr) || active) {
+        movingC->Release();
+        movingA->Release();
+        front->Release();
+        stream->Release();
+        return Fail(L"Reset-revokes-old-objects", FAILED(hr) ? hr : E_FAIL);
+    }
+
     movingC->Release();
     movingA->Release();
     front->Release();
@@ -329,5 +355,6 @@ int wmain() {
     std::wcout << L"SPATIAL_OBJECT_STREAM_STABLE_ID_OK 1\n";
     std::wcout << L"SPATIAL_OBJECT_STREAM_XYZ_PERSISTENCE_OK 1\n";
     std::wcout << L"SPATIAL_OBJECT_STREAM_RELEASE_RECLAIM_OK 1\n";
+    std::wcout << L"SPATIAL_OBJECT_STREAM_RESET_PROPAGATION_OK 1\n";
     return 0;
 }
