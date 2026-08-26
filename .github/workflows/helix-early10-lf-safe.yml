@@ -27,7 +27,8 @@ jobs:
       - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
-          rustup override set "$RUST_TOOLCHAIN" omniphony-renderer
+          cd omniphony-renderer
+          rustup override set "$RUST_TOOLCHAIN"
 
       - name: Apply LF-safe Early10 patch
         run: |
