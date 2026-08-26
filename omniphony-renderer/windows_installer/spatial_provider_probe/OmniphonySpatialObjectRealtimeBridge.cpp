@@ -99,7 +99,8 @@ public:
             !Resolve(module_, "omniphony_spatial_objects_destroy", destroy_) ||
             !Resolve(module_, "omniphony_spatial_objects_latency_frames", latency_) ||
             !Resolve(module_, "omniphony_spatial_objects_processed_blocks", processedBlocks_) ||
-            !Resolve(module_, "omniphony_spatial_objects_process_f32", process_)) {
+            !Resolve(module_, "omniphony_spatial_objects_process_f32", process_) ||
+            !Resolve(module_, "omniphony_spatial_objects_reset", reset_)) {
             Close();
             return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
         }
@@ -134,6 +135,7 @@ public:
         latency_ = nullptr;
         processedBlocks_ = nullptr;
         process_ = nullptr;
+        reset_ = nullptr;
         descriptors_.clear();
 
         if (module_) {
@@ -173,6 +175,14 @@ public:
         return result == 0 ? S_OK : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
     }
 
+    HRESULT Reset() noexcept {
+        if (!processor_ || !reset_) {
+            return E_UNEXPECTED;
+        }
+        const std::int32_t result = reset_(processor_);
+        return result == 0 ? S_OK : HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+    }
+
 private:
     using AbiVersionFn = std::uint32_t (*)();
     using CreateFn = OmniphonySpatialObjectProcessor* (*)(
@@ -189,17 +199,32 @@ private:
         float*,
         std::size_t);
 
+    using ResetFn = std::int32_t (*)(OmniphonySpatialObjectProcessor*);
+
     HMODULE module_ = nullptr;
     OmniphonySpatialObjectProcessor* processor_ = nullptr;
     DestroyFn destroy_ = nullptr;
     LatencyFn latency_ = nullptr;
     ProcessedBlocksFn processedBlocks_ = nullptr;
     ProcessFn process_ = nullptr;
+    ResetFn reset_ = nullptr;
     std::vector<OmniphonySpatialStaticObjectDescriptor> descriptors_;
 };
 
 class RealtimeObjectQuantumTransport final : public OmniphonySpatialObjectQuantumTransport {
 public:
+    HRESULT Reset() noexcept override {
+        if (!stereoQueue_) {
+            return E_UNEXPECTED;
+        }
+        const HRESULT result = bridge_.Reset();
+        if (FAILED(result)) {
+            return result;
+        }
+        stereoQueue_->Reset();
+        return S_OK;
+    }
+
     HRESULT Open(
         const wchar_t* realtimeDllPath,
         const SpatialAudioObjectRenderStreamActivationParams& params,
