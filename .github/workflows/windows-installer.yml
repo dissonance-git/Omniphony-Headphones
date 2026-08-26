@@ -138,6 +138,9 @@ jobs:
             'OmniphonySpatialObjectStreamSmoke',
             'OmniphonySpatialObjectRealtimeSmoke',
             'OmniphonySpatialRealtimeBridgeSmoke',
+            'OmniphonySpatialStereoQueueSmoke',
+            'OmniphonySpatialRawOutputProbe',
+            'OmniphonySpatialRawOutputSinkProbe',
             'OmniphonySpatialClosedGateEgressProbe'
           )) {
             cmake --build $build --config Release --target $target --parallel
@@ -285,8 +288,17 @@ jobs:
           $spatialRelease = "$env:GITHUB_WORKSPACE\build\spatial-provider\Release"
           $providerDll = Join-Path $spatialRelease 'OmniphonySpatialProbe.dll'
           $providerCtl = Join-Path $spatialRelease 'OmniphonySpatialProbeCtl.exe'
+          $providerSmoke = Join-Path $spatialRelease 'OmniphonySpatialProbeSmoke.exe'
+          $objectStreamSmoke = Join-Path $spatialRelease 'OmniphonySpatialObjectStreamSmoke.exe'
+          $objectRealtimeSmoke = Join-Path $spatialRelease 'OmniphonySpatialObjectRealtimeSmoke.exe'
+          $composedRealtimeSmoke = Join-Path $spatialRelease 'OmniphonySpatialRealtimeBridgeSmoke.exe'
+          $queueSmoke = Join-Path $spatialRelease 'OmniphonySpatialStereoQueueSmoke.exe'
+          $rawOutputProbe = Join-Path $spatialRelease 'OmniphonySpatialRawOutputProbe.exe'
+          $rawOutputSinkProbe = Join-Path $spatialRelease 'OmniphonySpatialRawOutputSinkProbe.exe'
           $closedGateProbe = Join-Path $spatialRelease 'OmniphonySpatialClosedGateEgressProbe.exe'
           $spatialSource = "$renderer\windows_installer\spatial_provider_probe"
+          $spatialToolkit = Join-Path $support 'spatial-provider-dev'
+          New-Item -ItemType Directory -Force $spatialToolkit | Out-Null
           $closedGateRunner = Join-Path $spatialSource 'Run-ClosedGateEgress.ps1'
           $providerEnable = Join-Path $spatialSource 'Enable-OmniphonySpatialProvider.ps1'
           $providerDisable = Join-Path $spatialSource 'Disable-OmniphonySpatialProvider.ps1'
@@ -316,6 +328,31 @@ jobs:
           Copy-Item $providerDisable $support -Force
           Copy-Item $closedGateProbe $support -Force
           Copy-Item $closedGateRunner $support -Force
+
+          # Explicit development toolkit. Setup never executes these scripts.
+          # The directory is a self-contained PackageRoot for immutable staging.
+          foreach ($file in @(
+            $providerDll,
+            $providerCtl,
+            $providerSmoke,
+            $objectStreamSmoke,
+            $objectRealtimeSmoke,
+            $composedRealtimeSmoke,
+            $queueSmoke,
+            $rawOutputProbe,
+            $rawOutputSinkProbe,
+            $env:OMNIPHONY_REALTIME_DLL
+          )) {
+            Copy-Item $file $spatialToolkit -Force
+          }
+          foreach ($name in @(
+            'CaptureSpatialProviderState.ps1',
+            'Stage-OmniphonySpatialProvider.ps1',
+            'Preflight-OmniphonySpatialProvider.ps1',
+            'Test-OmniphonySpatialProviderActivation.ps1'
+          )) {
+            Copy-Item (Join-Path $spatialSource $name) $spatialToolkit -Force
+          }
           Copy-Item $endpointCtl $support -Force
           Copy-Item "$env:GITHUB_WORKSPACE\omniphony\LICENSE" "$payload\LICENSE" -Force
 
@@ -332,6 +369,7 @@ jobs:
           Write-Host '  Omniphony\support\Disable-OmniphonySpatialProvider.ps1 (provider rollback)'
           Write-Host '  Omniphony\support\OmniphonySpatialClosedGateEgressProbe.exe (manual physical egress diagnostic)'
           Write-Host '  Omniphony\support\Run-ClosedGateEgress.ps1 (installed closed-gate runner)'
+          Write-Host '  Omniphony\support\spatial-provider-dev\ (inert staged/preflight/activation toolkit; never auto-run)'
           Write-Host '  no taskbar window; no background host process'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
 
@@ -376,7 +414,7 @@ jobs:
           $repo = $env:GITHUB_REPOSITORY
           $sha = $env:GITHUB_SHA
           $asset = 'dist/OmniphonySetup.exe'
-          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, native-surround 7.1.4 stream smoke, static/dynamic Spatial Sound object COM smoke, realtime object ABI 0.7 moving-XYZ/reset smoke, and fail-closed provider COM smoke passed."
+          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the protected Current renderer, stereo APO, native-surround stream smoke, static/dynamic Spatial Sound object and ABI 0.7 reset smokes, and fail-closed provider COM checks. The Spatial Sound provider is shipped as an inert development toolkit and is not auto-selected by setup."
 
           gh release view windows-current --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
