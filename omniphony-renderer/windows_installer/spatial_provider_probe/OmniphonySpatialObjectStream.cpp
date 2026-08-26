@@ -414,26 +414,35 @@ public:
     }
 
     HRESULT STDMETHODCALLTYPE Reset() override {
-        std::lock_guard<std::mutex> lock(state_->mutex);
-        if (state_->destroyed) {
-            return SPTLAUDCLNT_E_DESTROYED;
-        }
-        if (state_->running) {
-            return SPTLAUDCLNT_E_STREAM_NOT_STOPPED;
-        }
-        if (state_->inUpdate || state_->transportInFlight) {
-            return SPTLAUDCLNT_E_OUT_OF_ORDER;
-        }
-        state_->generation = 0;
-        std::fill(staticPlanar_.begin(), staticPlanar_.end(), 0.0f);
-        std::fill(dynamicPlanar_.begin(), dynamicPlanar_.end(), 0.0f);
-        std::fill(stereo_.begin(), stereo_.end(), 0.0f);
-        for (auto* object : state_->objects) {
-            if (object) {
-                object->Revoke();
+        std::shared_ptr<OmniphonySpatialObjectQuantumTransport> transport;
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            if (state_->destroyed) {
+                return SPTLAUDCLNT_E_DESTROYED;
             }
+            if (state_->running) {
+                return SPTLAUDCLNT_E_STREAM_NOT_STOPPED;
+            }
+            if (state_->inUpdate || state_->transportInFlight) {
+                return SPTLAUDCLNT_E_OUT_OF_ORDER;
+            }
+            state_->generation = 0;
+            std::fill(staticPlanar_.begin(), staticPlanar_.end(), 0.0f);
+            std::fill(dynamicPlanar_.begin(), dynamicPlanar_.end(), 0.0f);
+            std::fill(stereo_.begin(), stereo_.end(), 0.0f);
+            for (auto* object : state_->objects) {
+                if (object) {
+                    object->Revoke();
+                }
+            }
+            transport = transport_;
         }
-        return S_OK;
+
+        // Reset is a stopped-stream control operation. Propagate the logical
+        // discontinuity through the transport so source sample time, stable
+        // slots, renderer history, queues, and output protection restart
+        // together rather than carrying state across a seek/recovery boundary.
+        return transport ? transport->Reset() : S_OK;
     }
 
     HRESULT STDMETHODCALLTYPE BeginUpdatingAudioObjects(
