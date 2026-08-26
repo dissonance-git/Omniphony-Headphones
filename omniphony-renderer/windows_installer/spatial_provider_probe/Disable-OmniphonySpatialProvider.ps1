@@ -17,8 +17,6 @@ if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
     $ReceiptPath = Join-Path $env:ProgramData 'Omniphony\spatial-provider-last.json'
 }
 
-$ConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
-
 function Assert-Elevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -34,9 +32,20 @@ if (-not (Test-Path -LiteralPath $ControlPath -PathType Leaf)) {
 }
 $ControlPath = (Resolve-Path -LiteralPath $ControlPath).Path
 
-# Close the application-stream gate before registration state is touched.
-if (Test-Path -LiteralPath $ConfigPath) {
-    Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 0 -ErrorAction SilentlyContinue
+# Close/delete the application-stream gate through the single canonical owner
+# before registration state is touched.
+$previousPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Continue'
+    $runtimeOutput = @(& $ControlPath runtime-disable 2>&1 | ForEach-Object { "$_" })
+    $runtimeExit = $LASTEXITCODE
+    if ($null -eq $runtimeExit) { $runtimeExit = 0 }
+} finally {
+    $ErrorActionPreference = $previousPreference
+}
+$runtimeOutput | ForEach-Object { Write-Host $_ }
+if ($runtimeExit -ne 0) {
+    throw "Omniphony spatial provider runtime-disable failed: exit=$runtimeExit"
 }
 
 $previousPreference = $ErrorActionPreference
@@ -51,10 +60,6 @@ try {
 $output | ForEach-Object { Write-Host $_ }
 if ($exitCode -ne 0) {
     throw "Omniphony spatial provider unregister failed: exit=$exitCode"
-}
-
-if (Test-Path -LiteralPath $ConfigPath) {
-    Remove-Item -LiteralPath $ConfigPath -Recurse -Force
 }
 
 $stateRoot = Split-Path -Parent $ReceiptPath
