@@ -4,19 +4,17 @@ Omniphony is a free and open-source spatial audio renderer for headphones. Contr
 
 ## Read before changing code
 
-Use the repository's canonical owners rather than relying on duplicated summaries:
+Use canonical owners rather than duplicated summaries:
 
-1. [`README.md`](README.md) for product identity, stable architecture, and source-authority model;
-2. [`AGENTS.md`](AGENTS.md) for governing development, evidence, realtime, and listening law;
-3. [`ROADMAP.md`](ROADMAP.md) when your work targets unresolved current work;
-4. the smallest relevant contract under [`docs/`](docs/);
+1. [`README.md`](README.md) for product identity and stable architecture;
+2. [`AGENTS.md`](AGENTS.md) for governing development/evidence law;
+3. [`ROADMAP.md`](ROADMAP.md) when work targets an unresolved gate;
+4. the smallest relevant living contract under [`docs/`](docs/);
 5. the exact implementation and tests you intend to change.
-
-The repository follows this design rule:
 
 > **Store authority. Derive views. Preserve evidence. Promote slowly.**
 
-Do not copy architecture, status, or implementation inventories into contributor prose when a canonical owner or exact repository query already exists.
+In this repository, retired experiments and chronology belong to Git history. Do not create research ledgers, listening histories, status reports, migration diaries, or frozen frontier snapshots. Fold the surviving decision into a living contract, test, code path, or current roadmap item.
 
 ## Contribution shape
 
@@ -31,11 +29,12 @@ Which source representations are affected?
 Which invariant protects against regression?
 How was it validated?
 What remains unproven?
+What redundant surface can now be removed?
 ```
 
 Avoid combining unrelated renderer tuning, host plumbing, repository restructuring, and calibration changes unless they truly cannot be separated.
 
-Large architectural changes should identify the missing obligation, the canonical owner, the baseline, the candidate mechanism, validation, migration/rollback, and which weaker or duplicate machinery is retired.
+Large architectural changes should identify the missing obligation, canonical owner, candidate mechanism, validation, migration/rollback, and which weaker or duplicate machinery is retired.
 
 ## Core boundaries
 
@@ -52,8 +51,6 @@ In particular:
 - protect stereo master identity, bass, transients, center stability, dynamics, timbre, and motion;
 - keep public/default tuning distinct from listener-specific calibration unless broader evidence earns promotion.
 
-For detailed scene and Windows semantics, follow the relevant focused contracts under `docs/` rather than duplicating them here.
-
 ## Testing
 
 The renderer workspace currently requires Rust 1.88.0 or newer.
@@ -62,11 +59,8 @@ From `omniphony-renderer/`, useful focused commands include:
 
 ```sh
 cargo test -p renderer
-cargo test -p renderer --test source_shell_spread_energy
 cargo test -p orender_engine --lib --tests
-cargo test -p orender_engine --test source_shared_wet_extent
 cargo test -p source_ffi --lib --tests
-cargo test -p source_ffi --test runtime_spatial_mode
 cargo test -p realtime_ffi
 ```
 
@@ -76,7 +70,7 @@ CI failures are evidence. Do not make a gate green by weakening the requirement 
 
 ## Audible DSP changes
 
-For an audible change, record at minimum:
+For an audible change, evaluate at minimum:
 
 ```text
 intended percept
@@ -93,13 +87,24 @@ Useful objective checks include null/residual tests where identity is expected, 
 
 Human listening remains required for perceptual questions such as externalization, front/back discrimination, elevation, radial depth, source extent, image stability, envelopment, room naturalness, direct-source solidity, bass/groove integrity, timbre, fatigue, and preference.
 
-Listening should be loudness-aware and route-clean. Do not draw conclusions while duplicate physical paths or multiple headphone virtualizers are active unintentionally.
+Listening should be loudness-aware and route-clean. Do not draw conclusions while duplicate physical paths or multiple headphone virtualizers are unintentionally active.
 
-Accepted/rejected perceptual evidence belongs in [`docs/listening-history.md`](docs/listening-history.md). Unresolved work belongs in [`ROADMAP.md`](ROADMAP.md).
+After the decision:
+
+```text
+retained stable rule
+→ living contract and/or regression test
+
+unresolved consequence
+→ ROADMAP.md
+
+retired comparison narrative
+→ Git history only
+```
 
 ## Documentation and evidence
 
-Public-facing documentation should describe stable product behavior, contracts, and supported capabilities. Current project status belongs in `ROADMAP.md`; historical listening evidence belongs in `docs/listening-history.md`; implementation truth belongs in code/tests/CI.
+Working-tree documentation describes current product law, current unresolved work, or a focused current technical contract. Implementation truth belongs in code/tests/CI.
 
 Keep evidence states distinct:
 
@@ -113,9 +118,9 @@ source builds
 ≠ physical listening confirms the intended percept
 ```
 
-Do not promote a capability beyond the strongest evidence actually obtained.
+Do not promote a capability beyond the strongest evidence obtained.
 
-Machine-specific debugging transcripts, temporary hypotheses, one-off game configurations, and dated experiment narratives belong in focused evidence/research material rather than the root README or contributor guide.
+Do not preserve machine-specific debugging transcripts, dated experiment narratives, old implementation inventories, or completed validation reports in `docs/`. Git already preserves the exact repository state that produced them.
 
 ## Upstream and third-party work
 
@@ -125,4 +130,4 @@ External projects, papers, datasets, and proprietary spatial renderers may be us
 
 ## Submitting changes
 
-Before publication, re-fetch current `main`, inspect the exact targets, preserve concurrent work, and run validation proportionate to the change. After publication, verify the resulting commit and report build/tests, CI, measurements, and physical listening as separate evidence states.
+Before publication, re-fetch current `main`, inspect the exact targets, preserve concurrent work, and run validation proportionate to the change. After publication, verify the resulting commit and report build/tests, CI, measurements, and physical listening as separate evidence states. Remove superseded documentation rather than memorializing it.
