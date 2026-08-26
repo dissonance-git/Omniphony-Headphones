@@ -8,6 +8,7 @@ using namespace Windows::ApplicationModel::AppService;
 using namespace Windows::ApplicationModel::Background;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
+using namespace Windows::Storage;
 using namespace OmniphonySpatialLicenseService;
 
 namespace {
@@ -20,6 +21,31 @@ String^ ReadText(ValueSet^ values, String^ key) {
     }
     auto value = values->Lookup(key);
     return value == nullptr ? ref new String(L"") : value->ToString();
+}
+
+unsigned int ReadUInt32(IPropertySet^ values, String^ key) {
+    if (values == nullptr || !values->HasKey(key)) {
+        return 0u;
+    }
+    auto property = dynamic_cast<IPropertyValue^>(values->Lookup(key));
+    if (property == nullptr || property->Type != PropertyType::UInt32) {
+        return 0u;
+    }
+    return property->GetUInt32();
+}
+
+void RecordBrokerRequest(
+    String^ command,
+    String^ deviceId,
+    String^ mediaCodecName,
+    String^ spatialAudioSubtype) {
+    auto values = ApplicationData::Current->LocalSettings->Values;
+    const unsigned int requestCount = ReadUInt32(values, L"SpatialLicenseBroker.RequestCount") + 1u;
+    values->Insert(L"SpatialLicenseBroker.RequestCount", PropertyValue::CreateUInt32(requestCount));
+    values->Insert(L"SpatialLicenseBroker.LastCommand", PropertyValue::CreateString(command));
+    values->Insert(L"SpatialLicenseBroker.LastDeviceID", PropertyValue::CreateString(deviceId));
+    values->Insert(L"SpatialLicenseBroker.LastMediaCodecName", PropertyValue::CreateString(mediaCodecName));
+    values->Insert(L"SpatialLicenseBroker.LastSpatialAudioSubtype", PropertyValue::CreateString(spatialAudioSubtype));
 }
 
 void InsertLicenseResponse(ValueSet^ response, unsigned int status) {
@@ -79,9 +105,20 @@ void SpatialLicenseService::OnRequestReceived(
         auto command = ReadText(message, L"Command");
         auto deviceId = ReadText(message, L"DeviceID");
         auto mediaCodecName = ReadText(message, L"MediaCodecName");
+        auto spatialAudioSubtype = ReadText(message, L"SpatialAudioSubtype");
 
         OutputDebugStringW((L"OmniphonySpatialLicenseService Command=" + command +
-            L" DeviceID=" + deviceId + L" MediaCodecName=" + mediaCodecName + L"\n")->Data());
+            L" DeviceID=" + deviceId + L" MediaCodecName=" + mediaCodecName +
+            L" SpatialAudioSubtype=" + spatialAudioSubtype + L"\n")->Data());
+
+        // This breadcrumb is deliberately package-local and diagnostic only. It
+        // distinguishes our own direct AppService self-test from a request that
+        // Windows' spatial-license path actually routes into this broker.
+        try {
+            RecordBrokerRequest(command, deviceId, mediaCodecName, spatialAudioSubtype);
+        } catch (...) {
+            OutputDebugStringW(L"OmniphonySpatialLicenseService observation write failed.\n");
+        }
 
         auto response = ref new ValueSet();
         if (command == L"GetLicenseInfo" || command == L"GetRuntimeParameters") {

@@ -161,6 +161,18 @@ set_target_properties(OmniphonySpatialAppServiceProbeV17 PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
 
+add_executable(OmniphonySpatialBrokerProbeV22
+    OmniphonySpatialBrokerProbeV22.cpp
+)
+target_compile_features(OmniphonySpatialBrokerProbeV22 PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialBrokerProbeV22 PRIVATE UNICODE _UNICODE NOMINMAX)
+target_compile_options(OmniphonySpatialBrokerProbeV22 PRIVATE /W4 /permissive-)
+target_link_libraries(OmniphonySpatialBrokerProbeV22 PRIVATE windowsapp ole32)
+set_target_properties(OmniphonySpatialBrokerProbeV22 PROPERTIES
+    LINK_FLAGS "/MANIFESTUAC:\"level='asInvoker' uiAccess='false'\""
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+)
+
 add_executable(OmniphonySpatialOwnershipProbeV21
     OmniphonySpatialOwnershipProbeV21.cpp
 )
