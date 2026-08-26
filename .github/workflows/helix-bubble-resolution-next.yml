@@ -23,14 +23,19 @@ jobs:
           ref: helix/bubble-resolution-next
           fetch-depth: 0
 
-      - name: Apply resolution patch
+      - name: Apply dense late-field patch only
         run: |
-          # This branch already carries upstream's pinna symmetry fix. The staged
-          # patch predates that port and deliberately asserts the old line, so
-          # restore only that one anchor before applying the idempotent final form.
-          sed -i 's/let front = (0.5 \* az).cos().abs();/let front = (0.5 * az).cos().clamp(0.0, 1.0);/' \
-            omniphony-renderer/renderer/src/binaural/hrir.rs
-          python .helix/apply_bubble_resolution_next.py
+          python - <<'PY'
+          from pathlib import Path
+          src = Path('.helix/apply_bubble_resolution_next.py').read_text(encoding='utf-8')
+          marker = "# ---------------------------------------------------------------------------\n# Current late field: dense first-order HRTF projection.\n# ---------------------------------------------------------------------------\n"
+          i = src.find(marker)
+          if i < 0:
+              raise SystemExit('dense late-field marker not found')
+          prelude = "from pathlib import Path\nroot = Path.cwd()\nlate_path = root / 'omniphony-renderer/orender_engine/src/music_late_enclosure.rs'\n\n"
+          Path('/tmp/apply_dense_late.py').write_text(prelude + src[i:], encoding='utf-8')
+          PY
+          python /tmp/apply_dense_late.py
           git diff --check
 
       - name: Install pinned Rust
@@ -57,9 +62,7 @@ jobs:
         run: |
           git config user.name 'helix-ci'
           git config user.email 'helix-ci@users.noreply.github.com'
-          git add omniphony-renderer/renderer/src/binaural/hrir.rs \
-                  omniphony-renderer/renderer/src/binaural/measured.rs \
-                  omniphony-renderer/orender_engine/src/music_late_enclosure.rs
+          git add omniphony-renderer/orender_engine/src/music_late_enclosure.rs
           git commit -m 'feat(current): project late FOA through dense measured HRTF sphere'
           git push origin HEAD:helix/bubble-resolution-next
 
@@ -69,4 +72,4 @@ jobs:
         run: |
           gh workflow run windows-installer.yml --ref helix/bubble-resolution-next
 
-# trigger: 3
+# trigger: 4
