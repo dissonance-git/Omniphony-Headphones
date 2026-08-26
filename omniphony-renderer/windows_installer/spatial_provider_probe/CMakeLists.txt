@@ -99,6 +99,8 @@ add_executable(OmniphonySpatialRealtimeBridgeSmoke
     OmniphonySpatialRealtimeBridgeSmoke.cpp
     OmniphonySpatialRealtimeBridge.cpp
     OmniphonySpatialStaticStream.cpp
+    OmniphonySpatialObjectRealtimeBridge.cpp
+    OmniphonySpatialObjectStream.cpp
     OmniphonySpatialStereoQueue.cpp
 )
 target_compile_features(OmniphonySpatialRealtimeBridgeSmoke PRIVATE cxx_std_17)
