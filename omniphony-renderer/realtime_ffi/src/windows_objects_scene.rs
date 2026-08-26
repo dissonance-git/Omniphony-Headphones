@@ -15,6 +15,7 @@ use orender_engine::{
 };
 use renderer::source_frame::SourceFrameRenderer;
 use renderer::source_scene::{SourceLaneKind, SourceSceneEvidence};
+use renderer::stable_source_slots::StableSourceSlots;
 use std::f32::consts::PI;
 
 const OBJECT_OUTPUT_GAIN: f32 = 0.90;
@@ -74,12 +75,16 @@ pub(crate) struct WindowsSpatialObjectPipeline {
     headphone_eq: NoireXPersonalEq,
     peak_guard: StereoLookaheadPeakGuard,
     sample_pos: u64,
-    previous_dynamic_ids: Vec<u64>,
+    dynamic_slots: StableSourceSlots,
+    previous_dynamic_slots: Vec<Option<u64>>,
+    dynamic_ids: Vec<u64>,
+    dynamic_slot_to_input: Vec<Option<usize>>,
+    active_lanes: Vec<bool>,
     presentation_ramp_frames: Vec<u32>,
 }
 
 impl WindowsSpatialObjectPipeline {
-    pub(crate) fn new(sample_rate_hz: u32) -> Result<Self, String> {
+    pub(crate) fn new(sample_rate_hz: u32, max_dynamic_objects: usize) -> Result<Self, String> {
         let renderer = build_source_frame_renderer(
             sample_rate_hz,
             None,
@@ -101,8 +106,12 @@ impl WindowsSpatialObjectPipeline {
             headphone_eq: NoireXPersonalEq::new(sample_rate_hz),
             peak_guard: StereoLookaheadPeakGuard::new(sample_rate_hz),
             sample_pos: 0,
-            previous_dynamic_ids: Vec::new(),
-            presentation_ramp_frames: Vec::new(),
+            dynamic_slots: StableSourceSlots::new(max_dynamic_objects),
+            previous_dynamic_slots: vec![None; max_dynamic_objects],
+            dynamic_ids: Vec::with_capacity(max_dynamic_objects),
+            dynamic_slot_to_input: vec![None; max_dynamic_objects],
+            active_lanes: Vec::with_capacity(16 + max_dynamic_objects),
+            presentation_ramp_frames: Vec::with_capacity(16 + max_dynamic_objects),
         })
     }
 
@@ -113,8 +122,19 @@ impl WindowsSpatialObjectPipeline {
         if frames == 0 {
             return Err("spatial object silence quantum has zero frames".to_string());
         }
+        self.previous_dynamic_slots
+            .copy_from_slice(self.dynamic_slots.slots());
+        self.dynamic_slots
+            .reconcile(&[])
+            .map_err(|error| format!("dynamic slot release failed: {error:?}"))?;
+        for (slot, previous) in self.previous_dynamic_slots.iter().copied().enumerate() {
+            if previous.is_some() {
+                // process_silence is used only when this stream has no static
+                // objects, so dynamic slot zero is renderer lane zero.
+                self.renderer.reset_channel_runtime_state(slot);
+            }
+        }
         self.sample_pos = self.sample_pos.saturating_add(frames as u64);
-        self.previous_dynamic_ids.clear();
         Ok(self.peak_guard.process_interleaved(&vec![0.0f32; frames * 2]))
     }
 
@@ -195,9 +215,6 @@ impl WindowsSpatialObjectPipeline {
     ) -> Result<Vec<f32>, String> {
         let frames = Self::validate_quantum(static_objects, dynamic_objects)?;
 
-        self.sources.clear();
-        self.sources.reserve(static_objects.len() + dynamic_objects.len());
-
         let mut directional_static = Vec::with_capacity(static_objects.len());
         let mut lfe = None;
         for object in static_objects {
@@ -209,12 +226,32 @@ impl WindowsSpatialObjectPipeline {
         }
         directional_static.sort_by_key(|object| object.role.canonical_scene_index());
 
-        let mut ordered_dynamic = dynamic_objects.iter().collect::<Vec<_>>();
-        ordered_dynamic.sort_by_key(|object| object.stable_id);
+        self.previous_dynamic_slots
+            .copy_from_slice(self.dynamic_slots.slots());
+        self.dynamic_ids.clear();
+        self.dynamic_ids
+            .extend(dynamic_objects.iter().map(|object| object.stable_id));
+        self.dynamic_slots
+            .reconcile(&self.dynamic_ids)
+            .map_err(|error| format!("dynamic slot reconciliation failed: {error:?}"))?;
+        let dynamic_span = self.dynamic_slots.active_span_len();
+        self.dynamic_slot_to_input[..dynamic_span].fill(None);
+        for (input_index, object) in dynamic_objects.iter().enumerate() {
+            let slot = self
+                .dynamic_slots
+                .slot_for(object.stable_id)
+                .ok_or_else(|| format!("dynamic object {} lost stable slot", object.stable_id))?;
+            self.dynamic_slot_to_input[slot] = Some(input_index);
+        }
 
+        self.sources.clear();
+        self.sources.reserve(directional_static.len() + dynamic_span);
+        self.active_lanes.clear();
+        self.active_lanes
+            .reserve(directional_static.len() + dynamic_span);
         self.presentation_ramp_frames.clear();
         self.presentation_ramp_frames
-            .reserve(directional_static.len() + ordered_dynamic.len());
+            .reserve(directional_static.len() + dynamic_span);
 
         for object in &directional_static {
             let position = object
@@ -230,23 +267,49 @@ impl WindowsSpatialObjectPipeline {
                 ..SourceSceneEvidence::default()
             });
             // Static role geometry is already fixed for the stream.
+            self.active_lanes.push(true);
             self.presentation_ramp_frames.push(0);
         }
 
-        for object in &ordered_dynamic {
-            let position = object.omniphony_metric_position();
+        let static_count = directional_static.len();
+        for slot in 0..dynamic_span {
+            let slot_id = self.dynamic_slots.slots()[slot];
+            let Some(id) = slot_id else {
+                self.sources.push(SourceSceneEvidence {
+                    lane_kind: SourceLaneKind::DrySource,
+                    source_id: 0,
+                    persistent_part_id: None,
+                    confidence: 0.0,
+                    ..SourceSceneEvidence::default()
+                });
+                self.active_lanes.push(false);
+                self.presentation_ramp_frames.push(0);
+                continue;
+            };
+
+            let input_index = self.dynamic_slot_to_input[slot]
+                .ok_or_else(|| format!("active dynamic slot {slot} has no input object"))?;
+            let object = &dynamic_objects[input_index];
+
+            // Reusing a physical slot for a different identity must clear only
+            // that lane's convolution/ramp history. Surviving objects retain
+            // their state even when another object ends or provider order moves.
+            if self.previous_dynamic_slots[slot] != Some(id) {
+                self.renderer
+                    .reset_channel_runtime_state(static_count + slot);
+            }
+
             self.sources.push(SourceSceneEvidence {
                 lane_kind: SourceLaneKind::DrySource,
-                source_id: object.stable_id,
-                persistent_part_id: Some(object.stable_id),
-                authored_position: Some(position),
+                source_id: id,
+                persistent_part_id: Some(id),
+                authored_position: Some(object.omniphony_metric_position()),
                 confidence: 1.0,
                 ..SourceSceneEvidence::default()
             });
-            // A stable dynamic object interpolates across this sample span.
-            // A newly admitted object starts at its supplied position instead
-            // of flying in from a stale lane or the origin.
-            let ramp = if self.previous_dynamic_ids.binary_search(&object.stable_id).is_ok() {
+            self.active_lanes.push(true);
+
+            let ramp = if self.previous_dynamic_slots[slot] == Some(id) {
                 frames.min(u32::MAX as usize) as u32
             } else {
                 0
@@ -254,7 +317,7 @@ impl WindowsSpatialObjectPipeline {
             self.presentation_ramp_frames.push(ramp);
         }
 
-        let source_count = directional_static.len() + ordered_dynamic.len();
+        let source_count = directional_static.len() + dynamic_span;
         self.interleaved.clear();
         self.interleaved.reserve(frames.saturating_mul(source_count));
         for frame_index in 0..frames {
@@ -263,8 +326,10 @@ impl WindowsSpatialObjectPipeline {
                 self.interleaved
                     .push(if sample.is_finite() { sample } else { 0.0 });
             }
-            for object in &ordered_dynamic {
-                let sample = object.mono_pcm[frame_index];
+            for slot in 0..dynamic_span {
+                let sample = self.dynamic_slot_to_input[slot]
+                    .map(|input_index| dynamic_objects[input_index].mono_pcm[frame_index])
+                    .unwrap_or(0.0);
                 self.interleaved
                     .push(if sample.is_finite() { sample } else { 0.0 });
             }
@@ -274,12 +339,13 @@ impl WindowsSpatialObjectPipeline {
             vec![0.0f32; frames * 2]
         } else {
             self.renderer
-                .render_source_frame_with_presentation_controls(
+                .render_source_frame_with_lane_activity(
                     &self.interleaved,
                     &self.sources,
                     None,
                     None,
                     Some(&self.presentation_ramp_frames),
+                    Some(&self.active_lanes),
                     self.sample_pos,
                     0,
                     std::mem::take(&mut self.render_buf),
@@ -288,10 +354,6 @@ impl WindowsSpatialObjectPipeline {
                 .map_err(|error| error.to_string())?
                 .samples
         };
-
-        self.previous_dynamic_ids.clear();
-        self.previous_dynamic_ids
-            .extend(ordered_dynamic.iter().map(|object| object.stable_id));
 
         if mixed.len() != frames * 2 {
             return Err(format!(
@@ -345,40 +407,20 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_order_is_canonical_and_persistent_motion_gets_a_quantum_ramp() {
-        let pcm = [0.0f32; 8];
-        let objects = [
-            WindowsDynamicObject {
-                stable_id: 9,
-                windows_position: WindowsSpatialPosition::new(0.5, 0.0, -1.0),
-                mono_pcm: &pcm,
-            },
-            WindowsDynamicObject {
-                stable_id: 3,
-                windows_position: WindowsSpatialPosition::new(-0.5, 0.0, -1.0),
-                mono_pcm: &pcm,
-            },
-        ];
-        let mut ordered = objects.iter().collect::<Vec<_>>();
-        ordered.sort_by_key(|object| object.stable_id);
-        assert_eq!(
-            ordered.iter().map(|object| object.stable_id).collect::<Vec<_>>(),
-            vec![3, 9]
-        );
+    fn dynamic_slots_preserve_survivors_and_reuse_only_freed_lanes() {
+        let mut slots = StableSourceSlots::new(3);
+        slots.reconcile(&[9, 3]).unwrap();
+        assert_eq!(slots.slot_for(9), Some(0));
+        assert_eq!(slots.slot_for(3), Some(1));
 
-        let previous = [3u64, 9u64];
-        let ramps = ordered
-            .iter()
-            .map(|object| {
-                if previous.binary_search(&object.stable_id).is_ok() {
-                    pcm.len() as u32
-                } else {
-                    0
-                }
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(ramps, vec![8, 8]);
-        assert_eq!(previous.binary_search(&11), Err(2));
+        let before = slots.slots().to_vec();
+        slots.reconcile(&[3, 9]).unwrap();
+        assert_eq!(slots.slots(), before.as_slice());
+
+        slots.reconcile(&[3, 11]).unwrap();
+        assert_eq!(slots.slot_for(3), Some(1));
+        assert_eq!(slots.slot_for(11), Some(0));
+        assert_eq!(slots.active_span_len(), 2);
     }
 
     #[test]

@@ -292,7 +292,8 @@ impl AsyncSpatialObjects {
         let worker = thread::Builder::new()
             .name("omniphony-spatial-objects".to_string())
             .spawn(move || {
-                let mut pipeline = match WindowsSpatialObjectPipeline::new(sample_rate_hz) {
+                let mut pipeline =
+                    match WindowsSpatialObjectPipeline::new(sample_rate_hz, max_dynamic_objects) {
                     Ok(pipeline) => {
                         let _ = init_tx.send(Ok(()));
                         pipeline
@@ -435,6 +436,9 @@ impl AsyncSpatialObjects {
                 || !descriptor.z_back_m.is_finite()
             {
                 return -14;
+            }
+            if descriptor.stable_id == 0 {
+                return -16;
             }
             for previous in 0..index {
                 if unsafe { (*dynamic_descriptors.add(previous)).stable_id } == descriptor.stable_id {
