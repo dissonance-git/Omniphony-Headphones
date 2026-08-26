@@ -160,3 +160,16 @@ set_target_properties(OmniphonySpatialAppServiceProbeV17 PROPERTIES
     LINK_FLAGS "/MANIFESTUAC:\"level='asInvoker' uiAccess='false'\""
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
+
+add_executable(OmniphonySpatialOwnershipProbeV21
+    OmniphonySpatialOwnershipProbeV21.cpp
+)
+target_compile_features(OmniphonySpatialOwnershipProbeV21 PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialOwnershipProbeV21 PRIVATE UNICODE _UNICODE NOMINMAX)
+target_compile_options(OmniphonySpatialOwnershipProbeV21 PRIVATE /W4 /permissive-)
+target_link_libraries(OmniphonySpatialOwnershipProbeV21 PRIVATE windowsapp ole32 advapi32 shell32 tdh)
+set_target_properties(OmniphonySpatialOwnershipProbeV21 PROPERTIES
+    LINK_FLAGS "/MANIFESTUAC:\"level='asInvoker' uiAccess='false'\""
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/../../../dist/Omniphony-Spatial-Companion"
+)
