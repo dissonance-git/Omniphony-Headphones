@@ -25,6 +25,11 @@ jobs:
 
       - name: Apply resolution patch
         run: |
+          # This branch already carries upstream's pinna symmetry fix. The staged
+          # patch predates that port and deliberately asserts the old line, so
+          # restore only that one anchor before applying the idempotent final form.
+          sed -i 's/let front = (0.5 \* az).cos().abs();/let front = (0.5 * az).cos().clamp(0.0, 1.0);/' \
+            omniphony-renderer/renderer/src/binaural/hrir.rs
           python .helix/apply_bubble_resolution_next.py
           git diff --check
 
@@ -64,4 +69,4 @@ jobs:
         run: |
           gh workflow run windows-installer.yml --ref helix/bubble-resolution-next
 
-# trigger: 2
+# trigger: 3
