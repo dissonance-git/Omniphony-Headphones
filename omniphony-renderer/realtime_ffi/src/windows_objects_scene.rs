@@ -74,6 +74,8 @@ pub(crate) struct WindowsSpatialObjectPipeline {
     headphone_eq: NoireXPersonalEq,
     peak_guard: StereoLookaheadPeakGuard,
     sample_pos: u64,
+    previous_dynamic_ids: Vec<u64>,
+    presentation_ramp_frames: Vec<u32>,
 }
 
 impl WindowsSpatialObjectPipeline {
@@ -98,6 +100,8 @@ impl WindowsSpatialObjectPipeline {
             headphone_eq: NoireXPersonalEq::new(sample_rate_hz),
             peak_guard: StereoLookaheadPeakGuard::new(sample_rate_hz),
             sample_pos: 0,
+            previous_dynamic_ids: Vec::new(),
+            presentation_ramp_frames: Vec::new(),
         })
     }
 
@@ -109,6 +113,7 @@ impl WindowsSpatialObjectPipeline {
             return Err("spatial object silence quantum has zero frames".to_string());
         }
         self.sample_pos = self.sample_pos.saturating_add(frames as u64);
+        self.previous_dynamic_ids.clear();
         Ok(self.peak_guard.process_interleaved(&vec![0.0f32; frames * 2]))
     }
 
@@ -197,8 +202,20 @@ impl WindowsSpatialObjectPipeline {
         for object in static_objects {
             if object.role == WindowsStaticObjectRole::LowFrequency {
                 lfe = Some(object);
-                continue;
+            } else {
+                directional_static.push(object);
             }
+        }
+        directional_static.sort_by_key(|object| object.role.canonical_scene_index());
+
+        let mut ordered_dynamic = dynamic_objects.iter().collect::<Vec<_>>();
+        ordered_dynamic.sort_by_key(|object| object.stable_id);
+
+        self.presentation_ramp_frames.clear();
+        self.presentation_ramp_frames
+            .reserve(directional_static.len() + ordered_dynamic.len());
+
+        for object in &directional_static {
             let position = object
                 .omniphony_position()
                 .ok_or_else(|| format!("static object {:?} lost position", object.role))?;
@@ -215,10 +232,11 @@ impl WindowsSpatialObjectPipeline {
                 confidence: 1.0,
                 ..SourceSceneEvidence::default()
             });
-            directional_static.push(object);
+            // Static role geometry is already fixed for the stream.
+            self.presentation_ramp_frames.push(0);
         }
 
-        for object in dynamic_objects {
+        for object in &ordered_dynamic {
             let position = object.omniphony_position();
             self.sources.push(SourceSceneEvidence {
                 lane_kind: SourceLaneKind::DrySource,
@@ -232,9 +250,18 @@ impl WindowsSpatialObjectPipeline {
                 confidence: 1.0,
                 ..SourceSceneEvidence::default()
             });
+            // A stable dynamic object interpolates across this sample span.
+            // A newly admitted object starts at its supplied position instead
+            // of flying in from a stale lane or the origin.
+            let ramp = if self.previous_dynamic_ids.binary_search(&object.stable_id).is_ok() {
+                frames.min(u32::MAX as usize) as u32
+            } else {
+                0
+            };
+            self.presentation_ramp_frames.push(ramp);
         }
 
-        let source_count = directional_static.len() + dynamic_objects.len();
+        let source_count = directional_static.len() + ordered_dynamic.len();
         self.interleaved.clear();
         self.interleaved.reserve(frames.saturating_mul(source_count));
         for frame_index in 0..frames {
@@ -243,7 +270,7 @@ impl WindowsSpatialObjectPipeline {
                 self.interleaved
                     .push(if sample.is_finite() { sample } else { 0.0 });
             }
-            for object in dynamic_objects {
+            for object in &ordered_dynamic {
                 let sample = object.mono_pcm[frame_index];
                 self.interleaved
                     .push(if sample.is_finite() { sample } else { 0.0 });
@@ -254,10 +281,12 @@ impl WindowsSpatialObjectPipeline {
             vec![0.0f32; frames * 2]
         } else {
             self.renderer
-                .render_source_frame_with_gain_policy(
+                .render_source_frame_with_presentation_controls(
                     &self.interleaved,
                     &self.sources,
                     None,
+                    None,
+                    Some(&self.presentation_ramp_frames),
                     self.sample_pos,
                     0,
                     std::mem::take(&mut self.render_buf),
@@ -266,6 +295,10 @@ impl WindowsSpatialObjectPipeline {
                 .map_err(|error| error.to_string())?
                 .samples
         };
+
+        self.previous_dynamic_ids.clear();
+        self.previous_dynamic_ids
+            .extend(ordered_dynamic.iter().map(|object| object.stable_id));
 
         if mixed.len() != frames * 2 {
             return Err(format!(
@@ -319,6 +352,43 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn dynamic_order_is_canonical_and_persistent_motion_gets_a_quantum_ramp() {
+        let pcm = [0.0f32; 8];
+        let objects = [
+            WindowsDynamicObject {
+                stable_id: 9,
+                windows_position: WindowsSpatialPosition::new(0.5, 0.0, -1.0),
+                mono_pcm: &pcm,
+            },
+            WindowsDynamicObject {
+                stable_id: 3,
+                windows_position: WindowsSpatialPosition::new(-0.5, 0.0, -1.0),
+                mono_pcm: &pcm,
+            },
+        ];
+        let mut ordered = objects.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|object| object.stable_id);
+        assert_eq!(
+            ordered.iter().map(|object| object.stable_id).collect::<Vec<_>>(),
+            vec![3, 9]
+        );
+
+        let previous = [3u64, 9u64];
+        let ramps = ordered
+            .iter()
+            .map(|object| {
+                if previous.binary_search(&object.stable_id).is_ok() {
+                    pcm.len() as u32
+                } else {
+                    0
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ramps, vec![8, 8]);
+        assert_eq!(previous.binary_search(&11), Err(2));
+    }
+
     fn dynamic_ids_must_be_unique_inside_one_quantum() {
         let pcm = [0.0f32; 8];
         let object = WindowsDynamicObject {
