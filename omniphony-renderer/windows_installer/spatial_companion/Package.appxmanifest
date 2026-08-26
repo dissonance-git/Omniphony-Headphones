@@ -30,6 +30,17 @@
     <Resource Language="en-US" />
   </Resources>
 
+  <Extensions>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer>
+        <Path>OmniphonySpatialLicenseService.dll</Path>
+        <ActivatableClass
+          ActivatableClassId="OmniphonySpatialLicenseService.SpatialLicenseService"
+          ThreadingModel="both" />
+      </InProcessServer>
+    </Extension>
+  </Extensions>
+
   <Applications>
     <Application
       Id="Companion"
