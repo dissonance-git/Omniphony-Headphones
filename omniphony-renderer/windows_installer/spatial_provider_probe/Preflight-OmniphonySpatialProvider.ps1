@@ -121,6 +121,11 @@ if ($manifest.registry_mutated -ne $false -or $manifest.provider_selected -ne $f
 if ($manifest.exact_file_set_verified -ne $true -or $manifest.final_path_smokes_verified -ne $true) {
     throw 'Spatial-provider stage manifest does not record final immutable verification.'
 }
+if ($manifest.dynamic_object_contract_verified -ne $true -or
+    $manifest.spatial_object_abi_reset_verified -ne $true -or
+    $manifest.composed_dynamic_render_path_verified -ne $true) {
+    throw 'Spatial-provider stage predates the dynamic object/reset contract; restage the current package before activation preflight.'
+}
 if ($manifest.clock_domain_queue_verified -ne $true) {
     throw 'Spatial-provider stage predates the clock-domain queue contract; restage the current package before activation preflight.'
 }
@@ -171,7 +176,7 @@ foreach ($name in $expected.Keys) {
     }
 }
 
-foreach ($requiredField in @('provider_dll', 'realtime_dll', 'stereo_queue_smoke', 'raw_output_probe', 'raw_output_sink_probe')) {
+foreach ($requiredField in @('provider_dll', 'realtime_dll', 'object_stream_smoke', 'object_realtime_smoke', 'stereo_queue_smoke', 'raw_output_probe', 'raw_output_sink_probe')) {
     if (-not $manifest.$requiredField) {
         throw "Spatial-provider stage manifest is missing required current field: $requiredField"
     }
@@ -179,10 +184,12 @@ foreach ($requiredField in @('provider_dll', 'realtime_dll', 'stereo_queue_smoke
 
 $providerDll = [System.IO.Path]::GetFullPath([string]$manifest.provider_dll)
 $realtimeDll = [System.IO.Path]::GetFullPath([string]$manifest.realtime_dll)
+$objectStreamSmoke = [System.IO.Path]::GetFullPath([string]$manifest.object_stream_smoke)
+$objectRealtimeSmoke = [System.IO.Path]::GetFullPath([string]$manifest.object_realtime_smoke)
 $stereoQueueSmoke = [System.IO.Path]::GetFullPath([string]$manifest.stereo_queue_smoke)
 $rawOutputProbe = [System.IO.Path]::GetFullPath([string]$manifest.raw_output_probe)
 $rawOutputSinkProbe = [System.IO.Path]::GetFullPath([string]$manifest.raw_output_sink_probe)
-foreach ($ownedPath in @($providerDll, $realtimeDll, $stereoQueueSmoke, $rawOutputProbe, $rawOutputSinkProbe)) {
+foreach ($ownedPath in @($providerDll, $realtimeDll, $objectStreamSmoke, $objectRealtimeSmoke, $stereoQueueSmoke, $rawOutputProbe, $rawOutputSinkProbe)) {
     if (-not (Test-PathWithin -Child $ownedPath -Parent $generationRoot)) {
         throw "Spatial-provider manifest points outside its immutable generation: $ownedPath"
     }
@@ -197,12 +204,30 @@ $staticStream = Invoke-NativeCaptured `
     -Path (Join-Path $generationRoot 'OmniphonySpatialStaticStreamSmoke.exe') `
     -Label 'Final-path static stream lifecycle smoke'
 
+$objectStream = Invoke-NativeCaptured `
+    -Path $objectStreamSmoke `
+    -Label 'Final-path dynamic object lifecycle smoke'
+Assert-Marker -Result $objectStream -Marker 'SPATIAL_OBJECT_STREAM_STABLE_ID_OK 1' -Label 'Final-path dynamic object lifecycle smoke'
+Assert-Marker -Result $objectStream -Marker 'SPATIAL_OBJECT_STREAM_XYZ_PERSISTENCE_OK 1' -Label 'Final-path dynamic object lifecycle smoke'
+Assert-Marker -Result $objectStream -Marker 'SPATIAL_OBJECT_STREAM_RESET_PROPAGATION_OK 1' -Label 'Final-path dynamic object lifecycle smoke'
+
+$objectRealtime = Invoke-NativeCaptured `
+    -Path $objectRealtimeSmoke `
+    -Arguments @($realtimeDll) `
+    -Label 'Final-path dynamic object realtime ABI smoke'
+$objectRealtimeText = @($objectRealtime.output) -join "`n"
+if ($objectRealtimeText -notmatch 'SPATIAL_OBJECT_REALTIME_ABI_OK\s+ABI=0\.7\b.*\bRESET=1') {
+    throw 'Final-path dynamic object realtime ABI/reset marker missing.'
+}
+
 $realtimeBridge = Invoke-NativeCaptured `
     -Path (Join-Path $generationRoot 'OmniphonySpatialRealtimeBridgeSmoke.exe') `
     -Arguments @($realtimeDll) `
     -Label 'Final-path realtime bridge smoke'
 Assert-Marker -Result $realtimeBridge -Marker 'SPATIAL_COM_TO_CURRENT_OK 1' -Label 'Final-path realtime bridge smoke'
 Assert-Marker -Result $realtimeBridge -Marker 'SPATIAL_COM_TO_STEREO_QUEUE_OK 1' -Label 'Final-path realtime bridge smoke'
+Assert-Marker -Result $realtimeBridge -Marker 'SPATIAL_DYNAMIC_COM_TO_CURRENT_OK 1' -Label 'Final-path realtime bridge smoke'
+Assert-Marker -Result $realtimeBridge -Marker 'SPATIAL_DYNAMIC_COM_TO_STEREO_QUEUE_OK 1' -Label 'Final-path realtime bridge smoke'
 Assert-Marker -Result $realtimeBridge -Marker 'SPATIAL_FINAL_ENDPOINT_PROVEN 0' -Label 'Final-path realtime bridge smoke'
 
 $queueSmoke = Invoke-NativeCaptured `
@@ -262,7 +287,11 @@ $report = [ordered]@{
     all_file_hashes_verified = $true
     final_path_capability_smoke_verified = $true
     final_path_static_stream_smoke_verified = $true
+    final_path_dynamic_object_smoke_verified = $true
+    final_path_dynamic_object_abi_reset_verified = $true
     final_path_realtime_bridge_smoke_verified = $true
+    dynamic_com_to_current_verified_registry_free = $true
+    dynamic_current_stereo_to_queue_verified_registry_free = $true
     com_to_current_verified_registry_free = $true
     current_stereo_to_queue_verified_registry_free = $true
     clock_domain_queue_verified = $true
@@ -302,6 +331,10 @@ Write-Host "SPATIAL_PROVIDER_PREFLIGHT_OK GENERATION=$($manifest.generation)"
 Write-Host "SPATIAL_PROVIDER_PREFLIGHT_ENDPOINT $PhysicalEndpointId"
 Write-Host "SPATIAL_PROVIDER_PREFLIGHT_REPORT $reportFullPath"
 Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_COM_TO_CURRENT 1'
+Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_DYNAMIC_OBJECT_CONTRACT 1'
+Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_OBJECT_ABI_RESET 1'
+Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_DYNAMIC_COM_TO_CURRENT 1'
+Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_DYNAMIC_CURRENT_TO_STEREO_QUEUE 1'
 Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_CURRENT_TO_STEREO_QUEUE 1'
 Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_CLOCK_DOMAIN_QUEUE 1'
 Write-Host "SPATIAL_PROVIDER_PREFLIGHT_RENDER_QUANTUM_FRAMES 480"
