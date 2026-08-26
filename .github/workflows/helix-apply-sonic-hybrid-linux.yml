@@ -1,0 +1,31 @@
+name: Helix apply Sonic hybrid source
+
+on:
+  push:
+    branches: [helix/sonic-reference-hybrid]
+    paths:
+      - '.github/workflows/helix-apply-sonic-hybrid-linux.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/sonic-reference-hybrid
+          fetch-depth: 0
+      - name: Apply hybrid patch
+        run: |
+          python3 .helix/apply_sonic_hybrid.py
+          git diff --check
+          python3 -m py_compile .helix/apply_sonic_hybrid.py
+      - name: Commit hybrid source
+        run: |
+          git config user.name helix-ci
+          git config user.email helix-ci@users.noreply.github.com
+          git add omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp omniphony-renderer/windows_installer/endpoint_apo/CMakeLists.txt omniphony-renderer/windows_installer/endpoint_apo/Install-OmniphonyAdaptive.ps1
+          git commit -m 'test(windows): restore post-Sonic Current reference route'
+          git push origin HEAD:helix/sonic-reference-hybrid
