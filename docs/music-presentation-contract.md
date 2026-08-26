@@ -107,12 +107,14 @@ The default music path may use these classes of mechanism because they satisfy c
 - measured-HRTF binaural rendering;
 - directional measured-HRTF early reflections;
 - bounded transient-sensitive excitation of the existing early field while leaving the direct event untouched;
-- restrained late closure;
+- a restrained first-order late enclosure whose directional field reaches the ears through a continuous measured-HRTF projection rather than exposing a sparse cardinal-axis HRTF lattice;
 - support-side spectral management where needed to avoid duplicating common renderer coloration;
 - fixed output makeup/headroom policy plus stereo-linked peak safety;
 - realtime continuity guards.
 
 These are one product presentation, not a menu of historical profiles. A replacement mechanism must retire the weaker mechanism if it wins.
+
+The late field earns retention by improving closure and envelopment without requiring more wet energy. Once late closure is smooth and unobtrusive, further externalization should be sought first through early-field geometry and directional resolution rather than by increasing late level, decay, or diffuse duplication.
 
 ## 5. Direct, broad, diffuse, and room roles stay distinct
 
