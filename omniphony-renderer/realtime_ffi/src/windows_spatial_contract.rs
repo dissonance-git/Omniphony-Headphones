@@ -63,6 +63,29 @@ impl WindowsStaticObjectRole {
         self as usize
     }
 
+    pub const fn from_canonical_scene_index(index: u32) -> Option<Self> {
+        Some(match index {
+            0 => Self::FrontLeft,
+            1 => Self::FrontRight,
+            2 => Self::FrontCenter,
+            3 => Self::LowFrequency,
+            4 => Self::SideLeft,
+            5 => Self::SideRight,
+            6 => Self::BackLeft,
+            7 => Self::BackRight,
+            8 => Self::BackCenter,
+            9 => Self::TopFrontLeft,
+            10 => Self::TopFrontRight,
+            11 => Self::TopBackLeft,
+            12 => Self::TopBackRight,
+            13 => Self::BottomFrontLeft,
+            14 => Self::BottomFrontRight,
+            15 => Self::BottomBackLeft,
+            16 => Self::BottomBackRight,
+            _ => return None,
+        })
+    }
+
     pub const fn is_directional(self) -> bool {
         !matches!(self, Self::LowFrequency)
     }
@@ -159,7 +182,16 @@ mod tests {
         assert_eq!(WINDOWS_STATIC_OBJECT_ROLES_8_1_4_4.len(), 17);
         for (index, role) in WINDOWS_STATIC_OBJECT_ROLES_8_1_4_4.into_iter().enumerate() {
             assert_eq!(role.canonical_scene_index(), index);
+            assert_eq!(
+                WindowsStaticObjectRole::from_canonical_scene_index(index as u32),
+                Some(role)
+            );
         }
+        assert_eq!(WindowsStaticObjectRole::from_canonical_scene_index(17), None);
+        assert_eq!(
+            WindowsStaticObjectRole::from_canonical_scene_index(u32::MAX),
+            None
+        );
     }
 
     #[test]
