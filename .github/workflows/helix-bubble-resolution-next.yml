@@ -63,3 +63,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run windows-installer.yml --ref helix/bubble-resolution-next
+
+# trigger: 2
