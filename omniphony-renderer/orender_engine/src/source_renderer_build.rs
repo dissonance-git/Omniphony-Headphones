@@ -58,6 +58,9 @@ pub struct SourceRendererOptions {
     pub hrir_source: HrirSource,
     /// Metres represented by one ADM unit for binaural distance cues.
     pub unit_scale_m: f32,
+    /// Preserve host-supplied metric object radius by rendering object lanes
+    /// directly to the ears. False keeps the accepted cascaded source path.
+    pub authored_metric_objects: bool,
     /// Early-reflection return level when externalization is enabled.
     pub reflection_level: f32,
     /// Small listening-room dimensions for externalization, not source reverb.
@@ -71,6 +74,7 @@ impl Default for SourceRendererOptions {
             externalization: false,
             hrir_source: HrirSource::SafKemar,
             unit_scale_m: 1.0,
+            authored_metric_objects: false,
             reflection_level: 0.22,
             reflection_room_size_m: [4.0, 5.0, 2.7],
         }
@@ -128,8 +132,12 @@ fn source_layout() -> Result<SpeakerLayout> {
     SpeakerLayout::from_yaml_str(SOURCE_SHELL_LAYOUT)
 }
 
-fn binaural_mode() -> BinauralMode {
-    BinauralMode::Cascaded
+fn binaural_mode(options: &SourceRendererOptions) -> BinauralMode {
+    if options.authored_metric_objects {
+        BinauralMode::Direct
+    } else {
+        BinauralMode::Cascaded
+    }
 }
 
 fn source_render_config(render_cfg: Option<&RenderConfig>) -> Option<RenderConfig> {
@@ -203,10 +211,11 @@ pub fn build_source_frame_renderer(
         let control = renderer.renderer_control();
         let mut live = control.live.write();
         live.binaural.output_mode = OutputMode::Binaural;
-        live.binaural.mode = binaural_mode();
+        live.binaural.mode = binaural_mode(&options);
         live.binaural.hrir_source = options.hrir_source;
         live.binaural.unit_scale_m = options.unit_scale_m.clamp(0.25, 4.0);
         live.binaural.air_absorption = true;
+        live.binaural.near_field_parallax = options.authored_metric_objects;
         live.binaural.reverb.enabled = false;
         live.binaural.reflections.enabled = options.externalization;
         live.binaural.reflections.level = options.reflection_level.clamp(0.0, 1.0);
@@ -240,7 +249,7 @@ mod tests {
         assert_eq!(policy.max_distance, 1.0);
         assert_eq!(policy.shared_wet.strength, 0.0);
         assert_eq!(policy.shared_wet.extent, [0.0, 0.0, 0.0]);
-        assert_eq!(binaural_mode(), BinauralMode::Cascaded);
+        assert_eq!(binaural_mode(&SourceRendererOptions::default()), BinauralMode::Cascaded);
     }
 
     #[test]
@@ -256,6 +265,16 @@ mod tests {
         assert!(policy.shared_wet.distance > 1.4);
         assert!(policy.shared_wet.extent[0] > policy.shared_wet.extent[2]);
         assert_eq!(binaural_mode(), BinauralMode::Cascaded);
+    }
+
+    #[test]
+    fn authored_metric_objects_use_direct_binaural_geometry() {
+        let options = SourceRendererOptions {
+            authored_metric_objects: true,
+            ..SourceRendererOptions::default()
+        };
+        assert_eq!(binaural_mode(&options), BinauralMode::Direct);
+        assert!(options.authored_metric_objects);
     }
 
     #[test]
