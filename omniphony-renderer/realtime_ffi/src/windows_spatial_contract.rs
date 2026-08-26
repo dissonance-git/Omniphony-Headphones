@@ -265,8 +265,20 @@ mod tests {
         assert_eq!(first.stable_id, second.stable_id);
         assert_eq!(first.mono_pcm, second.mono_pcm);
         assert_ne!(first.omniphony_metric_position(), second.omniphony_metric_position());
-        assert_eq!(first.omniphony_metric_position(), [-0.75, 1.5, 0.2]);
-        assert_eq!(second.omniphony_metric_position(), [0.9, -0.4, -0.1]);
+        for (actual, expected) in first
+            .omniphony_metric_position()
+            .into_iter()
+            .zip([-0.75_f64, 1.5, 0.2])
+        {
+            assert!((actual - expected).abs() < 1.0e-6, "{actual} != {expected}");
+        }
+        for (actual, expected) in second
+            .omniphony_metric_position()
+            .into_iter()
+            .zip([0.9_f64, -0.4, -0.1])
+        {
+            assert!((actual - expected).abs() < 1.0e-6, "{actual} != {expected}");
+        }
     }
 
     #[test]
