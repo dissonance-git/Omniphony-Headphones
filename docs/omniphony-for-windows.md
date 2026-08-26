@@ -54,13 +54,18 @@ Windows UI/service integration
 The portable core owns:
 
 ```text
+host-neutral scene contract
 source scene
 source authority
 fixed-channel/object semantics
+metric geometry and source timing
+bounded stable source identity
 presentation state
 spatial rendering
 binaural output
 ```
+
+Windows adapters lower native role/object metadata into the host-neutral scene contract before renderer DSP. Compatibility entry points may wrap that canonical path, but they may not own a second worker model, fallback mixer, lifecycle model, scene vocabulary, or object renderer.
 
 Do not move endpoint identities, registry state, WASAPI concepts, COM lifetime rules, provider registration, tray/service state, or installer state into portable renderer semantics.
 
@@ -122,11 +127,16 @@ Dynamic objects remain continuous objects beside the fixed frame. Preserve:
 
 - stable object identity;
 - PCM association;
-- continuous XYZ where supplied;
+- continuous metric XYZ where supplied;
+- authored radial distance implied by that metric geometry;
 - object gain/volume;
-- update timing;
+- exact update timing after conversion to source sample time;
 - lifetime/EOS;
 - other authoritative host metadata that belongs to the source contract.
+
+Persistent dynamic IDs use bounded stable sparse lanes so one object appearing or ending does not reset unrelated object history. Host update-quantum boundaries are transport boundaries, not trajectory semantics. Position smoothing/interpolation must be defined on source sample time.
+
+Static-only compatibility ingress and combined static+dynamic ingress must converge into the same canonical object-rendering ownership before DSP. The static compatibility surface must not grow independent scene, worker, fallback, or rendering behavior.
 
 Do not snap moving objects to static anchors merely for implementation convenience.
 
