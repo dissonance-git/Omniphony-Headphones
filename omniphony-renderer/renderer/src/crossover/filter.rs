@@ -35,12 +35,15 @@ pub struct BiquadState {
 }
 
 /// Biquad coefficients: `[b0, b1, b2, a1, a2]` in Direct-Form-II Transposed.
+///
+/// Public so sibling renderer components can reuse the exact LR4 section
+/// implementation without cloning coefficient math; fields stay opaque.
 #[derive(Clone, Copy)]
-pub(crate) struct BiquadCoeffs(pub(crate) [f32; 5]);
+pub struct BiquadCoeffs(pub(crate) [f32; 5]);
 
 /// Process one sample through a biquad (Direct Form II Transposed).
 #[inline(always)]
-pub(crate) fn biquad(input: f32, c: BiquadCoeffs, s: &mut BiquadState) -> f32 {
+pub fn biquad(input: f32, c: BiquadCoeffs, s: &mut BiquadState) -> f32 {
     let [b0, b1, b2, a1, a2] = c.0;
     let out = b0 * input + s.z1;
     s.z1 = b1 * input - a1 * out + s.z2;
@@ -64,14 +67,14 @@ fn butterworth2_parts(fc: f32, sample_rate: u32) -> (f32, f32, f32, f32) {
 }
 
 /// 2nd-order Butterworth low-pass biquad at `fc` Hz.
-pub(crate) fn butterworth2_lp(fc: f32, sample_rate: u32) -> BiquadCoeffs {
+pub fn butterworth2_lp(fc: f32, sample_rate: u32) -> BiquadCoeffs {
     let (k2, norm, a1, a2) = butterworth2_parts(fc, sample_rate);
     let b0 = k2 / norm;
     BiquadCoeffs([b0, 2.0 * b0, b0, a1, a2])
 }
 
 /// 2nd-order Butterworth high-pass biquad at `fc` Hz.
-pub(crate) fn butterworth2_hp(fc: f32, sample_rate: u32) -> BiquadCoeffs {
+pub fn butterworth2_hp(fc: f32, sample_rate: u32) -> BiquadCoeffs {
     let (_, norm, a1, a2) = butterworth2_parts(fc, sample_rate);
     let b0 = 1.0 / norm;
     BiquadCoeffs([b0, -2.0 * b0, b0, a1, a2])
