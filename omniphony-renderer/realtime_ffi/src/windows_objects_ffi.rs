@@ -583,6 +583,17 @@ impl OmniphonySpatialObjectProcessor {
         self.inner.processed_blocks.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn reset_stream(&mut self) -> Result<(), String> {
+        let replacement = AsyncSpatialObjects::new(
+            self.sample_rate_hz,
+            self.frames_per_quantum as usize,
+            self.inner.static_descriptors.clone(),
+            self.max_dynamic_objects as usize,
+        )?;
+        self.inner = replacement;
+        Ok(())
+    }
+
     pub(crate) unsafe fn process_static_only(
         &mut self,
         static_input_planar: *const f32,
@@ -723,6 +734,22 @@ pub unsafe extern "C" fn omniphony_spatial_objects_process_f32(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn omniphony_spatial_objects_reset(
+    processor: *mut OmniphonySpatialObjectProcessor,
+) -> i32 {
+    crate::ffi_guard(-127, || {
+        if processor.is_null() {
+            return -1;
+        }
+        let processor = unsafe { &mut *processor };
+        match processor.reset_stream() {
+            Ok(()) => 0,
+            Err(_) => -2,
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn omniphony_spatial_objects_sample_rate_hz(
     processor: *const OmniphonySpatialObjectProcessor,
 ) -> u32 {
@@ -790,6 +817,36 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn spatial_object_reset_restarts_worker_state_without_changing_stream_shape() {
+        let descriptors = [OmniphonySpatialObjectStaticDescriptor {
+            role: 0,
+            x_right_m: -0.7,
+            y_up_m: 0.0,
+            z_back_m: -0.7,
+        }];
+        let processor = unsafe {
+            omniphony_spatial_objects_create(&OmniphonySpatialObjectConfig {
+                sample_rate_hz: 48_000,
+                frames_per_quantum: 480,
+                static_object_count: 1,
+                static_objects: descriptors.as_ptr(),
+                max_dynamic_objects: 2,
+            })
+        };
+        assert!(!processor.is_null());
+
+        unsafe {
+            assert_eq!(omniphony_spatial_objects_reset(processor), 0);
+            assert_eq!(omniphony_spatial_objects_sample_rate_hz(processor), 48_000);
+            assert_eq!(omniphony_spatial_objects_frames_per_quantum(processor), 480);
+            assert_eq!(omniphony_spatial_objects_static_object_count(processor), 1);
+            assert_eq!(omniphony_spatial_objects_max_dynamic_objects(processor), 2);
+            assert_eq!(omniphony_spatial_objects_processed_blocks(processor), 0);
+            omniphony_spatial_objects_destroy(processor);
+        }
+    }
+
     fn dynamic_safety_pan_tracks_continuous_x_position() {
         let left = dynamic_position_pan(WindowsSpatialPosition::new(-1.0, 0.0, 0.0));
         let right = dynamic_position_pan(WindowsSpatialPosition::new(1.0, 0.0, 0.0));
