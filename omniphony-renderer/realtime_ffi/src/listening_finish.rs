@@ -8,18 +8,17 @@
 //!
 //! The qualification rule is intentionally strict. Only LF-dominant motion below
 //! the kick/bass region can open the enhancement. Midrange, treble, broadband
-//! impulses, and crossover leakage have no independent gain authority. When the
-//! enhancement does move, both ears receive exactly the same gain so existing
-//! ILD/IPD/HRTF relationships are preserved.
+//! impulses, and crossover leakage have no independent gain authority. Qualifying
+//! attacks receive a short positive lift and then return to unity; this processor
+//! never ducks sustain or falls below unity. Both ears receive exactly the same
+//! gain so existing ILD/IPD/HRTF relationships are preserved.
 
 use std::f32::consts::PI;
 
 const FAST_ENVELOPE_MS: f32 = 2.0;
 const SLOW_ENVELOPE_MS: f32 = 48.0;
 const MAX_ATTACK_LIFT_DB: f32 = 2.8;
-const MAX_SUSTAIN_RELIEF_DB: f32 = 0.35;
 const TRANSIENT_FULL_SCALE: f32 = 1.35;
-const SUSTAIN_FULL_SCALE: f32 = 0.65;
 
 const DETECTOR_LOW_CUTOFF_HZ: f32 = 180.0;
 const LF_DOMINANCE_FLOOR: f32 = 0.30;
@@ -87,23 +86,13 @@ impl ListeningFinish {
             let attack_dominance = dominance_gate(
                 self.low_fast_energy / (self.total_fast_energy + 1.0e-12),
             );
-            let sustain_dominance = dominance_gate(
-                self.low_slow_energy / (self.total_slow_energy + 1.0e-12),
-            );
-
             let transient = normalized_rise(
                 self.low_fast_energy,
                 self.low_slow_energy,
                 TRANSIENT_FULL_SCALE,
             ) * attack_dominance;
-            let sustain = normalized_fall(
-                self.low_fast_energy,
-                self.low_slow_energy,
-                SUSTAIN_FULL_SCALE,
-            ) * sustain_dominance;
 
-            let gain_db = MAX_ATTACK_LIFT_DB * transient - MAX_SUSTAIN_RELIEF_DB * sustain;
-            let linked_gain = db_to_gain(gain_db);
+            let linked_gain = db_to_gain(MAX_ATTACK_LIFT_DB * transient);
             left *= linked_gain;
             right *= linked_gain;
 
@@ -127,12 +116,6 @@ fn normalized_rise(fast: f32, slow: f32, full_scale: f32) -> f32 {
     let positive_rise = (fast - slow).max(0.0);
     let relative_rise = positive_rise / (slow + 1.0e-7);
     (relative_rise / full_scale).clamp(0.0, 1.0)
-}
-
-fn normalized_fall(fast: f32, slow: f32, full_scale: f32) -> f32 {
-    let positive_fall = (slow - fast).max(0.0);
-    let relative_fall = positive_fall / (slow + 1.0e-7);
-    (relative_fall / full_scale).clamp(0.0, 1.0)
 }
 
 fn one_pole_alpha(time_ms: f32, sample_rate_hz: f32) -> f32 {
@@ -229,21 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn attack_and_relief_are_bounded() {
-        assert!((2.5..=3.0).contains(&MAX_ATTACK_LIFT_DB));
-        assert!((0.30..=0.40).contains(&MAX_SUSTAIN_RELIEF_DB));
-        assert!(MAX_SUSTAIN_RELIEF_DB < MAX_ATTACK_LIFT_DB);
-        assert!(db_to_gain(MAX_ATTACK_LIFT_DB) < 1.40);
-    }
-
-    #[test]
-    fn falling_bass_envelope_gets_only_small_relief() {
+    fn enhancement_never_reduces_program_level() {
         let sample_rate = 48_000.0_f32;
-        let steady_frames = 4096usize;
-        let tail_frames = 2048usize;
-        let mut samples = vec![0.0_f32; (steady_frames + tail_frames) * 2];
-        for frame in 0..(steady_frames + tail_frames) {
-            let amplitude = if frame < steady_frames { 0.5 } else { 0.15 };
+        let frames = 8192usize;
+        let mut samples = vec![0.0_f32; frames * 2];
+        for frame in 0..frames {
+            let amplitude = if frame < 4096 { 0.5 } else { 0.15 };
             let phase = 2.0 * PI * 80.0 * frame as f32 / sample_rate;
             let sample = amplitude * phase.sin();
             samples[frame * 2] = sample;
@@ -252,17 +226,17 @@ mod tests {
         let before = samples.clone();
         let mut finish = ListeningFinish::new(48_000);
         finish.process_interleaved(&mut samples);
-
-        let mut min_gain = 1.0_f32;
-        for frame in steady_frames..(steady_frames + tail_frames) {
-            let input = before[frame * 2];
-            if input.abs() < 1.0e-4 {
-                continue;
+        for (before, after) in before.iter().zip(samples.iter()) {
+            if before.abs() > 1.0e-6 {
+                assert!(after.abs() + 1.0e-7 >= before.abs());
             }
-            min_gain = min_gain.min(samples[frame * 2] / input);
         }
-        assert!(min_gain < 1.0);
-        assert!(min_gain >= db_to_gain(-MAX_SUSTAIN_RELIEF_DB) - 1.0e-5);
+    }
+
+    #[test]
+    fn attack_gain_is_bounded() {
+        assert!((2.5..=3.0).contains(&MAX_ATTACK_LIFT_DB));
+        assert!(db_to_gain(MAX_ATTACK_LIFT_DB) < 1.40);
     }
 
     #[test]
