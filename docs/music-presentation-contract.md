@@ -114,6 +114,8 @@ The default music path may use these classes of mechanism because they satisfy c
 
 These are one product presentation, not a menu of historical profiles. A replacement mechanism must retire the weaker mechanism if it wins.
 
+The current default Windows music presentation is the protected perceptual baseline. Its accepted directional early field, restrained late field, coherent foundation, bass-specific finishing, center authority, and deterministic safety behavior stay fixed while new capabilities are developed around it. A new audible mechanism enters the default path only after controlled engineering validation and clean-route physical listening show that it preserves or improves the protected musical invariants.
+
 The late field earns retention by improving closure and envelopment without requiring more wet energy. Once late closure is smooth and unobtrusive, further externalization should be sought first through early-field geometry and directional resolution rather than by increasing late level, decay, or diffuse duplication.
 
 ## 5. Direct, broad, diffuse, and room roles stay distinct
