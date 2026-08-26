@@ -190,6 +190,10 @@ stereo headphones
 
 An internal render lattice may be denser than the semantic scene. It is not an authored input format and must not leak outward as fake source channels.
 
+A continuous directional field may be represented internally by first-order or higher-order coefficients and projected to the ears from a dense measured-HRTF sampling or another demonstrably equivalent continuous transfer. A small set of virtual loudspeaker/cardinal axes is an implementation approximation, not scene truth, and must not impose an audible directional lattice on an otherwise continuous field.
+
+Discrete HRTF sampling directions remain renderer samples. They do not become authored anchors or source roles.
+
 ## 11. Presentation entity vocabulary
 
 Useful higher-level entities remain distinct from channel provenance:
@@ -244,9 +248,12 @@ EARLY FIELD
 
 LATE FIELD
 → bounded closure / envelopment / decay
+→ preserve continuous field structure through binaural projection
 ```
 
 Do not use late reverberation as a universal substitute for direct width, source extent, distance, or rear placement.
+
+A late field may use a compact coefficient representation internally, but its binaural projection must preserve the intended directional continuity rather than making the listener hear the decoder's support axes. Additional externalization should preferentially improve early-field geometry before increasing late-field energy or decay.
 
 ## 14. Bass and groove law
 
