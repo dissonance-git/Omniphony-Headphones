@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 
+#include "OmniphonySpatialObjectRealtimeBridge.h"
 #include "OmniphonySpatialRealtimeBridge.h"
 #include "OmniphonySpatialRoles.h"
 #include "OmniphonySpatialStereoQueue.h"
@@ -39,6 +40,32 @@ WAVEFORMATEX ObjectFormat() {
     format.nBlockAlign = sizeof(float);
     format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
     return format;
+}
+
+HRESULT FillObjectPattern(
+    ISpatialAudioObject* object,
+    UINT32 frames,
+    std::uint32_t quantum,
+    float amplitude) {
+    if (!object) {
+        return E_POINTER;
+    }
+    BYTE* bytes = nullptr;
+    UINT32 byteCount = 0;
+    HRESULT hr = object->GetBuffer(&bytes, &byteCount);
+    if (FAILED(hr)) {
+        return hr;
+    }
+    if (!bytes || byteCount != frames * sizeof(float)) {
+        return E_FAIL;
+    }
+
+    auto* samples = reinterpret_cast<float*>(bytes);
+    for (UINT32 frame = 0; frame < frames; ++frame) {
+        const auto phase = (quantum * frames + frame) % 64;
+        samples[frame] = phase < 32 ? amplitude : -amplitude;
+    }
+    return S_OK;
 }
 
 HRESULT ExerciseComToCurrentQueue(const wchar_t* realtimeDllPath) {
@@ -167,6 +194,141 @@ HRESULT ExerciseComToCurrentQueue(const wchar_t* realtimeDllPath) {
     return hr;
 }
 
+
+HRESULT ExerciseDynamicComToCurrentQueue(const wchar_t* realtimeDllPath) {
+    auto format = ObjectFormat();
+    SpatialAudioObjectRenderStreamActivationParams params{};
+    params.ObjectFormat = &format;
+    params.StaticObjectTypeMask = AudioObjectType_FrontLeft;
+    params.MinDynamicObjectCount = 1;
+    params.MaxDynamicObjectCount = 2;
+    params.Category = AudioCategory_GameEffects;
+    params.EventHandle = nullptr;
+    params.NotifyObject = nullptr;
+
+    auto queue = std::make_shared<OmniphonySpatialStereoQueue>();
+    if (!queue->Open(1920)) {
+        return E_OUTOFMEMORY;
+    }
+
+    ISpatialAudioObjectRenderStream* stream = nullptr;
+    HRESULT hr = CreateOmniphonySpatialObjectStreamWithRealtimeBridgeAndQueue(
+        params,
+        realtimeDllPath,
+        queue,
+        &stream);
+    if (FAILED(hr) || !stream) {
+        queue->Close();
+        return FAILED(hr) ? hr : E_FAIL;
+    }
+
+    hr = stream->Start();
+    if (FAILED(hr)) {
+        stream->Release();
+        queue->Close();
+        return hr;
+    }
+
+    ISpatialAudioObject* front = nullptr;
+    ISpatialAudioObject* moving = nullptr;
+    std::vector<float> queuedStereo(480 * 2, 0.0f);
+    float peak = 0.0f;
+
+    for (std::uint32_t quantum = 0; quantum < 16; ++quantum) {
+        UINT32 available = 0;
+        UINT32 frames = 0;
+        hr = stream->BeginUpdatingAudioObjects(&available, &frames);
+        if (FAILED(hr) || frames != 480) {
+            if (SUCCEEDED(hr)) {
+                hr = E_FAIL;
+            }
+            break;
+        }
+
+        if (!front) {
+            hr = stream->ActivateSpatialAudioObject(AudioObjectType_FrontLeft, &front);
+            if (FAILED(hr) || !front) {
+                if (SUCCEEDED(hr)) {
+                    hr = E_FAIL;
+                }
+                break;
+            }
+        }
+        if (!moving) {
+            hr = stream->ActivateSpatialAudioObject(AudioObjectType_Dynamic, &moving);
+            if (FAILED(hr) || !moving) {
+                if (SUCCEEDED(hr)) {
+                    hr = E_FAIL;
+                }
+                break;
+            }
+        }
+
+        const float t = static_cast<float>(quantum) / 15.0f;
+        hr = moving->SetPosition(
+            -0.8f + 1.6f * t,
+            0.25f - 0.5f * t,
+            -0.45f - 1.55f * t);
+        if (FAILED(hr) ||
+            FAILED(moving->SetVolume(0.65f)) ||
+            FAILED(front->SetVolume(0.40f)) ||
+            FAILED(FillObjectPattern(front, frames, quantum, 0.035f)) ||
+            FAILED(FillObjectPattern(moving, frames, quantum, 0.055f))) {
+            if (SUCCEEDED(hr)) {
+                hr = E_FAIL;
+            }
+            break;
+        }
+
+        hr = stream->EndUpdatingAudioObjects();
+        if (FAILED(hr)) {
+            break;
+        }
+        if (queue->AvailableFrames() != frames) {
+            hr = E_FAIL;
+            break;
+        }
+
+        std::fill(queuedStereo.begin(), queuedStereo.end(), 0.0f);
+        const std::size_t readFrames = queue->Read(queuedStereo.data(), frames);
+        if (readFrames != frames || !AllFinite(queuedStereo)) {
+            hr = E_FAIL;
+            break;
+        }
+        for (float sample : queuedStereo) {
+            peak = std::max(peak, std::abs(sample));
+        }
+        Sleep(12);
+    }
+
+    if (SUCCEEDED(hr) && (!(peak > 0.0f) || !std::isfinite(peak))) {
+        hr = E_FAIL;
+    }
+    if (SUCCEEDED(hr) &&
+        (queue->AvailableFrames() != 0 || queue->DroppedFrames() != 0)) {
+        hr = E_FAIL;
+    }
+    if (SUCCEEDED(hr)) {
+        hr = stream->Stop();
+    }
+    if (SUCCEEDED(hr)) {
+        hr = stream->Reset();
+    }
+    if (SUCCEEDED(hr) && queue->AvailableFrames() != 0) {
+        hr = E_FAIL;
+    }
+
+    if (moving) {
+        moving->Release();
+    }
+    if (front) {
+        front->Release();
+    }
+    stream->Release();
+    queue->Close();
+    return hr;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -254,6 +416,11 @@ int wmain(int argc, wchar_t** argv) {
         return Fail(L"COM-to-Current-queue", hr);
     }
 
+    hr = ExerciseDynamicComToCurrentQueue(argv[1]);
+    if (FAILED(hr)) {
+        return Fail(L"dynamic-COM-to-Current-queue", hr);
+    }
+
     std::wcout << L"SPATIAL_REALTIME_BRIDGE_OK 1\n";
     std::wcout << L"SPATIAL_REALTIME_BRIDGE_OBJECTS " << objectCount << L"\n";
     std::wcout << L"SPATIAL_REALTIME_BRIDGE_FRAMES " << frames << L"\n";
@@ -264,6 +431,8 @@ int wmain(int argc, wchar_t** argv) {
     std::wcout << L"SPATIAL_REALTIME_BRIDGE_OUTPUT_PEAK " << peak << L"\n";
     std::wcout << L"SPATIAL_COM_TO_CURRENT_OK 1\n";
     std::wcout << L"SPATIAL_COM_TO_STEREO_QUEUE_OK 1\n";
+    std::wcout << L"SPATIAL_DYNAMIC_COM_TO_CURRENT_OK 1\n";
+    std::wcout << L"SPATIAL_DYNAMIC_COM_TO_STEREO_QUEUE_OK 1\n";
     std::wcout << L"SPATIAL_FINAL_ENDPOINT_PROVEN 0\n";
     return 0;
 }
