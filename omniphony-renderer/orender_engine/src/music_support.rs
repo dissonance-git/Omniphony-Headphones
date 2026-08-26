@@ -33,8 +33,9 @@ pub(crate) fn current_model_config(base: &str) -> String {
 
     // The inherited FDN collapses to two decorrelated ear returns. Current now
     // keeps the same tiny 0.016 / 0.12 s / 32 ms closure in
-    // `HrtfLateEnclosure`, where the upper tail remains six-axis directional
-    // through measured HRTFs and the low tail stays interaurally coherent.
+    // `HrtfLateEnclosure`, where the upper tail remains a first-order directional
+    // field projected through dense measured HRTFs and the low tail stays
+    // interaurally coherent.
     cfg.replace(
         "    reverb:\n      enabled: true",
         "    reverb:\n      enabled: false",
