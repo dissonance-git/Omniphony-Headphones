@@ -140,6 +140,19 @@ Declarations are cached and replaced on declared changes/reset. Timed events ret
 
 The portable authored-object timeline uses sample spans rather than callback numbers. A motion segment owns stable object identity, a half-open sample interval, and start/end metric XYZ. Interpolation is defined on that sample interval so splitting the same audio into different host callbacks cannot redefine the trajectory.
 
+Source timing may arrive as exact rational or fractional time. Lower it to integer affected-sample spans with the same half-open rule used by established ADM renderers:
+
+```text
+fractional [start, end)
+→ integer [ceil(start), ceil(end))
+```
+
+Use exact integer/rational arithmetic for that lowering where possible. Floating-point callback clocks must not become source timing authority.
+
+Persistent object identity uses bounded stable slots. A temporarily inactive slot may remain sparse so another object appearing or disappearing does not force unrelated persistent lanes to reset their history. A slot may be reused only through an explicit identity transition/reset boundary; stale state from the previous occupant must not leak into the replacement source.
+
+The host-neutral scene contract sits below both adapters and renderer DSP. Native hosts translate into one canonical identity/geometry/time/slot vocabulary, and the renderer consumes that same vocabulary. A compatibility ABI may adapt into this contract, but it may not own a second scene model or a parallel object renderer.
+
 Adapter-specific metadata may be less expressive than this canonical form. Such adapters must make their interpolation convention explicit rather than silently turning one position update per callback into the scene's timing law.
 
 ## 8. Rich source truth outranks inference
@@ -284,11 +297,14 @@ Keep validation decomposed:
 ### Known-scene lane
 
 ```text
-known authored geometry
+known authored geometry / exact source time
+→ portable scene contract
 → scene
 → renderer
 → headphones
 ```
+
+The portable conformance layer should prove identity continuity, half-open block timing, callback-partition invariance, discontinuity handling, metric radius preservation, and stable sparse-slot behavior independently of any Windows provider or audio callback.
 
 Tests renderer behavior without stereo inference uncertainty.
 
