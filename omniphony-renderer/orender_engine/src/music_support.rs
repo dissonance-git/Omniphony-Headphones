@@ -1,5 +1,6 @@
 use crate::bridge_loader::LoadedBridge;
 use crate::music_early_reflections::HrtfEarlyReflectionField;
+use crate::music_late_enclosure::HrtfLateEnclosure;
 use crate::renderer_build::{SpatialRendererParams, build_spatial_renderer};
 use crate::{Engine, RenderedAudio};
 use anyhow::{Context, bail};
@@ -21,25 +22,29 @@ pub(crate) enum SpatialProfile {
 pub(crate) fn current_model_config(base: &str) -> String {
     let mut cfg = base.to_string();
     cfg = cfg.replace("      level: 0.32", "      level: 0.36");
-    // Keep the transient-aware measured-HRTF early field intact, but reduce the
-    // low-level late closure after listening found the center slightly too wet.
-    // Spatial scale should come from geometry and early directional evidence,
-    // leaving centered vocals anchored in the protected master.
-    cfg = cfg.replace("      level: 0.028", "      level: 0.016");
-    cfg = cfg.replace("      rt60_s: 0.16", "      rt60_s: 0.12");
 
     // The Current model owns first-order reflections in the fixed-cost six-bus
     // measured-HRTF field below, so disable the inherited analytic reflection
     // bank to prevent duplicate early energy.
-    cfg.replace(
+    cfg = cfg.replace(
         "    reflections:\n      enabled: true",
         "    reflections:\n      enabled: false",
+    );
+
+    // The inherited FDN collapses to two decorrelated ear returns. Current now
+    // keeps the same tiny 0.016 / 0.12 s / 32 ms closure in
+    // `HrtfLateEnclosure`, where the upper tail remains six-axis directional
+    // through measured HRTFs and the low tail stays interaurally coherent.
+    cfg.replace(
+        "    reverb:\n      enabled: true",
+        "    reverb:\n      enabled: false",
     )
 }
 
 pub(crate) struct MusicSupportRenderer {
     primary: Engine,
     early_reflections: HrtfEarlyReflectionField,
+    late_enclosure: HrtfLateEnclosure,
     primary_pcm: Vec<u8>,
 }
 
@@ -61,6 +66,7 @@ impl MusicSupportRenderer {
             "Current model support",
         )?;
         let early_reflections = HrtfEarlyReflectionField::new(sample_rate_hz);
+        let late_enclosure = HrtfLateEnclosure::new(sample_rate_hz);
 
         let header = streaming_f32_wav_header(MUSIC_FIELD_CHANNELS as u16, sample_rate_hz);
         seed_engine(&mut primary, &header, "Current model support")?;
@@ -68,6 +74,7 @@ impl MusicSupportRenderer {
         Ok(Self {
             primary,
             early_reflections,
+            late_enclosure,
             primary_pcm: Vec::new(),
         })
     }
@@ -79,7 +86,9 @@ impl MusicSupportRenderer {
             .process(&self.primary_pcm, RInputTransport::Raw, 0)
             .context("Current model music support render failed")?;
         let early = self.early_reflections.process(field_input)?;
-        add_stereo_support(primary, &early)
+        let late = self.late_enclosure.process(field_input)?;
+        let primary = add_stereo_support(primary, &early)?;
+        add_stereo_support(primary, &late)
     }
 }
 
@@ -208,7 +217,7 @@ fn add_stereo_support(
     let total: usize = primary.iter().map(|block| block.samples.len()).sum();
     if total != added.len() {
         bail!(
-            "Current model HRTF early-reflection support length mismatch: renderer={} reflection_field={}",
+            "Current model HRTF support length mismatch: renderer={} support={}",
             total,
             added.len()
         );
@@ -217,7 +226,7 @@ fn add_stereo_support(
     for block in &mut primary {
         if block.n_channels != 2 {
             bail!(
-                "Current model HRTF early-reflection field expected stereo primary output, got {} channels",
+                "Current model HRTF support expected stereo primary output, got {} channels",
                 block.n_channels
             );
         }
