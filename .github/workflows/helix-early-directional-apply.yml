@@ -20,9 +20,10 @@ jobs:
       - name: Apply bounded early-direction patch
         run: python .helix/apply_early_directional.py
 
-      - name: Format affected Rust package
-        working-directory: omniphony-renderer
-        run: cargo fmt -p orender_engine
+      - name: Format only touched Rust files
+        run: |
+          rustfmt --edition 2024 omniphony-renderer/orender_engine/src/music_early_reflections.rs
+          rustfmt --edition 2024 omniphony-renderer/orender_engine/src/music_support.rs
 
       - name: Verify patch scope
         shell: bash
