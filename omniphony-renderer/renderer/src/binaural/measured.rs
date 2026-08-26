@@ -238,7 +238,29 @@ pub fn hrir_set_from_sofa(path: &str, sample_rate: u32) -> anyhow::Result<super:
         .map_err(|e| anyhow::anyhow!("open SOFA '{path}': {e:?}"))?;
     let filter_len = sofa.filter_len();
     let provider = SofaProvider { sofa, filter_len };
-    Ok(super::hrir::HrirSet::new(&provider, sample_rate))
+    let set = super::hrir::HrirSet::new(&provider, sample_rate);
+    check_loaded_set(&set, path, filter_len)?;
+    Ok(set)
+}
+
+const SILENT_SOFA_PEAK: f32 = 1.0e-9;
+
+fn check_loaded_set(
+    set: &super::hrir::HrirSet,
+    path: &str,
+    filter_len: usize,
+) -> anyhow::Result<()> {
+    if set.peak() <= SILENT_SOFA_PEAK {
+        anyhow::bail!(
+            "SOFA '{path}' builds a silent HRIR set (filter length {filter_len}); room impulse-response conventions are not supported by this free-field binaural loader"
+        );
+    }
+    if set.is_direction_invariant() {
+        log::warn!(
+            "SOFA '{path}' resolves every direction to the same impulse response; binaural direction will not move"
+        );
+    }
+    Ok(())
 }
 
 /// Adapts a loaded SOFA file to [`HrirProvider`]: maps the renderer's direction
@@ -526,5 +548,22 @@ mod tests {
         grid_b.at(37.0, 12.0, &mut b);
         assert_eq!(a.left, b.left);
         assert_eq!(a.right, b.right);
+    }
+
+    struct SilentProvider;
+    impl HrirProvider for SilentProvider {
+        fn render(&self, _az: f32, _el: f32, _fs: u32) -> HrirPair {
+            HrirPair {
+                left: [0.0; HRIR_LEN],
+                right: [0.0; HRIR_LEN],
+            }
+        }
+    }
+
+    #[test]
+    fn silent_hrir_grid_is_detectable() {
+        let set = HrirSet::new(&SilentProvider, 48_000);
+        assert_eq!(set.peak(), 0.0);
+        assert!(check_loaded_set(&set, "silent.sofa", 7).is_err());
     }
 }

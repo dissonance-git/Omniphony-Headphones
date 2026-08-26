@@ -169,7 +169,10 @@ impl HrirProvider for ParametricPinnaHrir {
         // that is the front/back cue. (8) is validated for the frontal half
         // space only; the rear is our extrapolation.
         let az = az_deg.to_radians();
-        let front = (0.5 * az).cos().clamp(0.0, 1.0);
+        // Brown & Duda assumes signed azimuth in [-180, 180], while the
+        // grid feeds [0, 360). The absolute form is the same even periodic
+        // factor under both conventions and preserves left/right symmetry.
+        let front = (0.5 * az).cos().abs();
         let el_term = (90.0 - el_deg).to_radians(); // 0 overhead, grows downward
         let fs_scale = sample_rate as f32 / Self::REF_FS;
         let mut taus = [0.0f32; 5];
@@ -387,6 +390,23 @@ impl HrirSet {
             out.right[n] =
                 w00 * p00.right[n] + w10 * p10.right[n] + w01 * p01.right[n] + w11 * p11.right[n];
         }
+    }
+
+    /// Largest absolute tap in the grid. Build-time validation only.
+    pub fn peak(&self) -> f32 {
+        self.grid
+            .iter()
+            .flat_map(|p| p.left.iter().chain(p.right.iter()))
+            .fold(0.0f32, |m, &x| m.max(x.abs()))
+    }
+
+    /// Whether every grid node holds the same left/right kernel.
+    pub fn is_direction_invariant(&self) -> bool {
+        let Some((first, rest)) = self.grid.split_first() else {
+            return true;
+        };
+        rest.iter()
+            .all(|p| p.left == first.left && p.right == first.right)
     }
 }
 
@@ -690,6 +710,36 @@ mod tests {
         set.at(361.0, 0.0, &mut b);
         for n in 0..HRIR_LEN {
             assert!((a.left[n] - b.left[n]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn pinna_provider_is_symmetric_across_grid_azimuth_wrap() {
+        let p = ParametricPinnaHrir {
+            d: ParametricPinnaHrir::D_PB_NH,
+            depth: 1.0,
+        };
+        for el in [-30.0f32, 0.0, 30.0] {
+            for az in [10.0f32, 30.0, 90.0, 150.0] {
+                let a = p.render(az, el, 48_000);
+                let b = p.render(360.0 - az, el, 48_000);
+                let lr: f32 = a
+                    .left
+                    .iter()
+                    .zip(&b.right)
+                    .map(|(x, y)| (x - y) * (x - y))
+                    .sum();
+                let rl: f32 = a
+                    .right
+                    .iter()
+                    .zip(&b.left)
+                    .map(|(x, y)| (x - y) * (x - y))
+                    .sum();
+                assert!(
+                    lr < 1.0e-8 && rl < 1.0e-8,
+                    "az={az} el={el} lr={lr:e} rl={rl:e}"
+                );
+            }
         }
     }
 }

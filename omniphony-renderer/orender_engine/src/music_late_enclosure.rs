@@ -32,6 +32,7 @@
 //! stronger measured-HRTF early field.
 
 use anyhow::bail;
+#[cfg(test)]
 use renderer::binaural::convolver::EarConvolver;
 use renderer::binaural::hrir::{HRIR_LEN, HrirPair, HrirSet};
 use renderer::binaural::itd;
@@ -39,6 +40,7 @@ use renderer::binaural::measured::MeasuredHrirData;
 use renderer::crossover::filter::{
     BiquadCoeffs, BiquadState, biquad, butterworth2_hp, butterworth2_lp,
 };
+#[cfg(test)]
 use renderer::delay_line::DelayLine;
 use renderer::music_field::MUSIC_FIELD_CHANNELS;
 
@@ -198,7 +200,11 @@ impl LateSphereFdn {
         }
 
         let read = (self.pre_pos + self.predelay.len() - self.pre_len) % self.predelay.len();
-        let x = if self.pre_len == 0 { input } else { self.predelay[read] };
+        let x = if self.pre_len == 0 {
+            input
+        } else {
+            self.predelay[read]
+        };
         self.predelay[self.pre_pos] = input;
         self.pre_pos = (self.pre_pos + 1) % self.predelay.len();
 
@@ -237,6 +243,181 @@ impl LateSphereFdn {
     }
 }
 
+const SH_AZIMUTH_SAMPLES: usize = 24;
+const SH_Z_RINGS: usize = 12;
+const PROJECTED_FIR_LANES: usize = 8;
+
+/// Fixed stereo FIR for one FOA coefficient. Both ears share one input history.
+/// Coefficients are built once from the measured sphere; the realtime path only
+/// performs two contiguous dot products with no allocation or coefficient swap.
+struct StereoProjectedFir {
+    hist: Vec<f32>,
+    pos: usize,
+    taps: usize,
+    left_rev: Vec<f32>,
+    right_rev: Vec<f32>,
+}
+
+impl StereoProjectedFir {
+    fn new(left: Vec<f32>, right: Vec<f32>) -> Self {
+        assert_eq!(left.len(), right.len());
+        assert!(left.len().is_multiple_of(PROJECTED_FIR_LANES));
+        let taps = left.len();
+        Self {
+            hist: vec![0.0; 2 * taps],
+            pos: 0,
+            taps,
+            left_rev: left.into_iter().rev().collect(),
+            right_rev: right.into_iter().rev().collect(),
+        }
+    }
+
+    #[inline(always)]
+    fn process(&mut self, input: f32) -> (f32, f32) {
+        self.pos = if self.pos + 1 == self.taps {
+            0
+        } else {
+            self.pos + 1
+        };
+        self.hist[self.pos] = input;
+        self.hist[self.pos + self.taps] = input;
+        let win = &self.hist[self.pos + 1..self.pos + 1 + self.taps];
+        let mut acc_l = [0.0f32; PROJECTED_FIR_LANES];
+        let mut acc_r = [0.0f32; PROJECTED_FIR_LANES];
+        for ((cl, cr), h) in self
+            .left_rev
+            .chunks_exact(PROJECTED_FIR_LANES)
+            .zip(self.right_rev.chunks_exact(PROJECTED_FIR_LANES))
+            .zip(win.chunks_exact(PROJECTED_FIR_LANES))
+        {
+            for lane in 0..PROJECTED_FIR_LANES {
+                let x = h[lane];
+                acc_l[lane] += cl[lane] * x;
+                acc_r[lane] += cr[lane] * x;
+            }
+        }
+        (acc_l.iter().sum(), acc_r.iter().sum())
+    }
+}
+
+#[inline]
+fn effective_filter_len(sample_rate: u32) -> usize {
+    let (max_itd, _) =
+        itd::ear_delays_seconds(std::f32::consts::FRAC_PI_2, 0.0, itd::DEFAULT_HEAD_RADIUS_M);
+    let needed = HRIR_LEN + (max_itd * sample_rate as f32).ceil() as usize;
+    needed.next_multiple_of(PROJECTED_FIR_LANES)
+}
+
+fn bake_fractional_delay(ir: &[f32; HRIR_LEN], delay_samples: f32, filter_len: usize) -> Vec<f32> {
+    let delay = delay_samples.max(0.0);
+    let whole = delay.floor() as usize;
+    let frac = delay - whole as f32;
+    let mut out = vec![0.0f32; filter_len];
+    for (tap, &sample) in ir.iter().enumerate() {
+        let i0 = tap + whole;
+        if i0 < filter_len {
+            out[i0] += sample * (1.0 - frac);
+        }
+        let i1 = i0 + 1;
+        if frac != 0.0 && i1 < filter_len {
+            out[i1] += sample * frac;
+        }
+    }
+    out
+}
+
+fn direction_pair(
+    sample_rate: u32,
+    hrir: &HrirSet,
+    direction: [f32; 3],
+    filter_len: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    let az = direction[0].atan2(direction[1]);
+    let horiz = (direction[0] * direction[0] + direction[1] * direction[1]).sqrt();
+    let el = direction[2].atan2(horiz);
+    let mut pair = HrirPair {
+        left: [0.0; HRIR_LEN],
+        right: [0.0; HRIR_LEN],
+    };
+    hrir.at(az.to_degrees(), el.to_degrees(), &mut pair);
+    let (itd_l, itd_r) = itd::ear_delays_seconds(az, el, itd::DEFAULT_HEAD_RADIUS_M);
+    (
+        bake_fractional_delay(&pair.left, itd_l * sample_rate as f32, filter_len),
+        bake_fractional_delay(&pair.right, itd_r * sample_rate as f32, filter_len),
+    )
+}
+
+/// Project a set of equal-weight directions onto the fork's orthonormal FOA
+/// coefficient convention. A least-squares first-order fit is used per FIR tap.
+/// The final scaling is anchored so the six cardinal directions reproduce the
+/// previous FOA_TO_AXES decoder exactly for any transfer function that is first
+/// order over the sphere: W = sqrt(6) * monopole, XYZ = sqrt(2) * dipoles.
+fn project_directions_to_foa(
+    sample_rate: u32,
+    hrir: &HrirSet,
+    directions: &[[f32; 3]],
+) -> [StereoProjectedFir; FIELD_CHANNELS] {
+    assert!(!directions.is_empty());
+    let filter_len = effective_filter_len(sample_rate);
+    let inv_n = 1.0 / directions.len() as f32;
+    let mut gram = [0.0f32; FIELD_CHANNELS];
+    let mut left: [Vec<f32>; FIELD_CHANNELS] = std::array::from_fn(|_| vec![0.0; filter_len]);
+    let mut right: [Vec<f32>; FIELD_CHANNELS] = std::array::from_fn(|_| vec![0.0; filter_len]);
+
+    for &direction in directions {
+        let basis = [1.0, direction[0], direction[1], direction[2]];
+        for c in 0..FIELD_CHANNELS {
+            gram[c] += inv_n * basis[c] * basis[c];
+        }
+        let (eff_l, eff_r) = direction_pair(sample_rate, hrir, direction, filter_len);
+        for c in 0..FIELD_CHANNELS {
+            let w = inv_n * basis[c];
+            for tap in 0..filter_len {
+                left[c][tap] += w * eff_l[tap];
+                right[c][tap] += w * eff_r[tap];
+            }
+        }
+    }
+
+    let target_scale = [6.0f32.sqrt(), 2.0f32.sqrt(), 2.0f32.sqrt(), 2.0f32.sqrt()];
+    for c in 0..FIELD_CHANNELS {
+        let scale = target_scale[c] / gram[c].max(1.0e-9);
+        for tap in 0..filter_len {
+            left[c][tap] *= scale;
+            right[c][tap] *= scale;
+        }
+    }
+
+    let mut buses: Vec<StereoProjectedFir> = (0..FIELD_CHANNELS)
+        .map(|c| {
+            StereoProjectedFir::new(std::mem::take(&mut left[c]), std::mem::take(&mut right[c]))
+        })
+        .collect();
+    std::array::from_fn(|_| buses.remove(0))
+}
+
+fn dense_projection_directions() -> Vec<[f32; 3]> {
+    let mut directions = Vec::with_capacity(SH_AZIMUTH_SAMPLES * SH_Z_RINGS);
+    for zi in 0..SH_Z_RINGS {
+        // Equal-area midpoint rings: z is uniform, while azimuth is uniform on
+        // every ring. Opposite rings and the complete azimuth cycles make all
+        // first-order cross terms cancel to floating-point noise.
+        let z = -1.0 + 2.0 * (zi as f32 + 0.5) / SH_Z_RINGS as f32;
+        let radius = (1.0 - z * z).max(0.0).sqrt();
+        for ai in 0..SH_AZIMUTH_SAMPLES {
+            let az = std::f32::consts::TAU * ai as f32 / SH_AZIMUTH_SAMPLES as f32;
+            directions.push([radius * az.sin(), radius * az.cos(), z]);
+        }
+    }
+    directions
+}
+
+fn build_dense_foa_hrtf(sample_rate: u32, hrir: &HrirSet) -> [StereoProjectedFir; FIELD_CHANNELS] {
+    let directions = dense_projection_directions();
+    project_directions_to_foa(sample_rate, hrir, &directions)
+}
+
+#[cfg(test)]
 struct AxisHrtfBus {
     delay_l: DelayLine,
     delay_r: DelayLine,
@@ -244,6 +425,7 @@ struct AxisHrtfBus {
     conv_r: EarConvolver,
 }
 
+#[cfg(test)]
 impl AxisHrtfBus {
     fn new(sample_rate: u32, hrir: &HrirSet, direction: [f32; 3]) -> Self {
         let az = direction[0].atan2(direction[1]);
@@ -285,7 +467,7 @@ impl AxisHrtfBus {
 
 pub(crate) struct HrtfLateEnclosure {
     fdn: LateSphereFdn,
-    axes: [AxisHrtfBus; AXES],
+    foa_hrtf: [StereoProjectedFir; FIELD_CHANNELS],
     xover_lp: BiquadCoeffs,
     xover_hp: BiquadCoeffs,
     low_state: BiquadState,
@@ -298,9 +480,7 @@ impl HrtfLateEnclosure {
         let hrir = HrirSet::new(&measured, sample_rate);
         Self {
             fdn: LateSphereFdn::new(sample_rate),
-            axes: std::array::from_fn(|axis| {
-                AxisHrtfBus::new(sample_rate, &hrir, AXIS_DIRECTIONS[axis])
-            }),
+            foa_hrtf: build_dense_foa_hrtf(sample_rate, &hrir),
             xover_lp: butterworth2_lp(COHERENCE_XOVER_HZ, sample_rate),
             xover_hp: butterworth2_hp(COHERENCE_XOVER_HZ, sample_rate),
             low_state: Default::default(),
@@ -348,9 +528,8 @@ impl HrtfLateEnclosure {
                 field[channel] =
                     biquad(field_raw[channel], hp, &mut self.high_state[channel]) * field_gain;
             }
-            let axis_input = decode_foa_to_axes(field);
-            for axis in 0..AXES {
-                let (l, r) = self.axes[axis].process(axis_input[axis]);
+            for (channel, &sample) in field.iter().enumerate() {
+                let (l, r) = self.foa_hrtf[channel].process(sample);
                 out[o] += l;
                 out[o + 1] += r;
             }
@@ -371,9 +550,7 @@ mod tests {
 
     #[test]
     fn field_basis_is_balanced_and_orthogonal() {
-        let dot = |a: &[f32; N], b: &[f32; N]| -> f32 {
-            a.iter().zip(b).map(|(x, y)| x * y).sum()
-        };
+        let dot = |a: &[f32; N], b: &[f32; N]| -> f32 { a.iter().zip(b).map(|(x, y)| x * y).sum() };
         for row in &FIELD_SIGNS {
             assert_eq!(row.iter().sum::<f32>(), 0.0);
             assert_eq!(dot(row, &COHERENT_SIGNS), 0.0);
@@ -440,7 +617,10 @@ mod tests {
         // 32 ms predelay + shortest ~21 ms FDN line keeps the first 50 ms dry.
         let first_50ms: f32 = out[..2_400 * 2].iter().map(|x| x * x).sum();
         let later: f32 = out[2_400 * 2..].iter().map(|x| x * x).sum();
-        assert!(first_50ms < 1.0e-12, "late field arrived early: {first_50ms}");
+        assert!(
+            first_50ms < 1.0e-12,
+            "late field arrived early: {first_50ms}"
+        );
         assert!(later > 1.0e-10, "late enclosure produced no delayed energy");
     }
 
@@ -462,7 +642,10 @@ mod tests {
             .zip(&actual)
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        assert!(max_error < 1.0e-6, "callback boundary changed late enclosure: {max_error}");
+        assert!(
+            max_error < 1.0e-6,
+            "callback boundary changed late enclosure: {max_error}"
+        );
     }
 
     #[test]
@@ -490,10 +673,90 @@ mod tests {
 
         let (low_same, low_diff) = render_tone(120.0);
         let (high_same, high_diff) = render_tone(4_000.0);
-        assert!(low_same > low_diff * 6.0, "120 Hz late field lost ear coherence");
+        assert!(
+            low_same > low_diff * 6.0,
+            "120 Hz late field lost ear coherence"
+        );
         assert!(
             high_diff > low_diff * 4.0 || high_diff > high_same * 0.02,
             "upper late field did not develop binaural difference"
         );
+    }
+
+    #[test]
+    fn dense_projection_grid_has_first_order_symmetry() {
+        let directions = dense_projection_directions();
+        let n = directions.len() as f32;
+        let mean = [
+            directions.iter().map(|d| d[0]).sum::<f32>() / n,
+            directions.iter().map(|d| d[1]).sum::<f32>() / n,
+            directions.iter().map(|d| d[2]).sum::<f32>() / n,
+        ];
+        for value in mean {
+            assert!(value.abs() < 1.0e-6, "nonzero first moment {value:e}");
+        }
+        let xy = directions.iter().map(|d| d[0] * d[1]).sum::<f32>() / n;
+        let xz = directions.iter().map(|d| d[0] * d[2]).sum::<f32>() / n;
+        let yz = directions.iter().map(|d| d[1] * d[2]).sum::<f32>() / n;
+        assert!(xy.abs() < 1.0e-6 && xz.abs() < 1.0e-6 && yz.abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn six_axis_filter_projection_matches_the_old_runtime_after_itd_settles() {
+        let sample_rate = 48_000u32;
+        let measured = MeasuredHrirData::saf_kemar().resampled_to(sample_rate);
+        let hrir = HrirSet::new(&measured, sample_rate);
+        let mut old_axes: [AxisHrtfBus; AXES] =
+            std::array::from_fn(|axis| AxisHrtfBus::new(sample_rate, &hrir, AXIS_DIRECTIONS[axis]));
+        let mut projected = project_directions_to_foa(sample_rate, &hrir, &AXIS_DIRECTIONS);
+
+        // The historical DelayLine ramps to its static ITD target at one sample
+        // per sample. Late energy itself has a 32 ms predelay, so this warm-up
+        // always completes before audible late output in production.
+        for _ in 0..256 {
+            for axis in &mut old_axes {
+                axis.process(0.0);
+            }
+            for bus in &mut projected {
+                bus.process(0.0);
+            }
+        }
+
+        let mut max_error = 0.0f32;
+        for i in 0..768usize {
+            let t = i as f32;
+            let field = [
+                (0.071 * t).sin() * 0.3,
+                (0.113 * t + 0.2).sin() * 0.2,
+                (0.047 * t + 0.7).cos() * 0.25,
+                (0.089 * t + 1.1).sin() * 0.15,
+            ];
+            let axis_input = decode_foa_to_axes(field);
+            let mut old = [0.0f32; 2];
+            for axis in 0..AXES {
+                let (l, r) = old_axes[axis].process(axis_input[axis]);
+                old[0] += l;
+                old[1] += r;
+            }
+            let mut new = [0.0f32; 2];
+            for channel in 0..FIELD_CHANNELS {
+                let (l, r) = projected[channel].process(field[channel]);
+                new[0] += l;
+                new[1] += r;
+            }
+            max_error = max_error.max((old[0] - new[0]).abs());
+            max_error = max_error.max((old[1] - new[1]).abs());
+        }
+        assert!(
+            max_error < 3.0e-5,
+            "projected six-axis transfer drifted by {max_error:e}"
+        );
+    }
+
+    #[test]
+    fn projected_fir_is_smaller_than_six_axis_runtime_at_48k() {
+        let taps = effective_filter_len(48_000);
+        assert_eq!(taps, 160);
+        assert!(FIELD_CHANNELS * 2 * taps < AXES * 2 * HRIR_LEN);
     }
 }
