@@ -65,6 +65,14 @@ jobs:
           if ($text -notmatch 'SELECTION_CAPABILITY_FLAGS\s+DIAGNOSTIC_ONLY') { throw 'spatial capability flags became a selection veto again' }
           if ($text -notmatch 'SELECTION_RESULT_AUTHORITY\s+SetDefaultSpatialAudioFormatResult\.Status') { throw 'Windows setter result is no longer the selection authority' }
           if ($text -notmatch 'DIRECT_MMDEVICES_SELECTION_WRITES\s+0') { throw 'direct MMDevices write boundary drifted' }
+          if ($text -notmatch 'RUNTIME_CONFIG\s+HKLM\\SOFTWARE\\Omniphony\\SpatialProvider') { throw 'runtime config boundary missing' }
+          if ($text -notmatch 'RUNTIME_ENABLE_FAIL_CLOSED\s+1') { throw 'runtime gate fail-closed contract missing' }
+
+          $runtime = & $ctl runtime-status
+          if ($LASTEXITCODE -ne 0) { throw "Runtime gate status failed: $LASTEXITCODE" }
+          $runtime | Write-Host
+          $runtimeText = $runtime -join "`n"
+          if ($runtimeText -notmatch 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0') { throw 'clean runner runtime gate is not closed' }
 
           $capability = & $smoke $dll
           if ($LASTEXITCODE -ne 0) { throw "ISpatialAudioClient capability smoke failed: $LASTEXITCODE" }
