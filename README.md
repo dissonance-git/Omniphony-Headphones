@@ -151,6 +151,16 @@ Physical listening decides perceptual promotion. Once a result changes the durab
 
 See [`docs/music-presentation-contract.md`](docs/music-presentation-contract.md).
 
+## Protected perceptual baseline
+
+The accepted default Windows music presentation is a protected baseline, not a temporary tuning waypoint.
+
+Future work may expand authored-scene semantics, radial distance, personalization, platform integration, diagnostics, or optional capabilities, but a sound-changing mechanism does not enter the default music path merely because it is more sophisticated or passes engineering tests. It must preserve the accepted baseline's bass/body, transient ownership, center solidity, clarity, dynamics, authored motion, externalization, and route reliability under clean physical listening.
+
+New audible mechanisms therefore begin as bounded candidates outside the protected default. If a candidate wins controlled listening, its durable consequence replaces the weaker rule. If it does not, the accepted baseline remains the product.
+
+Optional features such as head tracking are enhancements for listeners who want them. They are not required for normal Omniphony playback, calibration, or the reference listening path.
+
 ## Realtime law
 
 Realtime paths remain bounded and deterministic for equivalent continuous input and state. Audible changes live on the sample timeline, not on callback boundaries.
