@@ -5,4 +5,5 @@
 //! binaural renderer, device, callback, or transport implementation.
 
 pub mod authored_scene;
+pub mod rational_time;
 pub mod stable_source_slots;
