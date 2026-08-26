@@ -39,7 +39,7 @@ pub(crate) fn ffi_guard<T>(fallback: T, body: impl FnOnce() -> T) -> T {
 }
 
 const ABI_MAJOR: u32 = 0;
-const ABI_MINOR: u32 = 6;
+const ABI_MINOR: u32 = 7;
 const MODE_IDENTITY: u32 = 0;
 const MODE_CURRENT: u32 = 1;
 const PROCESS_BLOCK_MS: usize = 20;
