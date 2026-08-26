@@ -92,7 +92,6 @@ pub fn windows_static_role_position(role: WindowsStaticObjectRole) -> Option<[f6
 
 fn static_lane_position(lane: &WindowsSpatialStaticLane<'_>) -> Option<[f64; 3]> {
     lane.endpoint_position
-        .map(|position| position.map(|axis| axis as f64))
         .or_else(|| windows_static_role_position(lane.role))
 }
 
@@ -178,7 +177,7 @@ pub fn build_windows_spatial_source_frame<'a>(
             lane_kind: SourceLaneKind::DrySource,
             source_id: lane.stable_id,
             persistent_part_id: Some(lane.stable_id),
-            authored_position: Some(lane.authored_position.map(|axis| axis as f64)),
+            authored_position: Some(lane.authored_position),
             confidence: 1.0,
             ..SourceSceneEvidence::default()
         });
