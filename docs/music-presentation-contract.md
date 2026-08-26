@@ -116,6 +116,8 @@ These are one product presentation, not a menu of historical profiles. A replace
 
 The current default Windows music presentation is the protected perceptual baseline. Its accepted directional early field, restrained late field, coherent foundation, bass-specific finishing, center authority, and deterministic safety behavior stay fixed while new capabilities are developed around it. A new audible mechanism enters the default path only after controlled engineering validation and clean-route physical listening show that it preserves or improves the protected musical invariants.
 
+That protection is executable as well as documentary. Sound-owning Current modules/configuration and selected output-safety constants are pinned by the baseline validation lane. Ordinary scene, host, portability, packaging, and refactoring work must not update the baseline guard merely to make CI pass. An intentional perceptual promotion updates the accepted sound and the guard in the same change after physical listening earns that promotion.
+
 The late field earns retention by improving closure and envelopment without requiring more wet energy. Once late closure is smooth and unobtrusive, further externalization should be sought first through early-field geometry and directional resolution rather than by increasing late level, decay, or diffuse duplication.
 
 ## 5. Direct, broad, diffuse, and room roles stay distinct
