@@ -27,6 +27,8 @@ using BlocksFn = std::uint64_t (*)(const OmniphonySpatialObjectProcessor*);
 using LatencyFn = std::size_t (*)(const OmniphonySpatialObjectProcessor*);
 using U32Fn = std::uint32_t (*)(const OmniphonySpatialObjectProcessor*);
 
+using ResetFn = std::int32_t (*)(OmniphonySpatialObjectProcessor*);
+
 template <typename T>
 T Resolve(HMODULE module, const char* name) {
     return reinterpret_cast<T>(GetProcAddress(module, name));
@@ -72,8 +74,10 @@ int wmain(int argc, wchar_t** argv) {
     const auto staticCount = Resolve<U32Fn>(module, "omniphony_spatial_objects_static_object_count");
     const auto maxDynamic = Resolve<U32Fn>(module, "omniphony_spatial_objects_max_dynamic_objects");
 
+    const auto reset = Resolve<ResetFn>(module, "omniphony_spatial_objects_reset");
+
     if (!abiMajor || !abiMinor || !create || !destroy || !process || !blocks ||
-        !latency || !rate || !quantum || !staticCount || !maxDynamic) {
+        !latency || !rate || !quantum || !staticCount || !maxDynamic || !reset) {
         FreeLibrary(module);
         return Fail(L"exports", 4);
     }
@@ -177,6 +181,16 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     const auto processed = blocks(processor);
+    if (result == 0) {
+        if (reset(processor) != 0 ||
+            blocks(processor) != 0u ||
+            rate(processor) != 48'000u ||
+            quantum(processor) != kFrames ||
+            staticCount(processor) != 1u ||
+            maxDynamic(processor) != 2u) {
+            result = Fail(L"reset", 13);
+        }
+    }
     destroy(processor);
     FreeLibrary(module);
 
@@ -185,7 +199,7 @@ int wmain(int argc, wchar_t** argv) {
                    << OMNIPHONY_REALTIME_ABI_MAJOR << L"."
                    << OMNIPHONY_REALTIME_ABI_MINOR
                    << L" STATIC=1 MAX_DYNAMIC=2 MOVING_XYZ=1 WORKER_BLOCKS="
-                   << processed << L"\n";
+                   << processed << L" RESET=1\n";
     }
     return result;
 }
