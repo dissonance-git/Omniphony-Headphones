@@ -160,6 +160,14 @@ pub(super) struct ChannelState {
 }
 
 impl ChannelState {
+    pub(super) fn reset_runtime_state(&mut self) {
+        self.initialized = false;
+        self.gain_db = -128;
+        self.slewed_gain = 0.0;
+        self.ramp = ChannelRampState::default();
+        self.interp_prev_gains.clear();
+    }
+
     /// Advance the gain slew by one block toward `target`; returns the
     /// block's `(start, per_sample_step)` so mix loops can interpolate
     /// `start + step * sample_idx`.

@@ -388,6 +388,16 @@ impl SpatialRenderer {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Clear history owned by one source lane while keeping every unrelated
+    /// channel, the shared room tail, and output-stage history continuous.
+    pub fn reset_channel_runtime_state(&mut self, channel_idx: usize) {
+        if let Some(state) = self.channel_states.get_mut(channel_idx) {
+            state.reset_runtime_state();
+        }
+        self.speaker_stage.reset_channel_runtime_state(channel_idx);
+        self.binaural.reset_channel_runtime_state(channel_idx);
+    }
+
     /// Update channel states from format-agnostic spatial events.
     ///
     /// Called internally from `render_frame` when pending events are present.

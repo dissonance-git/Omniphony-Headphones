@@ -362,6 +362,17 @@ impl BinauralRenderer {
         self.reverb_bus.fill(0.0);
     }
 
+    /// Reset sample history owned by one source lane without disturbing
+    /// unrelated sources or the shared late-room tail.
+    pub fn reset_channel_runtime_state(&mut self, channel_idx: usize) {
+        if let Some(Some(dsp)) = self.channels.get_mut(channel_idx) {
+            dsp.reset_runtime_state();
+        }
+        if let Some(boundary) = self.channel_gain_boundary.get_mut(channel_idx) {
+            *boundary = 0.0;
+        }
+    }
+
     /// Identity of the active HRIR grid (tests observe the async swap with it).
     #[cfg(test)]
     fn hrir_grid_id(&self) -> usize {

@@ -105,6 +105,12 @@ fn accumulate_band(out_frame: &mut [f32], gains: &[f32], sample: f32) {
 }
 
 impl SpeakerRenderStage {
+    pub(super) fn reset_channel_runtime_state(&mut self, channel_idx: usize) {
+        if let Some(Some(states)) = self.crossover_filter_states.get_mut(channel_idx) {
+            states.fill(BiquadState::default());
+        }
+    }
+
     /// Fill `out` with one full-size `Gains` per render band at `position`. Uses
     /// the unified multi-band table (one cell localisation for all bands) when
     /// available, else falls back to a per-band lookup. Free-standing (borrows

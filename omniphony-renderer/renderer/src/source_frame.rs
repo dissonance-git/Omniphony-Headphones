@@ -92,6 +92,18 @@ impl SourceFrameRenderer {
         self.presentation_identity_initialized.fill(false);
     }
 
+    /// Reset one physical source lane before it is reused for a different
+    /// stable identity. Other lanes keep their spatial and filter history.
+    pub fn reset_channel_runtime_state(&mut self, channel_idx: usize) {
+        self.renderer.reset_channel_runtime_state(channel_idx);
+        if let Some(identity) = self.presentation_identities.get_mut(channel_idx) {
+            *identity = None;
+        }
+        if let Some(initialized) = self.presentation_identity_initialized.get_mut(channel_idx) {
+            *initialized = false;
+        }
+    }
+
     /// Render one block of interleaved already-separated source PCM.
     ///
     /// This compatibility entry point assumes every lane is still pre-route and
@@ -237,17 +249,22 @@ impl SourceFrameRenderer {
         }
 
         if self.configured_channels != channels {
-            self.routes.clear();
+            let previous_channels = self.configured_channels;
             self.routes.resize(channels, ChannelRoute::Virtual);
             self.renderer.configure_channel_routing(&self.routes);
-            self.configured_channels = channels;
-            self.presentation_identities.clear();
+
+            // Source-count changes are ordinary lifecycle events for authored
+            // object streams. Keep the surviving prefix continuous and clear
+            // only lanes that disappeared or became newly addressable.
+            let reset_start = previous_channels.min(channels);
+            let reset_end = previous_channels.max(channels);
+            for channel_idx in reset_start..reset_end {
+                self.renderer.reset_channel_runtime_state(channel_idx);
+            }
+
             self.presentation_identities.resize(channels, None);
-            self.presentation_identity_initialized.clear();
             self.presentation_identity_initialized.resize(channels, false);
-            // A width change is also a source-scene discontinuity. Do not let a
-            // previous channel's pose/ramp survive into a newly admitted lane.
-            self.renderer.reset_runtime_state();
+            self.configured_channels = channels;
         }
 
         self.events.clear();
