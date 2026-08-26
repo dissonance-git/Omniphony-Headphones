@@ -264,7 +264,7 @@ mod tests {
         assert!(policy.shared_wet.elevation_deg > 25.0);
         assert!(policy.shared_wet.distance > 1.4);
         assert!(policy.shared_wet.extent[0] > policy.shared_wet.extent[2]);
-        assert_eq!(binaural_mode(), BinauralMode::Cascaded);
+        assert_eq!(binaural_mode(&SourceRendererOptions::default()), BinauralMode::Cascaded);
     }
 
     #[test]
