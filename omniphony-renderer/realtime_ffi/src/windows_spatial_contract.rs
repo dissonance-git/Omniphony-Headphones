@@ -12,6 +12,8 @@
 //! +X right, +Y forward, and +Z up, so the lossless axis conversion is
 //! `[x, y, z] -> [x, -z, y]`.
 
+use renderer::authored_scene::{MetricPosition, radial_distance_m};
+
 /// The 17 static spatial roles in the canonical Windows 8.1.4.4 bed.
 ///
 /// Discriminants intentionally match Omniphony's canonical scene order:
@@ -131,6 +133,18 @@ impl WindowsSpatialPosition {
     pub const fn to_omniphony_xyz(self) -> [f32; 3] {
         [self.x_right_m, -self.z_back_m, self.y_up_m]
     }
+
+    pub fn to_omniphony_metric_xyz(self) -> MetricPosition {
+        [
+            self.x_right_m as f64,
+            -self.z_back_m as f64,
+            self.y_up_m as f64,
+        ]
+    }
+
+    pub fn radial_distance_m(self) -> f64 {
+        radial_distance_m(self.to_omniphony_metric_xyz())
+    }
 }
 
 /// A static Windows Spatial Audio object for one update quantum.
@@ -153,6 +167,14 @@ impl<'a> WindowsStaticObject<'a> {
         self.windows_position
             .map(WindowsSpatialPosition::to_omniphony_xyz)
     }
+
+    pub fn omniphony_metric_position(&self) -> Option<MetricPosition> {
+        if !self.role.is_directional() {
+            return None;
+        }
+        self.windows_position
+            .map(WindowsSpatialPosition::to_omniphony_metric_xyz)
+    }
 }
 
 /// A dynamic Windows Spatial Audio object for one update quantum.
@@ -170,6 +192,14 @@ pub struct WindowsDynamicObject<'a> {
 impl<'a> WindowsDynamicObject<'a> {
     pub const fn omniphony_position(&self) -> [f32; 3] {
         self.windows_position.to_omniphony_xyz()
+    }
+
+    pub fn omniphony_metric_position(&self) -> MetricPosition {
+        self.windows_position.to_omniphony_metric_xyz()
+    }
+
+    pub fn radial_distance_m(&self) -> f64 {
+        self.windows_position.radial_distance_m()
     }
 }
 
@@ -229,6 +259,13 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn windows_metric_geometry_preserves_radial_distance() {
+        let position = WindowsSpatialPosition::new(3.0, 0.0, -4.0);
+        assert_eq!(position.to_omniphony_metric_xyz(), [3.0, 4.0, 0.0]);
+        assert_eq!(position.radial_distance_m(), 5.0);
+    }
+
     fn dynamic_object_keeps_identity_while_position_moves() {
         let pcm = [0.25, -0.25];
         let first = WindowsDynamicObject {
