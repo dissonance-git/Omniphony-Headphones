@@ -70,6 +70,10 @@ public:
             queue_->Close();
             queue_.reset();
         }
+        if (clientEvent_) {
+            CloseHandle(clientEvent_);
+            clientEvent_ = nullptr;
+        }
         if (stopEvent_) {
             CloseHandle(stopEvent_);
             stopEvent_ = nullptr;
@@ -419,11 +423,28 @@ HRESULT CreateOmniphonySpatialProviderObjectStreamFromActivation(
         return FAILED(result) ? result : E_FAIL;
     }
 
+    HANDLE clientEvent = nullptr;
+    if (!DuplicateHandle(
+            GetCurrentProcess(),
+            params.EventHandle,
+            GetCurrentProcess(),
+            &clientEvent,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS)) {
+        inner->Release();
+        queue->Close();
+        return LastErrorOrFail();
+    }
+
     ProviderObjectRenderStream* created = nullptr;
     try {
-        created = new ProviderObjectRenderStream(inner, queue, params.EventHandle);
+        // ProviderObjectRenderStream owns the duplicated event handle from
+        // this point forward, matching the Windows Spatial Audio contract.
+        created = new ProviderObjectRenderStream(inner, queue, clientEvent);
     }
     catch (const std::bad_alloc&) {
+        CloseHandle(clientEvent);
         inner->Release();
         queue->Close();
         return E_OUTOFMEMORY;
