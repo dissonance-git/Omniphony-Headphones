@@ -111,18 +111,20 @@ Level-match where needed, separate localization from tonal preference, separate 
 
 The immediate perceptual problem is frontal depth/externalization, not more frontal quantity.
 
-A dense first-order measured-HRTF late-field projection has earned physical-listening acceptance as the preferred late-enclosure direction, but that accepted candidate is not yet integrated into current `main`. Integrate that retained late-field rule first without changing the protected master, host routing, late-field energy budget, decay behavior, or predelay simply to make the effect more obvious.
+The physically accepted dense first-order measured-HRTF late-field projection is now integrated into `main`. Keep its late level, decay, predelay, protected-master relationship, and working Windows host route fixed while evaluating the next mechanism.
 
-After that integration, move the perceptual frontier to the **early field**. The current six final-wall HRTF grouping is too coarse to be treated as the final directional resolution. Increase early-reflection directional resolution while preserving per-tap timing and total reflection power, so improvement comes from better geometry rather than more wet energy.
+The current bounded candidate increases early-reflection HRTF directional resolution from six global final-wall averages to ten deterministic direction clusters. It preserves the existing image-source delay/tone banks, first-/second-order tap gains, transient law, total reflection-power bookkeeping, and late field. Clustering is initialized once from static source-wall geometry; the realtime loop only follows precomputed routes.
+
+The ten-bus choice is intentional rather than a round-number expansion: on the current source-wall geometry it materially reduces weighted directional quantization error versus the six-wall baseline while using every cluster, whereas a twelve-bus trial added effectively redundant capacity. Focused early-field tests and the full source-aware spatial suite have passed. Physical listening remains the promotion gate; engineering success alone does not establish perceptual improvement.
 
 Immediate sequence:
 
 ```text
-integrate accepted continuous first-order late-field projection into main
-→ keep late energy / decay / predelay bounded
-→ replace coarse early HRTF grouping with higher-resolution directional clustering
-→ preserve exact tap timing and power
-→ compare against the accepted baseline
+accepted dense late field stays fixed
+→ finish Windows/installer engineering validation of the ten-cluster early candidate
+→ compare ten-cluster early field against the accepted dense-late baseline
+→ require no loss of bass, transient ownership, center solidity, clarity, motion, or route reliability
+→ keep / revise / revert from physical listening
 → only then revisit second-order share or transient excitation
 ```
 
@@ -130,7 +132,7 @@ Investigate bounded front-specific early-field structure, HRTF interaction, dire
 
 Do not buy externalization with indiscriminate late reverb, synthetic width, or another copied wet path.
 
-**Gate:** `main` carries the accepted continuous late-field baseline, and frontal sources occupy stable external space with useful distance variation while protected musical invariants remain intact and the early field no longer exposes a coarse directional grouping.
+**Gate:** the higher-resolution early field beats the accepted dense-late baseline in clean-route physical listening, preserves the protected musical invariants, and remains reliable on the real Windows endpoint. If it does not, revert or revise it rather than increasing wet energy to hide the deficit.
 
 ---
 
@@ -239,8 +241,7 @@ prove closed-gate physical spatial egress
 → receive dynamic XYZ objects
 → prove a real spatial application/game
 → controlled renderer comparisons
-→ integrate accepted continuous late-field baseline
-→ increase early-field directional resolution
+→ physically validate higher-resolution early-field direction clustering
 → finish frontal externalization / distance
 → HRTF personalization + optional head tracking
 → already-binaural policy + Windows hardening
