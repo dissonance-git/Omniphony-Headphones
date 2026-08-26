@@ -1,221 +1,147 @@
-# Omniphony OSC control / state contract
+# Omniphony OSC control/state contract
 
-The engine is driven and observed entirely over **OSC** (UDP). This document is
-the human-readable contract for client authors (Omniphony Studio, alternative
-front-ends, automation). The machine-readable single source of truth for the
-address strings is
-[`runtime_control::osc_contract`](../omniphony-renderer/runtime_control/src/osc_contract.rs)
-— every address below has a named constant there, and the exhaustive lists are
-`osc_contract::ALL_CONTROL` and `osc_contract::ALL_STATE`. Keep this document and
-that module in sync.
+This document owns the **wire-level semantic rules** for Omniphony OSC control and state publication.
 
-## Directions
+It does **not** manually inventory every address. The machine-readable canonical address vocabulary is `runtime_control::osc_contract` in `omniphony-renderer/runtime_control/src/osc_contract.rs`, including `ALL_CONTROL` and `ALL_STATE`. Exact addresses, tunables, enums, and schemas must be derived from that executable owner rather than copied into a second hand-maintained table.
 
-- **Control** — `/omniphony/control/…`, sent **client → engine** to change state
-  or trigger an action.
-- **State** — `/omniphony/state/…`, emitted **engine → subscribed clients** when
-  something changes (and as snapshots on connect).
+## 1. Directions
 
-## Argument conventions
+```text
+/omniphony/control/...
+client → engine
+request an action or state change
 
-- **Booleans** are accepted as OSC `int` (`0`/non-zero), `float`, or `bool`; the
-  engine coerces. Most togglish controls take a single int `0`/`1`.
-- **Enums** are lowercase strings; an unrecognised value is ignored (the engine
-  validates and drops bad input rather than erroring).
-- **Realtime gain** controls (`/control/realtime/*`) carry a trailing monotonic
-  **sequence int** so the engine can drop stale updates that arrive out of order.
-- Larger structured payloads (layout / speakers / audio / input config) are sent
-  as a single **JSON string** argument.
+/omniphony/state/...
+engine → subscribed clients
+publish current state / deltas / diagnostics
+```
 
----
+Controls request state. State messages report authoritative engine state. A client must not assume a sent control succeeded until the resulting state/acknowledgement semantics say so.
 
-## Control — client → engine
+## 2. Address ownership
 
-### Spatialisation: spread & distance
+Every fixed OSC address has one named constant in `runtime_control::osc_contract`.
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/spread/min` | f `[0,1]` | Minimum effective spread. |
-| `/control/spread/max` | f `[0,1]` | Maximum effective spread. |
-| `/control/spread/from_distance` | int bool | Derive spread from distance instead of object size. |
-| `/control/spread/distance_range` | f `>0` | Distance at which distance-derived spread reaches 0. |
-| `/control/spread/distance_curve` | f `≥0` | Curve exponent for distance-derived spread. |
-| `/control/spread/size_to_spread_mode` | s | `max` \| `mean` \| `projection_perpendicular`. |
-| `/control/distance_model` | s | `none` \| `linear` \| `quadratic` \| `inverse-square`. |
-| `/control/distance_model_metric` | s | `spherical` \| `chebyshev`. |
-| `/control/distance_diffuse/enabled` | int bool | Enable the mirrored distance-diffuse blend. |
-| `/control/distance_diffuse/threshold` | f `>0` | ADM distance at which the blend reaches 100 % direct. |
-| `/control/distance_diffuse/curve` | f `≥0` | Blend-weight curve exponent. |
-| `/control/distance_diffuse/metric` | s | `spherical` \| `chebyshev`. |
-| `/control/distance_diffuse/mirror_axes` | s | ADM axes negated to build the mirror image: any combination of `x`, `y`, `z` (`xy` — the default half-turn about the vertical axis — `y` for a front/back reflection, `xyz` for an inversion through the origin), or `none`. |
-| `/control/room_ratio` | f×3 | Room proportions `[w, l, h]` used to scale ADM coords. |
-| `/control/room_ratio_rear` | f | Rear scaling factor. |
-| `/control/room_ratio_lower` | f | Lower-hemisphere scaling factor. |
-| `/control/room_ratio_center_blend` | f | Centre-blend factor. |
+Rules:
 
-### Render backend selection & parameters
+- dispatchers/producers reference the constant rather than duplicating string literals;
+- `ALL_CONTROL` and `ALL_STATE` are exhaustive machine-readable inventories;
+- tests enforce address namespace and duplicate-address invariants;
+- client documentation or UI inventories should be generated/queried from the executable schema where practical;
+- this document changes only when protocol semantics change, not whenever an address is added.
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/render_backend` | s | Select active backend by id (built-in or contributor). |
-| `/control/render_backend/restore` | int | Restore the previously selected backend. |
-| `/control/backend/param` | `[key, value]` or `[backend_id, key, value]` | Generic backend parameter setter (schema-driven). With an explicit backend id, targets that backend (e.g. a hybrid inner backend); otherwise the selected one. |
-| `/control/hybrid/external_backend` | s | Hybrid outer backend id. |
-| `/control/hybrid/internal_backend` | s | Hybrid inner backend id. |
-| `/control/hybrid/metric` | s | `spherical` \| `chebyshev`. |
-| `/control/hybrid/curve_smoothing` | f `[0,1]` | Blend-curve smoothing. |
-| `/control/hybrid/curve` | f×2N | Flattened `(x,y)` blend control points, each `[0,1]`. |
+## 3. Argument conventions
 
-### Render evaluation (precomputed tables)
+Unless a narrower executable schema says otherwise:
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/render_evaluation_mode` | s | `auto` \| `realtime` \| `precomputed_polar` \| `precomputed_cartesian`. |
-| `/control/render_evaluation_mode/from_file` | s | Load a precomputed evaluator artifact. |
-| `/control/render_evaluation/position_interpolation` | int bool | Nearest-cell vs trilinear table lookup. |
-| `/control/render_evaluation/cartesian/{x_size,y_size,z_size,z_neg_size}` | int `≥1` (z_neg `≥0`) | Cartesian table resolution per axis. |
-| `/control/render_evaluation/polar/azimuth_resolution` | int `≥1` | Azimuth cells. |
-| `/control/render_evaluation/polar/elevation_resolution` | int `≥1` | Elevation cells. |
-| `/control/render_evaluation/polar/distance_res` | int `≥1` | Distance cells. |
-| `/control/render_evaluation/polar/distance_max` | f `>0` | Max table distance. |
+- booleans may be accepted from the supported OSC scalar forms and normalized by the engine;
+- enums are validated strings; invalid values are rejected/ignored rather than becoming partial state;
+- realtime ordered controls carry sequence/generation information when stale UDP delivery would be unsafe;
+- larger structured payloads use a declared serialized schema rather than ad-hoc positional growth;
+- non-finite numeric input is invalid for audible state;
+- bounds are validated before publication into realtime state.
 
-### Gain, mute & loudness
+The executable option/schema registry is authoritative for exact types, ranges, enum values, defaults, and current addresses.
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/realtime/master_gain` | f `[0,2]`, seq int | Master gain. |
-| `/control/realtime/speaker_gain` | id int, f `[0,2]`, seq int | Per-speaker gain. |
-| `/control/realtime/object_gain` | id s, f `[0,2]`, seq int | Per-object gain. |
-| `/control/object/{id}/mute` | int bool | Per-object mute. |
-| `/control/config/speakers` | json | Speaker edits (incl. per-speaker mute). |
-| `/control/loudness` | int bool | Dialogue-norm / loudness correction. |
-| `/control/auto_gain` | int bool | Auto gain-reduction on clipping. |
-| `/control/auto_gain_ceiling` | f `[-12,0]` dB | Auto-gain target ceiling. |
+## 4. UDP and ordering law
 
-### Adaptive resampling (output clock servo)
+OSC transport is UDP. Delivery may be late, duplicated, or out of order.
 
-All under `/control/adaptive_resampling/…`. Master toggle: bare
-`/control/adaptive_resampling` (int bool). Tunables: `kp_near`, `ki`,
-`max_adjust`, `update_interval_callbacks`, `high_recover_entry_margin_ms`,
-`integral_discharge_ratio`, `near_far_threshold_ms`, `reset_ratio`, `pause`,
-and the far-mode group `enable_far_mode`, `force_silence_in_far_mode`,
-`hard_recover_high_in_far_mode`, `hard_recover_low_in_far_mode`,
-`far_mode_return_fade_in_ms`. `/control/latency_target` sets the target buffer
-latency. See `PI_TUNING_PROCEDURE.md` and `docs/latency-regulation.md`.
+Therefore controls whose ordering matters must carry enough sequence/generation identity for the engine to reject stale state.
 
-### Audio output & live input
+```text
+newer authoritative control
+→ accepted
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/config/audio`, `/control/config/audio/apply` | json | Audio output config (stage / apply). |
-| `/control/audio/output_device` | s | Select output device. |
-| `/control/audio/output_devices/refresh` | — | Re-enumerate output devices. |
-| `/control/audio/sample_rate` | int | Output sample rate. |
-| `/control/config/input`, `/control/config/input/apply`, `/control/input/apply` | json | Input config (stage / apply). |
-| `/control/input/mode` | s | Input source mode. |
-| `/control/input/refresh` | — | Re-enumerate input sources. |
-| `/control/input/drc_mode` | s | Dynamic-range-control mode. |
-| `/control/input/drc_weight` | f `[0,1]` | DRC weight. |
-| `/control/input/live/{backend,node,description,layout,layout_import,channels,sample_rate,format,clock_mode,map,lfe_mode}` | varies | Live-capture parameters. |
-| `/control/render/bridge_path` | s | Path to the format bridge library. |
-| `/control/render/input_pipe` | s | Named-pipe input path. |
+older delayed control
+→ rejected
+```
 
-### Head tracking (binaural)
+Do not rely on packet arrival order as semantic time.
 
-Live head-pose control for the binaural (headphone) path. The orientation
-*feed* itself arrives on a **user-configured** address
-(`head_tracking.osc_address`, e.g. `/gamerotationvector` for Sensors2OSC /
-`nxosc`) parsed per `head_tracking.format` — that is config, not a fixed
-contract address. See `omniphony-renderer/BINAURAL.md`.
+Audible application time follows `realtime-control-contract.md`, not UDP receive time.
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/head/orientation` | f×3 (euler °) | Set head pose directly (yaw, pitch, roll). |
-| `/control/head/quat` | f×4 | Set head pose directly (quaternion). |
-| `/control/head/recenter` | — | Capture the current orientation as "front". |
-| `/control/head/tracking/address` | s | Feed address the engine listens on (`""` disables tracking). |
-| `/control/head/tracking/format` | s | `auto` \| `quat` \| `rotvec` \| `euler`. |
-| `/control/head/tracking/smoothing` | f `[0,0.99]` | Pose smoothing (higher = smoother/laggier). |
-| `/control/head/tracking/invert` | int bool | Mirror the applied rotation. |
+## 5. Snapshot and delta law
 
-### Layout
+A client may receive:
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/config/layout`, `/control/config/layout/apply` | json | Layout config (stage / apply). |
-| `/control/layout/radius_m` | f | Layout radius (m). |
-| `/control/layout/export` | s (optional name) | Export the current layout. |
+```text
+full snapshot
++ later deltas
+```
 
-### Overlay (Studio 3D / mpv overlay)
+A snapshot establishes a coherent baseline. Deltas amend that baseline only when their generation/version semantics are compatible.
 
-`/control/overlay/{enabled,labels,objects,trails,tag,heatmap_enabled,
-heatmap_bands,heatmap_colormap,heatmap_custom_stops}` — visualisation toggles
-and heatmap configuration.
+Late-attaching clients must be able to reconstruct current state without relying on messages that happened before they subscribed.
 
-### Diagnostics & engine lifecycle
+Sparse declarations may be cached by the engine, but cache lifetime must follow the owning generation/reset semantics.
 
-| Address | Args | Meaning |
-|---|---|---|
-| `/control/metering/rate_hz` | f `[1,1000]` | Metering publication rate. |
-| `/control/diag/rate_hz` | f `[1,1000]` | Diagnostics publication rate. |
-| `/control/diag/enabled` | int bool | Enable diagnostics publication. |
-| `/control/debug/speaker_gaintable/subscribe` | have_version int, speaker int | Subscribe to a speaker's gain-table field. |
-| `/control/debug/speaker_gaintable/unsubscribe` | — | Release the gain-table subscription. |
-| `/control/debug/speaker_gaintable/nack` | … | Request missing chunks / version. |
-| `/control/log_level` | s | `off`\|`error`\|`warn`\|`info`\|`debug`\|`trace`. |
-| `/control/ramp_mode` | s | `off` \| `frame` \| `sample`. |
-| `/control/option` | s key, value | Generic setter for any declared live option (`renderer::options` registry; schema on `/state/options_schema`). The dedicated addresses (`synthetic_objects`, `surround_placement`, `output_channel_mapping`, `object_generator`, `phantom_extract`) are aliases of this. |
-| `/control/save_config` | — | Persist the current config. |
-| `/control/reload_config` | — | Reload config from disk. |
-| `/control/quit` | — | Shut the engine down. |
-| `/control/yield_port` | — | Ask this instance to shut down and free the OSC RX port. Honoured only by instances started with `--osc-yield` (a Studio-launched standby renderer); ignored otherwise, so an embedded (mpv) renderer can never be evicted. Sent automatically by a starting instance that finds the port busy. |
+## 6. Transactional configuration
 
----
+Large configuration updates should use stage/validate/apply semantics when partial mutation could create an invalid audible state.
 
-## State — engine → clients
+```text
+candidate config
+→ parse / validate outside realtime
+→ publish atomically if still current
+→ state publication confirms result
+```
 
-`/state/options_schema` carries the declared live-options schema (JSON:
-`[{key, kind, values?, default, flags, i18nKey, helpI18nKey?}]`), mirroring the
-generator/phantom param-schema pattern; option values ride in the `options`
-block of the renderer snapshot.
+A failed candidate leaves last-known-good state active.
 
-The full state snapshot is published as `/omniphony/state/renderer` (JSON);
-individual deltas use the addresses below. `osc_contract::ALL_STATE` is the
-exhaustive machine-readable list.
+## 7. Realtime controls
 
-- **Snapshot / lifecycle** — `renderer` (full JSON), `snapshot_complete`,
-  `capabilities`, `config/saved`, `config/save_error`, `shutdown` (goodbye
-  broadcast on graceful engine teardown, one string arg with the reason;
-  clients should treat the connection as gone and re-register with the next
-  instance).
-- **Render** — `render/version`, `render/config_path`, `render/config_status`,
-  `render/bridge_path`, `render/bridge_error`, `vbap/allow_negative_z`,
-  `render_evaluation/*` (mirrors of the control resolutions), `speakers`,
-  `speakers/recomputing`, `speakers/recompute_error`, `layout`.
-- **Head tracking** — `head_pose` (4-float quaternion `w,x,y,z`, broadcast at
-  ~30 Hz while a tracking feed is active, for low-latency client display).
-- **Metering / timing** — `clip`, `decode_time_ms`, `render_time_ms`,
-  `write_time_ms`, `crossover_time_ms`, `frame_duration_ms`, `monitoring`,
-  `loudness`, `realtime/{master_gain,object_gain,speaker_gain}`.
-- **Latency & resampling** — `latency`, `latency_instant`, `latency_smoothed`,
-  `latency_control`, `latency_target`, `latency_avail_input`,
-  `latency_output_fifo`, `latency_resampler_pending`, `latency_downstream`,
-  `resample_ratio`, `adaptive_resampling/state`, `adaptive_resampling/band`.
-- **Input / config echoes** — `input`, `input_pipe`, `audio`, `log_level`.
-- **OSC publication flags** — `osc/metering`, `osc/diag`.
-- **Diagnostics** — `diag_schema`, `diag_values`.
-- **Gain-table stream** — `debug/speaker_gaintable/{meta,chunk,uptodate,
-  unavailable}`.
+Realtime controls such as gain, head pose, bypass, and other audible targets publish bounded target state. They do not perform graph construction or heavy work in the audio callback.
 
----
+The control path may request a target immediately; the renderer owns the sample-time trajectory required to reach it safely.
 
-## Adding or changing an address
+Callback/block boundaries must not become audible automation boundaries.
 
-1. Add/rename the constant in `runtime_control/src/osc_contract.rs` (and to
-   `ALL_CONTROL` / `ALL_STATE`).
-2. Reference the constant from the dispatcher / producer instead of a literal.
-3. Update this document.
+## 8. Head tracking
 
-The `osc_contract` test module guards the structural invariants (every control
-const is a control address, every state const a state address, no duplicate wire
-addresses).
+Head-tracking feeds may use configurable OSC addresses/formats, but their semantic output is listener pose.
+
+Requirements:
+
+- explicit coordinate convention;
+- finite normalized pose;
+- recenter semantics;
+- bounded smoothing/transition;
+- stale/dropout handling;
+- source authority unchanged by listener motion.
+
+A configurable sensor-feed address is configuration, not part of the fixed Omniphony control-address inventory unless explicitly declared there.
+
+## 9. Latency and recovery controls
+
+OSC may expose latency targets, adaptive clock-control settings, and recovery diagnostics. Those controls configure/observe the realtime system; they do not define its underlying correctness law.
+
+`realtime-control-contract.md` owns:
+
+- target-latency semantics;
+- stable vs hard-recovery separation;
+- bounded clock adaptation;
+- underrun/overrun observability;
+- sample-time invariance.
+
+Exact tunables and backend-specific controls are derived from the executable schema/code.
+
+## 10. Diagnostics and lifecycle
+
+Diagnostic/metering publication must be rate-bounded and must not make realtime audio wait for OSC clients.
+
+A client disappearing must not stop rendering.
+
+Engine shutdown/yield semantics must be explicit enough that one process cannot accidentally evict an unrelated authoritative renderer instance.
+
+## 11. Changing the protocol
+
+For a protocol change:
+
+1. change the canonical constant/schema in code;
+2. change dispatcher/producer behavior using that canonical owner;
+3. add/update executable tests;
+4. update this document only if the wire semantics changed;
+5. do not paste a new full address table here.
+
+> **The protocol vocabulary is executable data. This document owns only the semantics that make that vocabulary safe and coherent.**
