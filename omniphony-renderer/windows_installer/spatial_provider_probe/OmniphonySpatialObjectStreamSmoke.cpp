@@ -347,8 +347,53 @@ int wmain() {
     }
 
     movingC->Release();
+    movingC = nullptr;
     movingA->Release();
+    movingA = nullptr;
     front->Release();
+    front = nullptr;
+
+    hr = stream->Start();
+    if (FAILED(hr)) {
+        stream->Release();
+        return Fail(L"Start-after-reset", hr);
+    }
+    hr = stream->BeginUpdatingAudioObjects(&available, &frames);
+    if (FAILED(hr) || available != 2 || frames != 480) {
+        stream->Release();
+        return Fail(L"BeginUpdatingAudioObjects-after-reset", FAILED(hr) ? hr : E_FAIL);
+    }
+
+    ISpatialAudioObject* movingD = nullptr;
+    hr = stream->ActivateSpatialAudioObject(AudioObjectType_Dynamic, &movingD);
+    if (FAILED(hr) || !movingD ||
+        FAILED(movingD->SetPosition(-0.2f, 0.4f, -0.8f)) ||
+        FAILED(FillObject(movingD, frames, 0.125f))) {
+        if (movingD) movingD->Release();
+        stream->Release();
+        return Fail(L"post-reset-object-authoring", FAILED(hr) ? hr : E_FAIL);
+    }
+    hr = stream->EndUpdatingAudioObjects();
+    if (FAILED(hr) || transport->Dynamic().size() != 1) {
+        movingD->Release();
+        stream->Release();
+        return Fail(L"EndUpdatingAudioObjects-after-reset", FAILED(hr) ? hr : E_FAIL);
+    }
+    const auto postReset = transport->Dynamic()[0];
+    if (postReset.stable_id == firstA.stable_id ||
+        postReset.stable_id == firstB.stable_id ||
+        postReset.stable_id == thirdC.stable_id) {
+        movingD->Release();
+        stream->Release();
+        return Fail(L"Reset-must-not-reuse-stable-id");
+    }
+    hr = stream->Stop();
+    if (FAILED(hr)) {
+        movingD->Release();
+        stream->Release();
+        return Fail(L"Stop-after-reset", hr);
+    }
+    movingD->Release();
     stream->Release();
 
     std::wcout << L"SPATIAL_OBJECT_STREAM_DYNAMIC_CAPACITY_OK 1\n";
