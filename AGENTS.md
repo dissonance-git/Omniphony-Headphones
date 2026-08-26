@@ -180,13 +180,20 @@ The renderer, inference, source scene, and DSP core remain portable and independ
 Portable core owns:
 
 ```text
+host-neutral scene contract
 source scene
 channel/object geometry
 source authority
+sample-time object semantics
+bounded stable source identity
 presentation state
 spatial rendering
 binaural output
 ```
+
+Keep the portable scene contract below the renderer. Host adapters and renderers may depend on the same canonical identity/geometry/time/slot semantics directly; do not make a platform adapter depend on renderer DSP merely to obtain scene types, and do not create parallel scene types inside Windows or another host.
+
+The scene contract owns source identity continuity, metric geometry, exact rational-to-sample timing semantics, and bounded stable source slots. The renderer owns presentation and DSP. Platform adapters own translation from native APIs into the scene contract.
 
 Platform hosts own:
 
