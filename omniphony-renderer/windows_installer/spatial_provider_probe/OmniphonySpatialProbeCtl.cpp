@@ -451,7 +451,6 @@ int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
     }
 
     HKEY key = nullptr;
-    DWORD disposition = 0;
     LONG result = RegCreateKeyExW(
         HKEY_LOCAL_MACHINE,
         kRuntimeConfigPath,
@@ -461,7 +460,7 @@ int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
         KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_WOW64_64KEY,
         nullptr,
         &key,
-        &disposition);
+        nullptr);
     if (result != ERROR_SUCCESS) {
         std::wcerr << L"ERROR\tcreate runtime gate\t" << Win32Text(result) << L'\n';
         return kExitAccess;
