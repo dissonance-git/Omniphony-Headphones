@@ -11,7 +11,6 @@ mod module_lifetime;
 mod native_bed;
 mod native_bed_ffi;
 mod noire_x_profile;
-mod windows_object_scene;
 mod windows_objects_ffi;
 mod windows_objects_scene;
 mod windows_static_ffi;
