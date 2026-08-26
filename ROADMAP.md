@@ -2,16 +2,17 @@
 
 This file is the canonical owner of **unresolved current work, acceptance gates, and project frontier**.
 
-It does not own durable architecture, implementation inventories, or historical evidence:
+It owns no durable architecture, implementation inventory, completed phase, research archive, or chronology.
 
 - durable product identity and stable architecture → `README.md`;
 - governing development/listening law → `AGENTS.md`;
-- Windows product/host contract → `docs/omniphony-for-windows.md`;
-- physical listening evidence and accepted/rejected audible mechanisms → `docs/listening-history.md`;
+- Windows host/ingress/egress law → `docs/omniphony-for-windows.md`;
+- source/scene/renderer semantics → `docs/scene-renderer-contract.md`;
+- music presentation law → `docs/music-presentation-contract.md`;
 - executable implementation state → code, tests, and CI;
-- chronology → Git history.
+- chronology and retired alternatives → Git history.
 
-When an item is accepted or physically proven, remove it from this roadmap and preserve its evidence in the appropriate owner. Do not keep completed phases here as a second history log.
+When a gate is crossed, remove it from this roadmap. Fold any surviving durable consequence into the appropriate living contract or executable regression. Do not move completed work into a history section or evidence ledger.
 
 The current product target remains one open spatial renderer that preserves the richest trustworthy source representation, performs one final binaural render, and invents only what the source does not already provide.
 
@@ -41,7 +42,7 @@ COM-shaped authored static source reaches Omniphony
 
 After physical egress is proven independently, verify safe provider registration, enumeration, selection, COM activation, deselection, rollback, and uninstall recovery.
 
-The provider-registration surface remains experimental until physically verified. Registry shape, MSSOAL observations, or successful COM construction alone are insufficient.
+The provider-registration surface remains experimental until physically verified. Registry shape, third-party observations, or successful COM construction alone are insufficient.
 
 **Gate:** Windows can enumerate, select, activate, and safely deselect Omniphony without leaving the machine on a provider that cannot render.
 
@@ -226,4 +227,4 @@ prove closed-gate physical spatial egress
 → public release
 ```
 
-When a gate is crossed, remove it from this roadmap and preserve the supporting evidence in its canonical owner.
+When a gate is crossed, delete it here. If it established a durable law, fold that law into the appropriate living contract or executable regression. Git history is the only project chronology.
