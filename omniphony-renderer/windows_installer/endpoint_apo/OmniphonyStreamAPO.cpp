@@ -5,6 +5,12 @@
 #include <audiomediatype.h>
 #include <BaseAudioProcessingObject.h>
 #include <ksmedia.h>
+#include <mmdeviceapi.h>
+#include <wrl/client.h>
+
+#include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Media.Audio.h>
 
 #include "omniphony_realtime.h"
 #include "OmniphonyStreamFallback.h"
@@ -29,6 +35,57 @@ constexpr DWORD kSevenOneMask =
 
 HINSTANCE g_module = nullptr;
 volatile LONG g_factoryLocks = 0;
+
+// Windows Spatial Sound is downstream of this pre-mix SFX. When the
+// user has selected an external spatial renderer (Windows Sonic,
+// Dolby Atmos for Headphones, DTS Headphone:X, or a provider), that
+// renderer must receive the authored stream without a first binaural
+// pass through Omniphony. APOInitSystemEffects2/3 both expose the
+// exact endpoint as the last item in pDeviceCollection.
+bool ExternalSpatialRendererSelected(UINT32 dataSize, BYTE* data) noexcept {
+    if (!data) return false;
+
+    IMMDeviceCollection* devices = nullptr;
+    BOOL discoveryOnly = FALSE;
+    if (dataSize == sizeof(APOInitSystemEffects3)) {
+        auto* init = reinterpret_cast<APOInitSystemEffects3*>(data);
+        devices = init->pDeviceCollection;
+        discoveryOnly = init->InitializeForDiscoveryOnly;
+    } else if (dataSize == sizeof(APOInitSystemEffects2)) {
+        auto* init = reinterpret_cast<APOInitSystemEffects2*>(data);
+        devices = init->pDeviceCollection;
+        discoveryOnly = init->InitializeForDiscoveryOnly;
+    } else {
+        return false;
+    }
+    if (discoveryOnly || !devices) return false;
+
+    try {
+        UINT count = 0;
+        if (FAILED(devices->GetCount(&count)) || count == 0) return false;
+
+        Microsoft::WRL::ComPtr<IMMDevice> endpoint;
+        if (FAILED(devices->Item(count - 1, endpoint.ReleaseAndGetAddressOf())) || !endpoint) {
+            return false;
+        }
+
+        LPWSTR rawId = nullptr;
+        if (FAILED(endpoint->GetId(&rawId)) || !rawId) return false;
+        const winrt::hstring endpointId{rawId};
+        CoTaskMemFree(rawId);
+
+        const auto configuration =
+            winrt::Windows::Media::Audio::SpatialAudioDeviceConfiguration::GetForDeviceId(endpointId);
+        // DefaultSpatialAudioFormat is the user's selection. Active can
+        // temporarily differ, so either non-empty value means another
+        // spatial renderer owns presentation and Omniphony must be identity.
+        return !configuration.DefaultSpatialAudioFormat().empty() ||
+               !configuration.ActiveSpatialAudioFormat().empty();
+    } catch (...) {
+        // Fail toward normal Omniphony rather than failing graph creation.
+        return false;
+    }
+}
 
 bool ReadAudioFormat(IAudioMediaType* mediaType, UNCOMPRESSEDAUDIOFORMAT& format) noexcept {
     format = {};
@@ -62,7 +119,11 @@ bool IsSupportedFormatPair(
 }
 
 bool IsRawBypassFormat(const UNCOMPRESSEDAUDIOFORMAT& format) noexcept {
-    return IsFloat32Format(format) && format.dwSamplesPerFrame == 2;
+    if (!IsFloat32Format(format) || format.dwSamplesPerFrame == 0 ||
+        format.dwSamplesPerFrame > 18) {
+        return false;
+    }
+    return format.dwSamplesPerFrame == 2 || format.dwChannelMask != 0;
 }
 
 bool IsRawBypassPair(
@@ -70,6 +131,7 @@ bool IsRawBypassPair(
     const UNCOMPRESSEDAUDIOFORMAT& output) noexcept {
     return IsRawBypassFormat(input) && IsRawBypassFormat(output) &&
            input.fFramesPerSecond == output.fFramesPerSecond &&
+           input.dwSamplesPerFrame == output.dwSamplesPerFrame &&
            input.dwBytesPerSampleContainer == output.dwBytesPerSampleContainer &&
            input.dwValidBitsPerSample == output.dwValidBitsPerSample &&
            IsEqualGUID(input.guidFormatType, output.guidFormatType) &&
@@ -298,7 +360,7 @@ private:
 };
 
 class OmniphonyStreamAPO final : public CBaseAudioProcessingObject,
-                                 public IAudioSystemEffects,
+                                 public IAudioSystemEffects2,
                                  public IAudioProcessingObjectPreferredFormatSupport,
                                  public INonDelegatingUnknown {
 public:
@@ -334,8 +396,9 @@ public:
             *object = static_cast<IAudioProcessingObjectRT*>(this);
         } else if (IsEqualIID(riid, __uuidof(IAudioProcessingObjectConfiguration))) {
             *object = static_cast<IAudioProcessingObjectConfiguration*>(this);
-        } else if (IsEqualIID(riid, __uuidof(IAudioSystemEffects))) {
-            *object = static_cast<IAudioSystemEffects*>(this);
+        } else if (IsEqualIID(riid, __uuidof(IAudioSystemEffects)) ||
+                   IsEqualIID(riid, __uuidof(IAudioSystemEffects2))) {
+            *object = static_cast<IAudioSystemEffects2*>(this);
         } else if (IsEqualIID(riid, __uuidof(IAudioProcessingObjectPreferredFormatSupport))) {
             *object = static_cast<IAudioProcessingObjectPreferredFormatSupport*>(this);
         } else {
@@ -373,7 +436,8 @@ public:
         } else if (dataSize == sizeof(APOInitSystemEffects2)) {
             processingMode = reinterpret_cast<APOInitSystemEffects2*>(data)->AudioProcessingMode;
         }
-        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);
+        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW) ||
+                     ExternalSpatialRendererSelected(dataSize, data);
         m_bIsInitialized = true;
         return S_OK;
     }
