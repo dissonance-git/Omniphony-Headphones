@@ -1,0 +1,61 @@
+name: Helix capture Stream APO error
+
+on:
+  push:
+    branches: [helix/omniphony-endpoint-geometry-fix]
+    paths:
+      - '.github/workflows/helix-capture-stream-apo-error.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/omniphony-endpoint-geometry-fix
+          fetch-depth: 0
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: choco install windowsdriverkit11 -y --no-progress
+      - name: Build only Stream APO and capture diagnostics
+        id: build
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $src = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\endpoint_apo"
+          $build = "$env:GITHUB_WORKSPACE\build\apo"
+          $log = "$env:GITHUB_WORKSPACE\STREAM_APO_COMPILER_ERROR.txt"
+          $all = [System.Collections.Generic.List[string]]::new()
+          $all.Add('=== CMAKE CONFIGURE ===')
+          cmake -S $src -B $build -A x64 2>&1 | ForEach-Object { $all.Add("$_"); Write-Host $_ }
+          $configureExit = $LASTEXITCODE
+          $all.Add("CONFIGURE_EXIT=$configureExit")
+          if ($configureExit -eq 0) {
+            $all.Add('=== STREAM APO BUILD ===')
+            cmake --build $build --config Release --target OmniphonyStreamAPO -- /v:detailed 2>&1 | ForEach-Object { $all.Add("$_"); Write-Host $_ }
+            $buildExit = $LASTEXITCODE
+          } else {
+            $buildExit = -1
+          }
+          $all.Add("BUILD_EXIT=$buildExit")
+          [System.IO.File]::WriteAllLines($log, $all, [System.Text.UTF8Encoding]::new($false))
+      - name: Commit compiler diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path STREAM_APO_COMPILER_ERROR.txt)) { throw 'compiler log was not produced' }
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add STREAM_APO_COMPILER_ERROR.txt
+          git commit -m 'ci: record Stream APO compiler diagnostics'
+          if ($LASTEXITCODE -ne 0) { throw "diagnostic commit failed: $LASTEXITCODE" }
+          git push origin HEAD:helix/omniphony-endpoint-geometry-fix
+          if ($LASTEXITCODE -ne 0) { throw "diagnostic push failed: $LASTEXITCODE" }
