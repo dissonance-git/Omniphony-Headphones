@@ -137,6 +137,7 @@ jobs:
             'OmniphonySpatialProbeSmoke',
             'OmniphonySpatialObjectStreamSmoke',
             'OmniphonySpatialObjectRealtimeSmoke',
+            'OmniphonySpatialRealtimeBridgeSmoke',
             'OmniphonySpatialClosedGateEgressProbe'
           )) {
             cmake --build $build --config Release --target $target --parallel
@@ -149,8 +150,9 @@ jobs:
           $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
           $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
           $objectRealtimeSmoke = Join-Path $release 'OmniphonySpatialObjectRealtimeSmoke.exe'
+          $composedRealtimeSmoke = Join-Path $release 'OmniphonySpatialRealtimeBridgeSmoke.exe'
           $closedGate = Join-Path $release 'OmniphonySpatialClosedGateEgressProbe.exe'
-          foreach ($file in @($provider, $control, $smoke, $objectStreamSmoke, $objectRealtimeSmoke, $closedGate)) {
+          foreach ($file in @($provider, $control, $smoke, $objectStreamSmoke, $objectRealtimeSmoke, $composedRealtimeSmoke, $closedGate)) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
               throw "Spatial provider build output is missing: $file"
             }
@@ -161,6 +163,14 @@ jobs:
 
           & $objectRealtimeSmoke $env:OMNIPHONY_REALTIME_DLL
           if ($LASTEXITCODE -ne 0) { throw "Spatial object realtime ABI 0.7 smoke failed: $LASTEXITCODE" }
+
+          $composedOutput = & $composedRealtimeSmoke $env:OMNIPHONY_REALTIME_DLL
+          if ($LASTEXITCODE -ne 0) { throw "Spatial composed static/dynamic realtime smoke failed: $LASTEXITCODE" }
+          $composedOutput | Write-Host
+          $composedText = $composedOutput -join "`n"
+          if ($composedText -notmatch 'SPATIAL_COM_TO_CURRENT_OK\s+1') { throw 'static COM-to-Current marker missing' }
+          if ($composedText -notmatch 'SPATIAL_DYNAMIC_COM_TO_CURRENT_OK\s+1') { throw 'dynamic COM-to-Current marker missing' }
+          if ($composedText -notmatch 'SPATIAL_DYNAMIC_COM_TO_STEREO_QUEUE_OK\s+1') { throw 'dynamic COM-to-queue marker missing' }
 
           # CI deliberately has no HKLM\SOFTWARE\Omniphony\SpatialProvider gate.
           # The provider must therefore expose capabilities but reject public
