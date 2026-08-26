@@ -727,6 +727,7 @@ impl SpatialRenderer {
                         reflections: g.binaural.reflections.clone(),
                         reverb: g.binaural.reverb.clone(),
                         air_absorption: g.binaural.air_absorption,
+                        near_field_parallax: g.binaural.near_field_parallax,
                     },
                     g.binaural.ears,
                     self.cascade_spectral_compensation
