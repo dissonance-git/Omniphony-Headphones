@@ -23,9 +23,9 @@ pub(crate) fn current_model_config(base: &str) -> String {
     let mut cfg = base.to_string();
     cfg = cfg.replace("      level: 0.32", "      level: 0.36");
 
-    // The Current model owns first-order reflections in the fixed-cost six-bus
-    // measured-HRTF field below, so disable the inherited analytic reflection
-    // bank to prevent duplicate early energy.
+    // The Current model owns first-order reflections in the bounded clustered
+    // measured-HRTF early field below, so disable the inherited analytic
+    // reflection bank to prevent duplicate early energy.
     cfg = cfg.replace(
         "    reflections:\n      enabled: true",
         "    reflections:\n      enabled: false",
