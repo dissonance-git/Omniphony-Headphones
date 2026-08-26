@@ -1,4 +1,4 @@
-//! Six-axis measured-HRTF late enclosure for the retained Current music path.
+//! First-order spherical measured-HRTF late enclosure for the retained Current music path.
 //!
 //! The protected stereo master never enters this module. It receives only the
 //! derived full-sphere support field, exactly like `music_early_reflections`.
@@ -6,18 +6,25 @@
 //! The inherited binaural FDN ends as two decorrelated ear returns. That is a
 //! useful distance/closure cue, but after the network has collapsed to L/R it
 //! can no longer say "this late energy arrived from above / in front / behind".
-//! Current therefore keeps the same bounded 8-line Householder network and
-//! short RT60, but reads six mutually-orthogonal late buses from it. Those buses
-//! are rendered as ±X / ±Y / ±Z through the same embedded SAF/KEMAR HRTF family
+//! This candidate keeps the same bounded 8-line Householder network and short
+//! RT60, but reads four mutually-orthogonal late buses as a first-order spherical
+//! field W/X/Y/Z. The field is decoded energy-neutrally to six virtual directions
+//! ±X / ±Y / ±Z, then rendered through the same embedded SAF/KEMAR HRTF family
 //! used elsewhere in the Current support renderer.
 //!
-//! Below 300 Hz the late field is deliberately coherent at the ears: one seventh
-//! orthogonal FDN output is low-passed and shared by L/R. Above 300 Hz the six
-//! directional buses are high-passed before HRTF rendering. Because these are
-//! orthogonal stochastic FDN readouts rather than two coherent speaker bands,
-//! the crossover is a single 2nd-order Butterworth pair: its LP/HP squared
-//! magnitudes sum to unity, so the transition preserves late-field power instead
-//! of creating the 3 dB hole an LR4 pair would produce for incoherent branches.
+//! This is deliberately different from six independent directional buses. A
+//! first-order spherical field is closed under arbitrary rotation: W is invariant
+//! and X/Y/Z rotate as a vector. That makes the late representation compatible
+//! with future head tracking and matches the low-order Ambisonic strategy used
+//! by established binaural renderers, while retaining exactly the same six HRTF
+//! virtual directions for a causal listening comparison.
+//!
+//! Below 300 Hz the late field is deliberately coherent at the ears: one fifth
+//! orthogonal FDN output is low-passed and shared by L/R. Above 300 Hz the four
+//! W/X/Y/Z readouts are high-passed before virtual-speaker decoding. Because
+//! these are orthogonal stochastic FDN readouts rather than two coherent speaker
+//! bands, the crossover is a single 2nd-order Butterworth pair: its LP/HP squared
+//! magnitudes sum to unity, preserving late-field power through the transition.
 //!
 //! This is intentionally a tiny closure layer, not a new reverb effect. Its
 //! level, RT60 and predelay match the retained Current model's already-reduced
@@ -37,6 +44,7 @@ use renderer::music_field::MUSIC_FIELD_CHANNELS;
 
 const N: usize = 8;
 const AXES: usize = 6;
+const FIELD_CHANNELS: usize = 4;
 const LENGTHS_48K: [usize; N] = [1031, 1327, 1523, 1801, 2053, 2311, 2617, 2903];
 const DAMPING: f32 = 0.35;
 const MOD_DEPTH_48K: f32 = 24.0;
@@ -51,20 +59,18 @@ const CURRENT_LATE_LEVEL: f32 = 0.016;
 const CURRENT_LATE_RT60_S: f32 = 0.12;
 const CURRENT_LATE_PREDELAY_MS: f32 = 32.0;
 
-/// Householder input injection. This is also the seventh non-DC Hadamard row;
-/// its delayed FDN output becomes the shared low-frequency late field.
+/// Householder input injection and the independent shared low-frequency readout.
 const COHERENT_SIGNS: [f32; N] = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
 
-/// Six zero-sum, mutually orthogonal H8 rows, all orthogonal to
-/// `COHERENT_SIGNS`. This gives the upper late field six independent directional
-/// coordinates without adding another delay network.
-const AXIS_SIGNS: [[f32; N]; AXES] = [
+/// Four zero-sum, mutually orthogonal H8 rows, all orthogonal to
+/// `COHERENT_SIGNS`. They are interpreted as W/X/Y/Z stochastic field
+/// coefficients rather than physical directions. Equal row norms give equal
+/// coefficient variance before the explicit field normalization below.
+const FIELD_SIGNS: [[f32; N]; FIELD_CHANNELS] = [
     [1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0],
     [1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0],
     [1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0],
     [1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0],
-    [1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 1.0],
-    [1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0],
 ];
 
 /// Axis order matches the renderer's shoebox wall convention: +X, -X, +Y,
@@ -78,6 +84,18 @@ const AXIS_DIRECTIONS: [[f32; 3]; AXES] = [
     [0.0, 0.0, -1.0],
 ];
 
+/// Energy-normalized first-order field -> six cardinal virtual speakers.
+/// Rows are speaker feeds; columns are [W, X, Y, Z]. R^T R = I exactly in
+/// real arithmetic, so decoding does not change total field energy.
+const FOA_TO_AXES: [[f32; FIELD_CHANNELS]; AXES] = [
+    [0.408_248_3, 0.707_106_77, 0.0, 0.0],
+    [0.408_248_3, -0.707_106_77, 0.0, 0.0],
+    [0.408_248_3, 0.0, 0.707_106_77, 0.0],
+    [0.408_248_3, 0.0, -0.707_106_77, 0.0],
+    [0.408_248_3, 0.0, 0.0, 0.707_106_77],
+    [0.408_248_3, 0.0, 0.0, -0.707_106_77],
+];
+
 #[inline]
 fn dot_signs(signs: &[f32; N], values: &[f32; N]) -> f32 {
     let mut sum = 0.0f32;
@@ -87,9 +105,20 @@ fn dot_signs(signs: &[f32; N], values: &[f32; N]) -> f32 {
     sum / (N as f32).sqrt()
 }
 
+#[inline]
+fn decode_foa_to_axes(field: [f32; FIELD_CHANNELS]) -> [f32; AXES] {
+    std::array::from_fn(|axis| {
+        FOA_TO_AXES[axis]
+            .iter()
+            .zip(field.iter())
+            .map(|(weight, sample)| weight * sample)
+            .sum()
+    })
+}
+
 /// The same compact late-network topology as the generic binaural FDN, but its
-/// readout remains in an abstract directional basis instead of collapsing to
-/// two ears inside the network.
+/// readout remains in a rotation-complete first-order field basis instead of
+/// collapsing to two ears inside the network.
 struct LateSphereFdn {
     lines: Vec<Vec<f32>>,
     base_len: [f32; N],
@@ -163,7 +192,7 @@ impl LateSphereFdn {
     }
 
     #[inline]
-    fn process(&mut self, input: f32) -> ([f32; AXES], f32) {
+    fn process(&mut self, input: f32) -> ([f32; FIELD_CHANNELS], f32) {
         if self.mod_samples_left == 0 {
             self.begin_modulation_segment();
         }
@@ -189,7 +218,7 @@ impl LateSphereFdn {
         }
         self.mod_samples_left -= 1;
 
-        let axes = std::array::from_fn(|axis| dot_signs(&AXIS_SIGNS[axis], &line_out));
+        let field = std::array::from_fn(|channel| dot_signs(&FIELD_SIGNS[channel], &line_out));
         let coherent = dot_signs(&COHERENT_SIGNS, &line_out);
 
         // Householder feedback H·o = o - (2/N)Σo, with the same darkened loop
@@ -204,7 +233,7 @@ impl LateSphereFdn {
             self.pos[i] = (self.pos[i] + 1) % cap;
         }
 
-        (axes, coherent)
+        (field, coherent)
     }
 }
 
@@ -260,7 +289,7 @@ pub(crate) struct HrtfLateEnclosure {
     xover_lp: BiquadCoeffs,
     xover_hp: BiquadCoeffs,
     low_state: BiquadState,
-    high_state: [BiquadState; AXES],
+    high_state: [BiquadState; FIELD_CHANNELS],
 }
 
 impl HrtfLateEnclosure {
@@ -290,7 +319,7 @@ impl HrtfLateEnclosure {
 
         let frames = field_input.len() / MUSIC_FIELD_CHANNELS;
         let mut out = vec![0.0f32; frames * 2];
-        let axis_gain = CURRENT_LATE_LEVEL / (AXES as f32).sqrt();
+        let field_gain = CURRENT_LATE_LEVEL / (FIELD_CHANNELS as f32).sqrt();
         let (lp, hp) = (self.xover_lp, self.xover_hp);
 
         for frame in 0..frames {
@@ -303,7 +332,7 @@ impl HrtfLateEnclosure {
                 .iter()
                 .copied()
                 .sum::<f32>();
-            let (axis_raw, coherent_raw) = self.fdn.process(input);
+            let (field_raw, coherent_raw) = self.fdn.process(input);
 
             // Shared low-frequency field: BW2 low-pass, identical at both ears.
             let low = biquad(coherent_raw, lp, &mut self.low_state) * CURRENT_LATE_LEVEL;
@@ -311,12 +340,17 @@ impl HrtfLateEnclosure {
             out[o] += low;
             out[o + 1] += low;
 
-            // Directional upper late field: power-complementary BW2 high-pass
-            // before six full HRTFs. The six readouts are orthogonal, so their
-            // total variance is normalized by 1/sqrt(AXES).
+            // Directional upper late field: filter the four independent W/X/Y/Z
+            // coordinates, normalize their total variance, then decode to the
+            // same six HRTF virtual directions used by the axis candidate.
+            let mut field = [0.0f32; FIELD_CHANNELS];
+            for channel in 0..FIELD_CHANNELS {
+                field[channel] =
+                    biquad(field_raw[channel], hp, &mut self.high_state[channel]) * field_gain;
+            }
+            let axis_input = decode_foa_to_axes(field);
             for axis in 0..AXES {
-                let high = biquad(axis_raw[axis], hp, &mut self.high_state[axis]) * axis_gain;
-                let (l, r) = self.axes[axis].process(high);
+                let (l, r) = self.axes[axis].process(axis_input[axis]);
                 out[o] += l;
                 out[o + 1] += r;
             }
@@ -336,19 +370,38 @@ mod tests {
     }
 
     #[test]
-    fn directional_basis_is_balanced_and_orthogonal() {
+    fn field_basis_is_balanced_and_orthogonal() {
         let dot = |a: &[f32; N], b: &[f32; N]| -> f32 {
             a.iter().zip(b).map(|(x, y)| x * y).sum()
         };
-        for row in &AXIS_SIGNS {
+        for row in &FIELD_SIGNS {
             assert_eq!(row.iter().sum::<f32>(), 0.0);
             assert_eq!(dot(row, &COHERENT_SIGNS), 0.0);
         }
         assert_eq!(COHERENT_SIGNS.iter().sum::<f32>(), 0.0);
-        for i in 0..AXES {
-            for j in i + 1..AXES {
-                assert_eq!(dot(&AXIS_SIGNS[i], &AXIS_SIGNS[j]), 0.0);
+        for i in 0..FIELD_CHANNELS {
+            for j in i + 1..FIELD_CHANNELS {
+                assert_eq!(dot(&FIELD_SIGNS[i], &FIELD_SIGNS[j]), 0.0);
             }
+        }
+    }
+
+    #[test]
+    fn foa_virtual_speaker_decode_preserves_energy() {
+        for field in [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.4, -0.7, 0.2, 1.1],
+        ] {
+            let axes = decode_foa_to_axes(field);
+            let field_energy: f32 = field.iter().map(|x| x * x).sum();
+            let axis_energy: f32 = axes.iter().map(|x| x * x).sum();
+            assert!(
+                (field_energy - axis_energy).abs() < 2.0e-6,
+                "FOA decode changed energy: field={field_energy}, axes={axis_energy}"
+            );
         }
     }
 
