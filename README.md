@@ -119,6 +119,8 @@ This is a coordinate vocabulary, not a claim that every source contains seventee
 
 The semantic source scene and internal rendering geometry are different concepts. Internal support directions are renderer geometry, not authored input channels.
 
+Portable scene semantics sit below the renderer in a host-neutral contract layer. That layer owns stable source/object identity continuity, metric XYZ and radial distance, exact lowering from rational source time to half-open sample spans, and bounded stable source slots. Platform adapters lower their native metadata into that contract; the renderer consumes the same contract. Callback size, Windows ABI shape, and renderer internals therefore cannot silently become scene semantics.
+
 See [`docs/scene-renderer-contract.md`](docs/scene-renderer-contract.md).
 
 ## Windows product boundary
@@ -159,6 +161,8 @@ Future work may expand authored-scene semantics, radial distance, personalizatio
 
 New audible mechanisms therefore begin as bounded candidates outside the protected default. If a candidate wins controlled listening, its durable consequence replaces the weaker rule. If it does not, the accepted baseline remains the product.
 
+The accepted Current sound is also guarded executably: sound-owning modules/configuration and selected output-safety constants are pinned by CI. Ordinary host, scene, and architecture work must not require that guard to move. An intentional listening promotion changes the sound and its baseline guard together.
+
 Optional features such as head tracking are enhancements for listeners who want them. They are not required for normal Omniphony playback, calibration, or the reference listening path.
 
 ## Realtime law
@@ -191,6 +195,7 @@ Claims stop at the strongest evidence actually obtained. Unresolved evidence bel
 From `omniphony-renderer/`:
 
 ```sh
+cargo test -p scene_contract
 cargo test -p renderer
 cargo test -p orender_engine --lib --tests
 cargo test -p source_ffi --lib --tests
