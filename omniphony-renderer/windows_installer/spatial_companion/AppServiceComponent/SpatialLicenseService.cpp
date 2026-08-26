@@ -38,6 +38,10 @@ void InsertLicenseResponse(ValueSet^ response, unsigned int status) {
 
 } // namespace
 
+SpatialLicenseService::SpatialLicenseService()
+{
+}
+
 void SpatialLicenseService::Run(IBackgroundTaskInstance^ taskInstance)
 {
     _taskDeferral = Platform::Agile<BackgroundTaskDeferral>(taskInstance->GetDeferral());
