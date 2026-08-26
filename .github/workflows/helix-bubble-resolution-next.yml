@@ -1,0 +1,65 @@
+name: Helix validate bubble resolution next
+
+on:
+  push:
+    branches: [helix/bubble-resolution-next]
+    paths:
+      - '.github/workflows/helix-bubble-resolution-next.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  RUST_TOOLCHAIN: 1.88.0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/bubble-resolution-next
+          fetch-depth: 0
+
+      - name: Apply resolution patch
+        run: |
+          python .helix/apply_bubble_resolution_next.py
+          git diff --check
+
+      - name: Install pinned Rust
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
+          cd omniphony-renderer
+          rustup override set "$RUST_TOOLCHAIN"
+          rustc --version
+
+      - name: Format patched Rust
+        run: |
+          cd omniphony-renderer
+          cargo fmt --all
+          git diff --check
+
+      - name: Test renderer and Current engine
+        run: |
+          cd omniphony-renderer
+          cargo test -p renderer
+          cargo test -p orender_engine
+          cargo test -p realtime_ffi
+
+      - name: Commit tested source
+        run: |
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add omniphony-renderer/renderer/src/binaural/hrir.rs \
+                  omniphony-renderer/renderer/src/binaural/measured.rs \
+                  omniphony-renderer/orender_engine/src/music_late_enclosure.rs
+          git commit -m 'feat(current): project late FOA through dense measured HRTF sphere'
+          git push origin HEAD:helix/bubble-resolution-next
+
+      - name: Dispatch full Windows installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-installer.yml --ref helix/bubble-resolution-next
