@@ -21,8 +21,9 @@
 
 namespace {
 
-constexpr std::size_t kProviderQueueFrames = 480u * 8u;
-constexpr LONG kSourcePeriodMilliseconds = 10;
+constexpr std::size_t kSourceQuantumFrames = 480u;
+constexpr std::size_t kProviderQueueFrames = kSourceQuantumFrames * 8u;
+constexpr std::size_t kProviderTargetQueuedFrames = kSourceQuantumFrames * 4u;
 constexpr UINT32 kProviderMaxDynamicObjects = 16;
 
 HRESULT LastErrorOrFail() noexcept {
@@ -68,10 +69,6 @@ public:
         if (queue_) {
             queue_->Close();
             queue_.reset();
-        }
-        if (sourceTimer_) {
-            CloseHandle(sourceTimer_);
-            sourceTimer_ = nullptr;
         }
         if (stopEvent_) {
             CloseHandle(stopEvent_);
@@ -150,47 +147,33 @@ public:
             return result;
         }
 
-        sourceTimer_ = CreateWaitableTimerW(nullptr, FALSE, nullptr);
-        if (!sourceTimer_) {
-            result = LastErrorOrFail();
-            (void)pump_.Stop();
-            (void)inner_->Stop();
-            return result;
-        }
-
-        LARGE_INTEGER due{};
-        due.QuadPart = -100'000LL;
-        if (!SetWaitableTimer(
-                sourceTimer_,
-                &due,
-                kSourcePeriodMilliseconds,
-                nullptr,
-                nullptr,
-                FALSE)) {
-            result = LastErrorOrFail();
-            CloseHandle(sourceTimer_);
-            sourceTimer_ = nullptr;
-            (void)pump_.Stop();
-            (void)inner_->Stop();
-            return result;
-        }
+        sourceRequestOutstanding_.store(false, std::memory_order_release);
+        updateInProgress_.store(false, std::memory_order_release);
 
         try {
             endpointWorker_ = std::thread([this]() { EndpointWorker(); });
-            sourceWorker_ = std::thread([this]() { SourceWorker(); });
         }
         catch (const std::system_error&) {
             SetEvent(stopEvent_);
             JoinWorkers();
-            CancelWaitableTimer(sourceTimer_);
-            CloseHandle(sourceTimer_);
-            sourceTimer_ = nullptr;
             (void)pump_.Stop();
             (void)inner_->Stop();
             return E_FAIL;
         }
 
         running_ = true;
+
+        // Prime one source request immediately. Subsequent requests are driven
+        // by queue demand and the physical endpoint's actual drain cadence.
+        result = RequestSourceIfNeeded();
+        if (FAILED(result)) {
+            SetEvent(stopEvent_);
+            JoinWorkers();
+            (void)pump_.Stop();
+            (void)inner_->Stop();
+            running_ = false;
+            return result;
+        }
         return S_OK;
     }
 
@@ -202,11 +185,9 @@ public:
 
         SetEvent(stopEvent_);
         JoinWorkers();
-        if (sourceTimer_) {
-            CancelWaitableTimer(sourceTimer_);
-            CloseHandle(sourceTimer_);
-            sourceTimer_ = nullptr;
-        }
+        sourceRequestOutstanding_.store(false, std::memory_order_release);
+        updateInProgress_.store(false, std::memory_order_release);
+        ResetEvent(clientEvent_);
 
         const HRESULT async = AsyncResult();
         const HRESULT pumpResult = pump_.Stop();
@@ -234,6 +215,9 @@ public:
         if (queue_) {
             queue_->Reset();
         }
+        sourceRequestOutstanding_.store(false, std::memory_order_release);
+        updateInProgress_.store(false, std::memory_order_release);
+        ResetEvent(clientEvent_);
         asyncResult_.store(S_OK, std::memory_order_release);
         return S_OK;
     }
@@ -245,9 +229,14 @@ public:
         if (FAILED(async)) {
             return async;
         }
-        return inner_->BeginUpdatingAudioObjects(
+        const HRESULT result = inner_->BeginUpdatingAudioObjects(
             availableDynamicObjectCount,
             frameCountPerBuffer);
+        if (SUCCEEDED(result)) {
+            sourceRequestOutstanding_.store(false, std::memory_order_release);
+            updateInProgress_.store(true, std::memory_order_release);
+        }
+        return result;
     }
 
     HRESULT STDMETHODCALLTYPE EndUpdatingAudioObjects() override {
@@ -255,7 +244,12 @@ public:
         if (FAILED(async)) {
             return async;
         }
-        return inner_->EndUpdatingAudioObjects();
+        const HRESULT result = inner_->EndUpdatingAudioObjects();
+        updateInProgress_.store(false, std::memory_order_release);
+        if (FAILED(result)) {
+            return result;
+        }
+        return RequestSourceIfNeeded();
     }
 
     HRESULT STDMETHODCALLTYPE ActivateSpatialAudioObject(
@@ -272,6 +266,38 @@ public:
     }
 
 private:
+    HRESULT RequestSourceIfNeeded() noexcept {
+        if (!clientEvent_ || !queue_ || !queue_->IsOpen()) {
+            return E_UNEXPECTED;
+        }
+        if (updateInProgress_.load(std::memory_order_acquire)) {
+            return S_OK;
+        }
+
+        // Keep a bounded producer lead, then let physical endpoint consumption
+        // create demand. This removes the former free-running 10 ms source
+        // timer and keeps one clock owner downstream.
+        const std::size_t queued = queue_->AvailableFrames();
+        if (queued + kSourceQuantumFrames > kProviderTargetQueuedFrames) {
+            return S_OK;
+        }
+
+        bool expected = false;
+        if (!sourceRequestOutstanding_.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            return S_OK;
+        }
+
+        if (!SetEvent(clientEvent_)) {
+            sourceRequestOutstanding_.store(false, std::memory_order_release);
+            return LastErrorOrFail();
+        }
+        return S_OK;
+    }
+
     HRESULT AsyncResult() const noexcept {
         return asyncResult_.load(std::memory_order_acquire);
     }
@@ -313,6 +339,12 @@ private:
                 SetAsyncFailure(drain);
                 break;
             }
+
+            const HRESULT sourceDemand = RequestSourceIfNeeded();
+            if (FAILED(sourceDemand)) {
+                SetAsyncFailure(sourceDemand);
+                break;
+            }
         }
 
         if (mmcss) {
@@ -320,31 +352,9 @@ private:
         }
     }
 
-    void SourceWorker() noexcept {
-        HANDLE handles[2] = {stopEvent_, sourceTimer_};
-        for (;;) {
-            const DWORD waitResult = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-            if (waitResult == WAIT_OBJECT_0) {
-                break;
-            }
-            if (waitResult != WAIT_OBJECT_0 + 1) {
-                SetAsyncFailure(
-                    waitResult == WAIT_FAILED ? LastErrorOrFail() : E_UNEXPECTED);
-                break;
-            }
-            if (!SetEvent(clientEvent_)) {
-                SetAsyncFailure(LastErrorOrFail());
-                break;
-            }
-        }
-    }
-
     void JoinWorkers() noexcept {
         if (endpointWorker_.joinable()) {
             endpointWorker_.join();
-        }
-        if (sourceWorker_.joinable()) {
-            sourceWorker_.join();
         }
     }
 
@@ -353,12 +363,12 @@ private:
     std::shared_ptr<OmniphonySpatialStereoQueue> queue_;
     HANDLE clientEvent_ = nullptr;
     HANDLE stopEvent_ = nullptr;
-    HANDLE sourceTimer_ = nullptr;
     OmniphonySpatialRawOutputPump pump_;
     std::thread endpointWorker_;
-    std::thread sourceWorker_;
     std::mutex lifecycleMutex_;
     std::atomic<HRESULT> asyncResult_{S_OK};
+    std::atomic<bool> sourceRequestOutstanding_{false};
+    std::atomic<bool> updateInProgress_{false};
     bool running_ = false;
 };
 
