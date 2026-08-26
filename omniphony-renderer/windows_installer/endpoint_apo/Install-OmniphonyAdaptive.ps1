@@ -14,6 +14,7 @@ $restartAudio = Join-Path $here 'Restart-OmniphonyAudio.ps1'
 $stateRoot = Join-Path $env:ProgramData 'Omniphony'
 $backupPath = Join-Path $stateRoot 'endpoint-backup.json'
 $logPath = Join-Path $stateRoot 'install-last.log'
+$topologyLogPath = Join-Path $stateRoot 'apo-topology.log'
 $runtimeRoot = Join-Path $AppRoot 'APO'
 $packageStreamApo = Join-Path $PackageRoot 'OmniphonyStreamAPO.dll'
 $packageStreamSmoke = Join-Path $PackageRoot 'OmniphonyStreamApoSmoke.exe'
@@ -131,6 +132,17 @@ function Set-AudioServiceRunning([bool]$Running) {
 # endpoint mixes this EFX is intentionally only a rollback anchor; the actual
 # renderer must be promoted to the stream SFX because Current itself is stereo.
 & $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG
+
+try {
+    New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+    Set-Content -LiteralPath $topologyLogPath -Value "OMNIPHONY_APO_TOPOLOGY_TRACE`tVERSION=1" -Encoding Ascii
+    & icacls.exe $stateRoot /grant '*S-1-5-19:(RX)' | Out-Null
+    & icacls.exe $topologyLogPath /grant '*S-1-5-19:(M)' | Out-Null
+    Write-Host "APO_TOPOLOGY_TRACE_READY PATH=$topologyLogPath"
+}
+catch {
+    Write-Warning "Could not prepare APO topology trace: $($_.Exception.Message)"
+}
 
 $transcriptStarted = $false
 try {
