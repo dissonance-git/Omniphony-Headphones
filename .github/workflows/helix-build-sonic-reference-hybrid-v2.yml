@@ -1,0 +1,68 @@
+name: Helix build Sonic reference hybrid v2
+
+on:
+  push:
+    branches: [helix/sonic-reference-hybrid]
+    paths:
+      - '.github/workflows/helix-build-sonic-reference-hybrid-v2.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-build-dispatch:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/sonic-reference-hybrid
+          fetch-depth: 0
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: choco install windowsdriverkit11 -y --no-progress
+      - name: Apply hybrid ownership patch
+        shell: pwsh
+        run: |
+          python .helix/apply_sonic_hybrid.py
+          if ($LASTEXITCODE -ne 0) { throw 'hybrid patch failed' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'hybrid patch produced whitespace errors' }
+      - name: Parse hybrid installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $path = Join-Path $env:GITHUB_WORKSPACE 'omniphony-renderer\windows_installer\endpoint_apo\Install-OmniphonyAdaptive.ps1'
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { $errors | Format-List | Out-String | Write-Host; throw 'PowerShell parse failed' }
+      - name: Compile both Omniphony APO routes
+        shell: pwsh
+        run: |
+          $src = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\endpoint_apo"
+          $build = "$env:GITHUB_WORKSPACE\build\apo"
+          cmake -S $src -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+          cmake --build $build --config Release --target OmniphonyStreamAPO OmniphonyAPO OmniphonyStreamApoSmoke OmniphonyApoSmoke OmniphonyRawApoSmoke
+          if ($LASTEXITCODE -ne 0) { throw 'hybrid APO compile failed' }
+      - name: Commit tested hybrid
+        shell: pwsh
+        run: |
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp omniphony-renderer/windows_installer/endpoint_apo/CMakeLists.txt omniphony-renderer/windows_installer/endpoint_apo/Install-OmniphonyAdaptive.ps1
+          git commit -m 'test(windows): restore post-Sonic Current reference route'
+          if ($LASTEXITCODE -ne 0) { throw "hybrid commit failed: $LASTEXITCODE" }
+          git push origin HEAD:helix/sonic-reference-hybrid
+          if ($LASTEXITCODE -ne 0) { throw "hybrid push failed: $LASTEXITCODE" }
+      - name: Dispatch full Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-installer.yml --ref helix/sonic-reference-hybrid
+          if ($LASTEXITCODE -ne 0) { throw 'installer dispatch failed' }
