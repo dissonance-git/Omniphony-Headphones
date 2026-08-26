@@ -160,7 +160,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Spatial dynamic object COM smoke failed: $LASTEXITCODE" }
 
           & $objectRealtimeSmoke $env:OMNIPHONY_REALTIME_DLL
-          if ($LASTEXITCODE -ne 0) { throw "Spatial object realtime ABI 0.6 smoke failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Spatial object realtime ABI 0.7 smoke failed: $LASTEXITCODE" }
 
           # CI deliberately has no HKLM\SOFTWARE\Omniphony\SpatialProvider gate.
           # The provider must therefore expose capabilities but reject public
@@ -366,7 +366,7 @@ jobs:
           $repo = $env:GITHUB_REPOSITORY
           $sha = $env:GITHUB_SHA
           $asset = 'dist/OmniphonySetup.exe'
-          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, native-surround 7.1.4 stream smoke, static/dynamic Spatial Sound object COM smoke, realtime object ABI 0.6 moving-XYZ smoke, and fail-closed provider COM smoke passed."
+          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the Current renderer, stereo APO, native-surround 7.1.4 stream smoke, static/dynamic Spatial Sound object COM smoke, realtime object ABI 0.7 moving-XYZ/reset smoke, and fail-closed provider COM smoke passed."
 
           gh release view windows-current --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
