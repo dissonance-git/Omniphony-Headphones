@@ -33,7 +33,6 @@ if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
     $ReceiptPath = Join-Path $env:ProgramData 'Omniphony\spatial-provider-last.json'
 }
 
-$ConfigPath = 'HKLM:\SOFTWARE\Omniphony\SpatialProvider'
 $FormatGuid = '{4BD75423-A66C-4586-B782-1FCBBDF2AE74}'
 $ComClsid = '{F3CDF827-20C4-405E-A430-8F739343FC89}'
 
@@ -121,12 +120,6 @@ $RestartAudioPath = (Resolve-Path -LiteralPath $RestartAudioPath).Path
 $registered = $false
 $selectionCommitted = $false
 try {
-    # Keep the public renderer fail-closed until registration has been verified.
-    New-Item -Path $ConfigPath -Force | Out-Null
-    New-ItemProperty -Path $ConfigPath -Name Enabled -PropertyType DWord -Value 0 -Force | Out-Null
-    New-ItemProperty -Path $ConfigPath -Name EndpointId -PropertyType String -Value $endpointId -Force | Out-Null
-    New-ItemProperty -Path $ConfigPath -Name RealtimeDll -PropertyType String -Value $RealtimeDll -Force | Out-Null
-
     Write-Host 'Registering Omniphony Spatial Sound provider...'
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('register', $ProviderDll)
     $registered = $true
@@ -134,8 +127,15 @@ try {
     Write-Host 'Verifying provider registration and COM construction...'
     $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('diagnose')
 
-    # The provider must be live before Windows is asked to make it active.
-    Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 1
+    # The control tool owns the only runtime-gate write path. It writes
+    # Enabled=0 first, validates the exact endpoint/runtime DLL, and commits
+    # Enabled=1 last.
+    Write-Host 'Opening fail-closed Omniphony provider runtime gate...'
+    $null = Invoke-NativeChecked -Path $ControlPath -Arguments @('runtime-enable', $endpointId, $RealtimeDll)
+    $runtimeStatus = Invoke-NativeChecked -Path $ControlPath -Arguments @('runtime-status')
+    if (($runtimeStatus -join "`n") -notmatch 'SPATIAL_RUNTIME_STATUS\s+KEY=1\s+ENABLED=1\s+READY=1') {
+        throw 'Omniphony provider runtime gate did not read back ready.'
+    }
 
     # Registration writes and COM construction are not proof that the running
     # Windows Audio graph has refreshed its spatial-provider inventory. Reopen
@@ -173,11 +173,14 @@ try {
         try { Write-Receipt $false } catch {}
         Write-Warning 'Windows accepted Omniphony as the default spatial format, so provider registration was retained for safety.'
     } else {
-        try {
-            if (Test-Path -LiteralPath $ConfigPath) {
-                Set-ItemProperty -Path $ConfigPath -Name Enabled -Type DWord -Value 0 -ErrorAction SilentlyContinue
-            }
-        } catch {}
+        if (Test-Path -LiteralPath $ControlPath -PathType Leaf) {
+            try {
+                $previousPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                & $ControlPath runtime-disable 2>&1 | ForEach-Object { Write-Warning "rollback: $_" }
+                $ErrorActionPreference = $previousPreference
+            } catch {}
+        }
 
         if ($registered -and (Test-Path -LiteralPath $ControlPath -PathType Leaf)) {
             try {
