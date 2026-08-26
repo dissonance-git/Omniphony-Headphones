@@ -176,7 +176,7 @@ foreach ($name in $expected.Keys) {
     }
 }
 
-foreach ($requiredField in @('provider_dll', 'realtime_dll', 'object_stream_smoke', 'object_realtime_smoke', 'stereo_queue_smoke', 'raw_output_probe', 'raw_output_sink_probe')) {
+foreach ($requiredField in @('provider_dll', 'realtime_dll', 'preflight_script', 'activation_test_script', 'object_stream_smoke', 'object_realtime_smoke', 'stereo_queue_smoke', 'raw_output_probe', 'raw_output_sink_probe')) {
     if (-not $manifest.$requiredField) {
         throw "Spatial-provider stage manifest is missing required current field: $requiredField"
     }
@@ -184,16 +184,23 @@ foreach ($requiredField in @('provider_dll', 'realtime_dll', 'object_stream_smok
 
 $providerDll = [System.IO.Path]::GetFullPath([string]$manifest.provider_dll)
 $realtimeDll = [System.IO.Path]::GetFullPath([string]$manifest.realtime_dll)
+$preflightScript = [System.IO.Path]::GetFullPath([string]$manifest.preflight_script)
+$activationTestScript = [System.IO.Path]::GetFullPath([string]$manifest.activation_test_script)
 $providerCtl = Join-Path $generationRoot 'OmniphonySpatialProbeCtl.exe'
 $objectStreamSmoke = [System.IO.Path]::GetFullPath([string]$manifest.object_stream_smoke)
 $objectRealtimeSmoke = [System.IO.Path]::GetFullPath([string]$manifest.object_realtime_smoke)
 $stereoQueueSmoke = [System.IO.Path]::GetFullPath([string]$manifest.stereo_queue_smoke)
 $rawOutputProbe = [System.IO.Path]::GetFullPath([string]$manifest.raw_output_probe)
 $rawOutputSinkProbe = [System.IO.Path]::GetFullPath([string]$manifest.raw_output_sink_probe)
-foreach ($ownedPath in @($providerDll, $realtimeDll, $providerCtl, $objectStreamSmoke, $objectRealtimeSmoke, $stereoQueueSmoke, $rawOutputProbe, $rawOutputSinkProbe)) {
+foreach ($ownedPath in @($providerDll, $realtimeDll, $preflightScript, $activationTestScript, $providerCtl, $objectStreamSmoke, $objectRealtimeSmoke, $stereoQueueSmoke, $rawOutputProbe, $rawOutputSinkProbe)) {
     if (-not (Test-PathWithin -Child $ownedPath -Parent $generationRoot)) {
         throw "Spatial-provider manifest points outside its immutable generation: $ownedPath"
     }
+}
+
+$currentScript = [System.IO.Path]::GetFullPath($PSCommandPath)
+if (-not $currentScript.Equals($preflightScript, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Activation preflight must run from the immutable generation script: $preflightScript"
 }
 
 $runtimeStatus = Invoke-NativeCaptured `
