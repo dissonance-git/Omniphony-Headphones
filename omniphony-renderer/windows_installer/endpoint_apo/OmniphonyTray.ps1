@@ -8,7 +8,6 @@ $stateRoot = Join-Path $programData 'Omniphony'
 $currentPath = Join-Path $stateRoot 'current-enabled.txt'
 $eqPresetPath = Join-Path $stateRoot 'eq-preset.txt'
 $legacyEqPath = Join-Path $stateRoot 'personal-eq.txt'
-$enhancementPath = Join-Path $stateRoot 'noire-x-enhancement.txt'
 $restartAudioPath = Join-Path $PSScriptRoot 'Restart-OmniphonyAudio.ps1'
 $stopPath = Join-Path $stateRoot 'tray.stop'
 
@@ -51,8 +50,6 @@ function Get-EqEnabled {
     } catch { }
     return $true
 }
-
-function Get-EnhancementEnabled { return Get-OnOffSetting $enhancementPath $true }
 
 function Show-TrayMessage([string]$Text) {
     $notify.BalloonTipTitle = 'Omniphony'
@@ -112,9 +109,6 @@ $currentItem.Text = 'Enabled'
 $eqItem = New-Object System.Windows.Forms.ToolStripMenuItem
 [void]$menu.Items.Add($eqItem)
 
-$enhancementItem = New-Object System.Windows.Forms.ToolStripMenuItem
-[void]$menu.Items.Add($enhancementItem)
-
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 
 $restartAudioItem = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -131,7 +125,6 @@ $notify.ContextMenuStrip = $menu
 function Update-TrayState {
     $current = Get-CurrentEnabled
     $eq = Get-EqEnabled
-    $enhancement = Get-EnhancementEnabled
 
     $currentItem.Checked = $current
     $currentItem.Text = 'Enabled'
@@ -139,14 +132,10 @@ function Update-TrayState {
     $eqItem.Checked = $eq
     $eqItem.Text = if ($eq) { 'Headphone EQ: Noire X' } else { 'Headphone EQ: Off' }
 
-    $enhancementItem.Checked = $enhancement
-    $enhancementItem.Text = if ($enhancement) { 'Noire X Enhancement: On' } else { 'Noire X Enhancement: Off' }
-
     $enabledText = if ($current) { 'Enabled' } else { 'Disabled' }
     $eqText = if ($eq) { 'EQ On' } else { 'EQ Off' }
-    $enhanceText = if ($enhancement) { 'NX On' } else { 'NX Off' }
-    $statusItem.Text = "Omniphony | $enabledText | $eqText | $enhanceText"
-    $notify.Text = "Omniphony | $enabledText | $enhanceText"
+    $statusItem.Text = "Omniphony | $enabledText | $eqText"
+    $notify.Text = "Omniphony | $enabledText | $eqText"
 }
 
 function Toggle-Current {
@@ -183,18 +172,8 @@ function Toggle-Eq {
     }
 }
 
-function Toggle-Enhancement {
-    try {
-        Set-OnOffSetting $enhancementPath (-not (Get-EnhancementEnabled)) 'on'
-        Update-TrayState
-    } catch {
-        Show-TrayMessage "Could not change Noire X Enhancement: $($_.Exception.Message)"
-    }
-}
-
 $currentItem.Add_Click({ Toggle-Current })
 $eqItem.Add_Click({ Toggle-Eq })
-$enhancementItem.Add_Click({ Toggle-Enhancement })
 $restartAudioItem.Add_Click({ [void](Restart-WindowsAudioService $true) })
 
 $exitItem.Add_Click({
