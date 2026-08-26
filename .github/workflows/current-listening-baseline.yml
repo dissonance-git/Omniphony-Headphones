@@ -1,0 +1,54 @@
+name: Protected Current listening baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "omniphony-renderer/current-listening-baseline.manifest"
+      - "omniphony-renderer/scripts/check-current-listening-baseline.sh"
+      - "omniphony-renderer/orender_engine/src/music_support.rs"
+      - "omniphony-renderer/orender_engine/src/music_early_reflections.rs"
+      - "omniphony-renderer/orender_engine/src/music_late_enclosure.rs"
+      - "omniphony-renderer/renderer/src/music_field.rs"
+      - "omniphony-renderer/renderer/src/music_foundation.rs"
+      - "omniphony-renderer/realtime_ffi/src/height_preference.rs"
+      - "omniphony-renderer/realtime_ffi/src/noire_x_profile.rs"
+      - "omniphony-renderer/realtime_ffi/src/listening_finish.rs"
+      - "omniphony-renderer/realtime_ffi/src/lib.rs"
+      - "omniphony-renderer/assets/binaural-baselines/stereo-field-prototype.yaml"
+      - "layouts/system-h-derived-22.0-upper60-grid10.yaml"
+      - ".github/workflows/current-listening-baseline.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "omniphony-renderer/current-listening-baseline.manifest"
+      - "omniphony-renderer/scripts/check-current-listening-baseline.sh"
+      - "omniphony-renderer/orender_engine/src/music_support.rs"
+      - "omniphony-renderer/orender_engine/src/music_early_reflections.rs"
+      - "omniphony-renderer/orender_engine/src/music_late_enclosure.rs"
+      - "omniphony-renderer/renderer/src/music_field.rs"
+      - "omniphony-renderer/renderer/src/music_foundation.rs"
+      - "omniphony-renderer/realtime_ffi/src/height_preference.rs"
+      - "omniphony-renderer/realtime_ffi/src/noire_x_profile.rs"
+      - "omniphony-renderer/realtime_ffi/src/listening_finish.rs"
+      - "omniphony-renderer/realtime_ffi/src/lib.rs"
+      - "omniphony-renderer/assets/binaural-baselines/stereo-field-prototype.yaml"
+      - "layouts/system-h-derived-22.0-upper60-grid10.yaml"
+      - ".github/workflows/current-listening-baseline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Current sound unchanged
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Verify protected listening baseline
+        shell: bash
+        run: bash omniphony-renderer/scripts/check-current-listening-baseline.sh
