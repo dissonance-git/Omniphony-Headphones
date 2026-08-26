@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.helix/apply_early10_lf_safe.py'
+      - '.helix/refine_early10_lf_dominance.py'
       - '.github/workflows/helix-early10-lf-safe.yml'
 
 permissions:
@@ -33,6 +34,7 @@ jobs:
       - name: Apply LF-safe Early10 patch
         run: |
           python .helix/apply_early10_lf_safe.py
+          python .helix/refine_early10_lf_dominance.py
           rustfmt --edition 2024 omniphony-renderer/orender_engine/src/music_early_reflections.rs
           git diff --check
           changed="$(git diff --name-only)"
@@ -51,6 +53,6 @@ jobs:
           git config user.name "helix-ci"
           git config user.email "helix-ci@users.noreply.github.com"
           git add omniphony-renderer/orender_engine/src/music_early_reflections.rs
-          git rm .helix/apply_early10_lf_safe.py .github/workflows/helix-early10-lf-safe.yml
+          git rm .helix/apply_early10_lf_safe.py .helix/refine_early10_lf_dominance.py .github/workflows/helix-early10-lf-safe.yml
           git commit -m "fix(current): preserve bass coherence in Early10 field"
           git push origin HEAD:main
