@@ -341,7 +341,7 @@ mod tests {
             mono_pcm: &pcm,
         };
         assert_eq!(first.stable_id, second.stable_id);
-        assert_ne!(first.omniphony_position(), second.omniphony_position());
+        assert_ne!(first.omniphony_metric_position(), second.omniphony_metric_position());
     }
 
     #[test]
