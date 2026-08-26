@@ -118,12 +118,13 @@ if ($preflight.live_runtime_gate_closed -ne $true -or $preflight.omniphony_not_s
 $generationRoot = [System.IO.Path]::GetFullPath([string]$stage.generation_root)
 $providerDll = [System.IO.Path]::GetFullPath([string]$stage.provider_dll)
 $realtimeDll = [System.IO.Path]::GetFullPath([string]$stage.realtime_dll)
+$activationScript = [System.IO.Path]::GetFullPath([string]$stage.activation_test_script)
 $endpointId = [string]$preflight.physical_endpoint_id
 $control = Join-Path $generationRoot 'OmniphonySpatialProbeCtl.exe'
 $smoke = Join-Path $generationRoot 'OmniphonySpatialProbeSmoke.exe'
 $capture = Join-Path $generationRoot 'CaptureSpatialProviderState.ps1'
 
-foreach ($path in @($providerDll, $realtimeDll, $control, $smoke, $capture)) {
+foreach ($path in @($providerDll, $realtimeDll, $activationScript, $control, $smoke, $capture)) {
     if (-not (Test-PathWithin -Child $path -Parent $generationRoot)) {
         throw "Activation-test path escaped immutable generation: $path"
     }
@@ -133,6 +134,11 @@ foreach ($path in @($providerDll, $realtimeDll, $control, $smoke, $capture)) {
 }
 if ([string]::IsNullOrWhiteSpace($endpointId)) {
     throw 'Preflight report does not identify a physical endpoint.'
+}
+
+$currentScript = [System.IO.Path]::GetFullPath($PSCommandPath)
+if (-not $currentScript.Equals($activationScript, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Activation test must run from the immutable generation script: $activationScript"
 }
 
 $runtimeBefore = Invoke-NativeCaptured -Path $control -Arguments @('runtime-status') -Label 'Initial runtime status'
