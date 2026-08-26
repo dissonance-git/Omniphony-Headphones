@@ -201,4 +201,4 @@ remain ambiguous
 → do not multiply product modes
 ```
 
-The current isolated audible frontier is the **front / center refinement candidate** above. Source/instrument awareness from libaural remains the next larger frontier after the basic geometry/directness behavior is satisfactory.
+Current unresolved perceptual work and frontier are owned by `ROADMAP.md`. This file preserves the listening evidence that can support or reopen those decisions.
