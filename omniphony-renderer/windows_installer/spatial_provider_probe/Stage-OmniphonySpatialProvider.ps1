@@ -120,7 +120,8 @@ $files = @(
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialStereoQueueSmoke.exe'); Name = 'OmniphonySpatialStereoQueueSmoke.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialRawOutputProbe.exe'); Name = 'OmniphonySpatialRawOutputProbe.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialRawOutputSinkProbe.exe'); Name = 'OmniphonySpatialRawOutputSinkProbe.exe' },
-    @{ Source = (Get-RequiredFile $packageRootResolved 'CaptureSpatialProviderState.ps1'); Name = 'CaptureSpatialProviderState.ps1' }
+    @{ Source = (Get-RequiredFile $packageRootResolved 'CaptureSpatialProviderState.ps1'); Name = 'CaptureSpatialProviderState.ps1' },
+    @{ Source = (Get-RequiredFile $packageRootResolved 'Test-OmniphonySpatialProviderActivation.ps1'); Name = 'Test-OmniphonySpatialProviderActivation.ps1' }
 )
 
 foreach ($file in $files) {
