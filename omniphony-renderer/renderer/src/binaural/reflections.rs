@@ -6,16 +6,23 @@
 //! centre, world-fixed walls): each reflection is a delayed, attenuated copy of
 //! the channel signal with independent left/right arrival times and gains.
 //!
-//! The bank deliberately does not run a full HRIR convolution per reflection.
-//! It is a lightweight early-field layer: directional ITD + broadband ILD +
-//! propagation delay + broad frequency-dependent wall / extra-path HF loss.
-//! The direct object still retains the full measured HRTF convolution.
+//! The early room is intentionally hybrid. Side/rear reflections stay on the
+//! cheap directional path (ITD + broadband ILD), while the front wall, ceiling
+//! and floor receive short per-ear HRIR filters. Those three surfaces are the
+//! minimum useful shell for frontal externalization and vertical enclosure, and
+//! keeping their filters to the perceptually critical early 64 taps bounds the
+//! realtime cost instead of multiplying the full 128-tap direct HRTF by six.
+//!
+//! All reflections retain propagation delay plus broad frequency-dependent wall
+//! / extra-path HF loss. The direct object still keeps the full measured HRTF.
 //!
 //! The direct path keeps zero common propagation delay (A/V sync unchanged);
 //! reflection delays are *relative* to the direct path
 //! (`(d_image − d_direct) / c ≥ 0`) plus each reflection direction's per-ear
 //! ITD. The direct/reflected timing and binaural structure therefore change with
 //! source and image direction without turning the room into generic reverb.
+
+use super::hrir::HRIR_LEN;
 
 /// Speed of sound (m/s), matching `itd.rs`.
 const SPEED_OF_SOUND: f32 = 343.0;
@@ -59,6 +66,22 @@ const EXTRA_PATH_HF_DECAY_PER_M: f32 = 0.020;
 
 /// Number of first-order images of a shoebox (one per wall).
 pub const NUM_REFLECTIONS: usize = 6;
+
+/// Full direct HRIRs are 128 taps. Reflections only need the early directional
+/// structure, so the HRTF shell keeps the first 64 taps and energy-normalizes the
+/// truncation. At 48 kHz that is ~1.33 ms, enough to carry pinna/head spectral
+/// structure while halving the per-reflection FIR work.
+const REFLECTION_HRIR_LEN: usize = 64;
+const REFLECTION_ACC_LANES: usize = 8;
+
+/// Image indices are produced as ±X, ±Y, ±Z. +Y is the room's front wall,
+/// +Z the ceiling and -Z the floor. These three surfaces form the bounded HRTF
+/// shell; side and rear reflections retain the existing cheap ITD/ILD path.
+const HRTF_REFLECTION_INDICES: [usize; 3] = [2, 4, 5];
+const HRTF_REFLECTION_COUNT: usize = HRTF_REFLECTION_INDICES.len();
+
+const _: () = assert!(REFLECTION_HRIR_LEN <= HRIR_LEN);
+const _: () = assert!(REFLECTION_HRIR_LEN.is_multiple_of(REFLECTION_ACC_LANES));
 
 /// Mirror `src` (listener-relative metres, listener at the room centre)
 /// across each of the six walls of a `room` (full extents, metres).
@@ -112,6 +135,180 @@ impl Tap {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ReflectionHrtfTag {
+    generation: u32,
+    az_bits: u32,
+    el_bits: u32,
+}
+
+impl ReflectionHrtfTag {
+    #[inline]
+    fn new(generation: u32, az_rad: f32, el_rad: f32) -> Self {
+        Self {
+            generation,
+            az_bits: az_rad.to_bits(),
+            el_bits: el_rad.to_bits(),
+        }
+    }
+}
+
+/// Compact direct-form FIR used only for the selected early-room surfaces.
+/// It mirrors the direct convolver's continuity rules but keeps half the taps.
+struct ReflectionConvolver {
+    hist: [f32; 2 * REFLECTION_HRIR_LEN],
+    pos: usize,
+    rcoeffs: [f32; REFLECTION_HRIR_LEN],
+    initialized: bool,
+    prev_rcoeffs: [f32; REFLECTION_HRIR_LEN],
+    fade_pos: u32,
+    fade_len: u32,
+}
+
+impl ReflectionConvolver {
+    fn new() -> Self {
+        Self {
+            hist: [0.0; 2 * REFLECTION_HRIR_LEN],
+            pos: 0,
+            rcoeffs: [0.0; REFLECTION_HRIR_LEN],
+            initialized: false,
+            prev_rcoeffs: [0.0; REFLECTION_HRIR_LEN],
+            fade_pos: 0,
+            fade_len: 0,
+        }
+    }
+
+    #[inline]
+    fn kernel_is(&self, coeffs: &[f32; REFLECTION_HRIR_LEN]) -> bool {
+        self.rcoeffs.iter().eq(coeffs.iter().rev())
+    }
+
+    fn set_coeffs_smooth(&mut self, coeffs: &[f32; REFLECTION_HRIR_LEN], fade_len: usize) {
+        if !self.initialized || fade_len == 0 {
+            for (dst, &c) in self.rcoeffs.iter_mut().zip(coeffs.iter().rev()) {
+                *dst = c;
+            }
+            self.initialized = true;
+            self.fade_pos = 0;
+            self.fade_len = 0;
+            return;
+        }
+        if self.kernel_is(coeffs) {
+            return;
+        }
+        if self.fade_pos < self.fade_len {
+            let w = self.fade_pos as f32 / self.fade_len as f32;
+            for i in 0..REFLECTION_HRIR_LEN {
+                self.prev_rcoeffs[i] += (self.rcoeffs[i] - self.prev_rcoeffs[i]) * w;
+            }
+        } else {
+            self.prev_rcoeffs.copy_from_slice(&self.rcoeffs);
+        }
+        for (dst, &c) in self.rcoeffs.iter_mut().zip(coeffs.iter().rev()) {
+            *dst = c;
+        }
+        self.fade_pos = 0;
+        self.fade_len = fade_len.min(REFLECTION_HRIR_LEN) as u32;
+    }
+
+    fn reset_runtime_state(&mut self) {
+        self.hist.fill(0.0);
+        self.pos = 0;
+        self.rcoeffs.fill(0.0);
+        self.prev_rcoeffs.fill(0.0);
+        self.initialized = false;
+        self.fade_pos = 0;
+        self.fade_len = 0;
+    }
+
+    #[inline(always)]
+    fn dot(coeffs: &[f32; REFLECTION_HRIR_LEN], win: &[f32]) -> f32 {
+        let mut acc = [0.0f32; REFLECTION_ACC_LANES];
+        for (c, h) in coeffs
+            .chunks_exact(REFLECTION_ACC_LANES)
+            .zip(win.chunks_exact(REFLECTION_ACC_LANES))
+        {
+            for lane in 0..REFLECTION_ACC_LANES {
+                acc[lane] += c[lane] * h[lane];
+            }
+        }
+        acc.iter().sum()
+    }
+
+    #[inline(always)]
+    fn dot2(
+        new_c: &[f32; REFLECTION_HRIR_LEN],
+        old_c: &[f32; REFLECTION_HRIR_LEN],
+        win: &[f32],
+    ) -> (f32, f32) {
+        let mut acc_new = [0.0f32; REFLECTION_ACC_LANES];
+        let mut acc_old = [0.0f32; REFLECTION_ACC_LANES];
+        for ((cn, co), h) in new_c
+            .chunks_exact(REFLECTION_ACC_LANES)
+            .zip(old_c.chunks_exact(REFLECTION_ACC_LANES))
+            .zip(win.chunks_exact(REFLECTION_ACC_LANES))
+        {
+            for lane in 0..REFLECTION_ACC_LANES {
+                let hv = h[lane];
+                acc_new[lane] += cn[lane] * hv;
+                acc_old[lane] += co[lane] * hv;
+            }
+        }
+        (acc_new.iter().sum(), acc_old.iter().sum())
+    }
+
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        if !self.initialized {
+            return x;
+        }
+        self.pos = if self.pos + 1 == REFLECTION_HRIR_LEN {
+            0
+        } else {
+            self.pos + 1
+        };
+        self.hist[self.pos] = x;
+        self.hist[self.pos + REFLECTION_HRIR_LEN] = x;
+        let win = &self.hist[self.pos + 1..self.pos + 1 + REFLECTION_HRIR_LEN];
+
+        if self.fade_pos < self.fade_len {
+            self.fade_pos += 1;
+            let w = self.fade_pos as f32 / self.fade_len as f32;
+            let (new_y, old_y) = Self::dot2(&self.rcoeffs, &self.prev_rcoeffs, win);
+            old_y + (new_y - old_y) * w
+        } else {
+            Self::dot(&self.rcoeffs, win)
+        }
+    }
+}
+
+/// Keep the early 64 taps but preserve the full HRIR's per-ear energy so the
+/// CPU-bound truncation does not accidentally flatten HRTF ILD. The scale cap
+/// prevents pathological files with almost all energy in the discarded tail
+/// from turning a reflection into an unstable gain boost.
+fn compact_hrir(src: &[f32; HRIR_LEN]) -> [f32; REFLECTION_HRIR_LEN] {
+    let full_energy = src.iter().map(|x| x * x).sum::<f32>();
+    let short_energy = src[..REFLECTION_HRIR_LEN]
+        .iter()
+        .map(|x| x * x)
+        .sum::<f32>();
+    let scale = if full_energy > 1e-12 && short_energy > 1e-12 {
+        (full_energy / short_energy).sqrt().clamp(0.5, 2.0)
+    } else {
+        1.0
+    };
+    let mut out = [0.0f32; REFLECTION_HRIR_LEN];
+    for (dst, &x) in out.iter_mut().zip(src.iter()) {
+        *dst = x * scale;
+    }
+    out
+}
+
+#[inline]
+fn hrtf_slot(idx: usize) -> Option<usize> {
+    HRTF_REFLECTION_INDICES.iter().position(|&candidate| candidate == idx)
+}
+
 /// Per-channel reflection bank: one shared ring buffer written once per
 /// sample, read by `NUM_REFLECTIONS × 2` smoothed taps (left/right ear).
 pub struct ReflectionBank {
@@ -121,6 +318,9 @@ pub struct ReflectionBank {
     taps_r: [Tap; NUM_REFLECTIONS],
     sample_rate: u32,
     tone_alpha: f32,
+    hrtf_l: [ReflectionConvolver; HRTF_REFLECTION_COUNT],
+    hrtf_r: [ReflectionConvolver; HRTF_REFLECTION_COUNT],
+    hrtf_tags: [Option<ReflectionHrtfTag>; HRTF_REFLECTION_COUNT],
 }
 
 impl ReflectionBank {
@@ -134,7 +334,55 @@ impl ReflectionBank {
             sample_rate,
             tone_alpha: 1.0
                 - (-std::f32::consts::TAU * REFLECTION_TONE_SPLIT_HZ / sample_rate as f32).exp(),
+            hrtf_l: std::array::from_fn(|_| ReflectionConvolver::new()),
+            hrtf_r: std::array::from_fn(|_| ReflectionConvolver::new()),
+            hrtf_tags: [None; HRTF_REFLECTION_COUNT],
         }
+    }
+
+    /// Whether this wall belongs to the bounded HRTF shell.
+    #[inline]
+    pub fn uses_hrtf(idx: usize) -> bool {
+        hrtf_slot(idx).is_some()
+    }
+
+    /// True when a selected reflection needs a new HRIR kernel for this source
+    /// direction or active HRTF generation. Non-HRTF walls always return false.
+    #[inline]
+    pub fn hrtf_needs_update(
+        &self,
+        idx: usize,
+        generation: u32,
+        az_rad: f32,
+        el_rad: f32,
+    ) -> bool {
+        let Some(slot) = hrtf_slot(idx) else {
+            return false;
+        };
+        self.hrtf_tags[slot] != Some(ReflectionHrtfTag::new(generation, az_rad, el_rad))
+    }
+
+    /// Install/crossfade the short reflection HRIR for one selected wall. The
+    /// caller owns HRTF interpolation and supplies the same active grid used by
+    /// the direct path; this bank only compacts and convolves it.
+    pub fn set_hrtf(
+        &mut self,
+        idx: usize,
+        generation: u32,
+        az_rad: f32,
+        el_rad: f32,
+        left: &[f32; HRIR_LEN],
+        right: &[f32; HRIR_LEN],
+        fade_len: usize,
+    ) {
+        let Some(slot) = hrtf_slot(idx) else {
+            return;
+        };
+        let left = compact_hrir(left);
+        let right = compact_hrir(right);
+        self.hrtf_l[slot].set_coeffs_smooth(&left, fade_len);
+        self.hrtf_r[slot].set_coeffs_smooth(&right, fade_len);
+        self.hrtf_tags[slot] = Some(ReflectionHrtfTag::new(generation, az_rad, el_rad));
     }
 
     /// Backward-compatible full-band target update with the same delay at both
@@ -217,6 +465,10 @@ impl ReflectionBank {
         self.write_pos = 0;
         self.taps_l = Default::default();
         self.taps_r = Default::default();
+        for conv in self.hrtf_l.iter_mut().chain(self.hrtf_r.iter_mut()) {
+            conv.reset_runtime_state();
+        }
+        self.hrtf_tags = [None; HRTF_REFLECTION_COUNT];
     }
 
     /// Write one input sample and return the summed (left, right) reflection
@@ -233,15 +485,21 @@ impl ReflectionBank {
             tl.step();
             let xl = read_frac(&self.ring, cap, self.write_pos, tl.delay);
             tl.tone_state += (xl - tl.tone_state) * self.tone_alpha;
-            let yl = tl.tone_state + tl.hf_gain * (xl - tl.tone_state);
-            l += tl.gain * yl;
+            let yl = tl.gain * (tl.tone_state + tl.hf_gain * (xl - tl.tone_state));
 
             let tr = &mut self.taps_r[i];
             tr.step();
             let xr = read_frac(&self.ring, cap, self.write_pos, tr.delay);
             tr.tone_state += (xr - tr.tone_state) * self.tone_alpha;
-            let yr = tr.tone_state + tr.hf_gain * (xr - tr.tone_state);
-            r += tr.gain * yr;
+            let yr = tr.gain * (tr.tone_state + tr.hf_gain * (xr - tr.tone_state));
+
+            if let Some(slot) = hrtf_slot(i) {
+                l += self.hrtf_l[slot].process(yl);
+                r += self.hrtf_r[slot].process(yr);
+            } else {
+                l += yl;
+                r += yr;
+            }
         }
 
         self.write_pos += 1;
@@ -297,6 +555,16 @@ mod tests {
     }
 
     #[test]
+    fn hrtf_shell_is_front_and_vertical_only() {
+        assert!(!ReflectionBank::uses_hrtf(0));
+        assert!(!ReflectionBank::uses_hrtf(1));
+        assert!(ReflectionBank::uses_hrtf(2));
+        assert!(!ReflectionBank::uses_hrtf(3));
+        assert!(ReflectionBank::uses_hrtf(4));
+        assert!(ReflectionBank::uses_hrtf(5));
+    }
+
+    #[test]
     fn bank_delays_and_attenuates() {
         let mut bank = ReflectionBank::new(48_000);
         bank.set_targets(0, 10.0 / 48_000.0, 0.5, 0.0);
@@ -316,6 +584,29 @@ mod tests {
                 assert!(l.abs() < 1e-3, "leak at {i}: {l}");
             }
         }
+    }
+
+    #[test]
+    fn selected_reflection_hrtf_keeps_ear_specific_filter_timing() {
+        let mut bank = ReflectionBank::new(48_000);
+        bank.set_targets_binaural_toned(2, 0.0, 0.0, 1.0, 1.0, 1.0);
+        let mut left = [0.0f32; HRIR_LEN];
+        let mut right = [0.0f32; HRIR_LEN];
+        left[0] = 1.0;
+        right[3] = 1.0;
+        bank.set_hrtf(2, 1, 0.0, 0.0, &left, &right, 0);
+        for _ in 0..4_000 {
+            bank.process(0.0);
+        }
+
+        let mut outs = Vec::new();
+        outs.push(bank.process(1.0));
+        for _ in 0..8 {
+            outs.push(bank.process(0.0));
+        }
+        assert!((outs[0].0 - 1.0).abs() < 1e-3, "left={:?}", outs[0]);
+        assert!(outs[0].1.abs() < 1e-3, "right arrived early={:?}", outs[0]);
+        assert!((outs[3].1 - 1.0).abs() < 1e-3, "right={:?}", outs[3]);
     }
 
     #[test]
