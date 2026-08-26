@@ -323,7 +323,7 @@ WAVEFORMATEXTENSIBLE SevenOneFloat48k() {
     return format;
 }
 
-int ProbeSharedSevenOne(IAudioClient* client, const std::wstring& name) {
+int ProbeSharedSevenOne(IAudioClient* client, const std::wstring& name, UINT16 endpointChannels) {
     if (!client) {
         return 8;
     }
@@ -377,7 +377,7 @@ int ProbeSharedSevenOne(IAudioClient* client, const std::wstring& name) {
     }
 
     std::wcout << L"SHARED_7_1_INITIALIZE_OK\t" << name
-               << L"\tRATE=48000\tINPUT_CHANNELS=8\tENDPOINT_CHANNELS=2"
+               << L"\tRATE=48000\tINPUT_CHANNELS=8\tENDPOINT_CHANNELS=" << endpointChannels
                << L"\tBITS=32\tFORMAT=float32\tBUFFER_FRAMES=" << bufferFrames << L'\n';
     return 0;
 }
@@ -451,14 +451,10 @@ int wmain(int argc, wchar_t** argv) {
                                << L"\tTAG=0x" << std::hex << format->wFormatTag << std::dec
                                << L'\n';
                     if (probeSharedSevenOne) {
-                        if (format->nChannels != 2 || format->nSamplesPerSec != 48000 ||
-                            format->wBitsPerSample != 32) {
-                            std::wcerr << L"SHARED_7_1_ENDPOINT_FLOOR_FAILED\t" << name
-                                       << L"\tEXPECTED=stereo-float32-48000\n";
-                            result = 11;
-                        } else {
-                            result = ProbeSharedSevenOne(client.Get(), name);
-                        }
+                        // Endpoint mix geometry belongs to the physical engine and may
+                        // legitimately be multichannel. The contract under test is
+                        // whether Windows accepts authored 7.1 through the Stream SFX.
+                        result = ProbeSharedSevenOne(client.Get(), name, format->nChannels);
                     }
                 }
                 if (format) {

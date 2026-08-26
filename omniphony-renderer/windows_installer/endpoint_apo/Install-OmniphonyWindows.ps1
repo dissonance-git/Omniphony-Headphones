@@ -178,24 +178,25 @@ function Assert-NativeSurroundClientFormat([string]$EndpointName) {
         throw 'Native-surround client probe returned no endpoint MIX_FORMAT_OK record.'
     }
     $mixMatch = [regex]::Match($mixLine, '(?:^|\t)CHANNELS=(\d+)(?:\t|$)')
-    if (-not $mixMatch.Success -or [int]$mixMatch.Groups[1].Value -ne 2) {
-        throw "Native-surround client probe did not preserve the physical stereo endpoint mix: $mixLine"
+    if (-not $mixMatch.Success -or [int]$mixMatch.Groups[1].Value -lt 1) {
+        throw "Native-surround client probe did not expose a valid endpoint mix width: $mixLine"
     }
+    $endpointChannels = [int]$mixMatch.Groups[1].Value
 
     $clientLine = $probe.Lines | Where-Object { $_.StartsWith("SHARED_7_1_INITIALIZE_OK`t") } | Select-Object -First 1
     if (-not $clientLine) {
         throw "Native-surround client probe did not prove 7.1 shared-stream initialization. output=$($probe.Lines -join ' | ')"
     }
 
-    Write-Host 'NATIVE_SURROUND_CLIENT_FORMAT_OK INPUT_CHANNELS=8 ENDPOINT_CHANNELS=2 RATE=48000 BITS=32'
+    Write-Host "NATIVE_SURROUND_CLIENT_FORMAT_OK INPUT_CHANNELS=8 ENDPOINT_CHANNELS=$endpointChannels RATE=48000 BITS=32"
 }
 
-function Assert-StereoRollbackMixFormat([string]$EndpointName) {
+function Assert-RollbackMixFormat([string]$EndpointName) {
     $channels = Get-MixChannelCount $EndpointName
-    if ($channels -ne 2) {
-        throw "Stereo Current rollback did not restore the two-channel mix. observed_channels=$channels"
+    if ($channels -lt 1) {
+        throw "Rollback endpoint mix probe returned an invalid channel count. observed_channels=$channels"
     }
-    Write-Host 'STEREO_ROLLBACK_MIX_FORMAT_OK CHANNELS=2'
+    Write-Host "ROLLBACK_MIX_FORMAT_OK CHANNELS=$channels"
 }
 
 function Register-NativeApo {
@@ -230,8 +231,8 @@ function Assert-ApoCtlIdDispatch {
     Write-Host 'APO_CTL_ID_DISPATCH_OK 1'
 }
 
-# Establish the proven stereo Current endpoint first. This is the rollback floor
-# and owns the endpoint backup plus AudioDG compatibility state.
+# Establish the compatibility baseline first. It owns the endpoint backup and
+# AudioDG compatibility state; the physical endpoint keeps its native mix geometry.
 & $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG
 
 # The baseline script owns and closes the first transcript section. Append the
@@ -304,11 +305,11 @@ try {
     Restart-AudioGraph
     Wait-EndpointActive $endpointId
 
-    # GetMixFormat remains the physical/shared engine mix and should stay stereo.
-    # The Windows 11 preferred-format contract is upstream of that mix. Prove the
-    # real capability by constructing an exact 7.1 float32 shared client stream;
-    # successful Initialize means the graph builder accepted authored 7.1 while
-    # retaining a stereo endpoint for the DAC.
+    # GetMixFormat remains the physical/shared engine mix and is endpoint-owned;
+    # it may legitimately be multichannel. The preferred-format contract is upstream
+    # of that mix. Prove the real capability by constructing an exact 7.1 float32
+    # shared client stream; successful Initialize means the graph builder accepted
+    # authored 7.1 through Omniphony's Stream SFX.
     Assert-NativeSurroundClientFormat $endpointName
 
     if (Test-Path -LiteralPath $legacyStreamBackupPath) {
@@ -316,7 +317,7 @@ try {
     }
 
     Write-Host 'OMNIPHONY_WINDOWS_INSTALL_OK 1'
-    Write-Host 'AUDIO_INGRESS windows-client-input=7.1 endpoint-mix=stereo multichannel=authored-speaker-bed output=binaural-stereo'
+    Write-Host 'AUDIO_INGRESS windows-client-input=7.1 endpoint-mix=endpoint-native multichannel=authored-speaker-bed output=binaural-stereo'
     Write-Host 'NATIVE_SURROUND_SFX 1'
     Write-Host 'NATIVE_SURROUND_EFX 0'
     Write-Host 'OMNIPHONY_INSTALL_STAGE native-surround-active'
@@ -337,7 +338,7 @@ catch {
             if ($LASTEXITCODE -ne 0) { throw "Could not restore stereo Current endpoint APO: $LASTEXITCODE" }
             Restart-AudioGraph
             Wait-EndpointActive $endpointId
-            Assert-StereoRollbackMixFormat $endpointName
+            Assert-RollbackMixFormat $endpointName
         }
 
         if ($nativeRegistered) {
