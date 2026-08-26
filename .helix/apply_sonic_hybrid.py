@@ -34,9 +34,8 @@ volatile LONG g_factoryLocks = 0;
 //   Spatial Sound ON  -> preserve the authored stream here; Windows Spatial
 //                        Sound renders first and the stereo-only Omniphony EFX
 //                        may then provide the post-spatial Current enclosure.
-// The endpoint handed to APOInitSystemEffects2/3 is the final device in the
-// collection. Query only the ACTIVE spatial format so a stale/default provider
-// selection does not bypass Omniphony while Spatial Sound is actually off.
+// Query only the ACTIVE spatial format so a remembered/default provider does
+// not bypass Omniphony while Spatial Sound is actually off.
 bool ExternalSpatialRendererActive(UINT32 dataSize, BYTE* data) noexcept {
     if (!data) return false;
 
@@ -122,26 +121,14 @@ text = replace_once(
     'system effects QI',
 )
 
+# Reuse the already-tested RAW identity implementation for external Spatial
+# Sound. This keeps the actual processing code single-path and avoids editing
+# each preferred-format / format-support / realtime bypass branch separately.
 text = replace_once(
     text,
     '        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);',
-    '''        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);\n        externalSpatialBypass_ = !rawBypass_ && ExternalSpatialRendererActive(dataSize, data);''',
+    '''        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW) ||\n                     ExternalSpatialRendererActive(dataSize, data);''',
     'initialize ownership',
-)
-
-# Every existing rawBypass_ branch is also the safe same-format identity path
-# for an active external spatial renderer. Keep the flags distinct so future
-# diagnostics can tell actual RAW apart from Sonic/Dolby/DTS ownership.
-text = text.replace('if (rawBypass_) {', 'if (rawBypass_ || externalSpatialBypass_) {')
-text = text.replace('(rawBypass_\n                ? IsRawBypassPair', '((rawBypass_ || externalSpatialBypass_)\n                ? IsRawBypassPair')
-# Close the extra parenthesis introduced in the conditional expression above.
-text = text.replace(': IsSupportedFormatPair(inputFormat, outputFormat));', ': IsSupportedFormatPair(inputFormat, outputFormat));')
-
-text = replace_once(
-    text,
-    '''    bool rawBypass_ = false;\n    IUnknown* outer_ = nullptr;''',
-    '''    bool rawBypass_ = false;\n    bool externalSpatialBypass_ = false;\n    IUnknown* outer_ = nullptr;''',
-    'ownership member',
 )
 
 source.write_text(text, encoding='utf-8', newline='\n')
