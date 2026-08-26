@@ -217,18 +217,14 @@ impl WindowsSpatialObjectPipeline {
 
         for object in &directional_static {
             let position = object
-                .omniphony_position()
+                .omniphony_metric_position()
                 .ok_or_else(|| format!("static object {:?} lost position", object.role))?;
             let source_id = static_source_id(object.role);
             self.sources.push(SourceSceneEvidence {
                 lane_kind: SourceLaneKind::DrySource,
                 source_id,
                 persistent_part_id: Some(source_id),
-                authored_position: Some([
-                    position[0] as f64,
-                    position[1] as f64,
-                    position[2] as f64,
-                ]),
+                authored_position: Some(position),
                 confidence: 1.0,
                 ..SourceSceneEvidence::default()
             });
@@ -237,16 +233,12 @@ impl WindowsSpatialObjectPipeline {
         }
 
         for object in &ordered_dynamic {
-            let position = object.omniphony_position();
+            let position = object.omniphony_metric_position();
             self.sources.push(SourceSceneEvidence {
                 lane_kind: SourceLaneKind::DrySource,
                 source_id: object.stable_id,
                 persistent_part_id: Some(object.stable_id),
-                authored_position: Some([
-                    position[0] as f64,
-                    position[1] as f64,
-                    position[2] as f64,
-                ]),
+                authored_position: Some(position),
                 confidence: 1.0,
                 ..SourceSceneEvidence::default()
             });
