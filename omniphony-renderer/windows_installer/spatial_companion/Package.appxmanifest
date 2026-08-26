@@ -63,7 +63,10 @@
           EntryPoint="OmniphonySpatialLicenseService.SpatialLicenseService">
           <uap:AppService Name="OmniphonySpatialLicense" />
         </uap:Extension>
-        <uap5:Extension Category="windows.appExecutionAlias">
+        <uap5:Extension
+          Category="windows.appExecutionAlias"
+          Executable="OmniphonySpatialCompanion.exe"
+          EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias>
             <uap5:ExecutionAlias Alias="OmniphonySpatialCompanion.exe" />
           </uap5:AppExecutionAlias>
