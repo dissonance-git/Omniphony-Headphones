@@ -12,7 +12,7 @@
 //! feed once the system-instantiation experiment succeeds.
 
 use bridge_api::RChannelLabel;
-use renderer::authored_scene::MetricPosition;
+use scene_contract::authored_scene::MetricPosition;
 
 // Keep the already-landed Windows semantic contract as the single source of
 // truth while provider activation is still experimental. If that experiment
