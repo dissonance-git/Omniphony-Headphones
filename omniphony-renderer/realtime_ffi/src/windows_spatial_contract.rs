@@ -243,13 +243,13 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn windows_metric_geometry_preserves_radial_distance() {
         let position = WindowsSpatialPosition::new(3.0, 0.0, -4.0);
         assert_eq!(position.to_omniphony_metric_xyz(), [3.0, 4.0, 0.0]);
         assert_eq!(position.radial_distance_m(), 5.0);
     }
 
+    #[test]
     fn dynamic_object_keeps_identity_while_position_moves() {
         let pcm = [0.25, -0.25];
         let first = WindowsDynamicObject {
@@ -288,6 +288,10 @@ mod tests {
             windows_position: Some(WindowsSpatialPosition::new(0.6, -0.7, 0.8)),
             mono_pcm: &pcm,
         };
-        assert_eq!(object.omniphony_metric_position(), Some([0.6, -0.8, -0.7]));
+        let position = object.omniphony_metric_position().expect("directional static position");
+        let expected = [0.6_f64, -0.8, -0.7];
+        for (actual, expected) in position.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1.0e-6, "{actual} != {expected}");
+        }
     }
 }
