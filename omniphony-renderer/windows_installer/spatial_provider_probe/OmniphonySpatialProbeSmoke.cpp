@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -60,8 +61,11 @@ bool IsExpectedObjectFormat(const WAVEFORMATEX* format) noexcept {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 2 || !argv[1] || !*argv[1]) {
-        std::wcerr << L"usage: OmniphonySpatialProbeSmoke <OmniphonySpatialProbe.dll>\n";
+    const bool expectRuntime =
+        argc == 3 && argv[2] && std::wstring(argv[2]) == L"--expect-runtime";
+    if ((argc != 2 && !expectRuntime) || !argv[1] || !*argv[1]) {
+        std::wcerr
+            << L"usage: OmniphonySpatialProbeSmoke <OmniphonySpatialProbe.dll> [--expect-runtime]\n";
         return 2;
     }
 
@@ -189,21 +193,94 @@ int wmain(int argc, wchar_t** argv) {
 
     hr = spatial->IsSpatialAudioStreamAvailable(
         __uuidof(ISpatialAudioObjectRenderStream), nullptr);
-    if (hr != SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE) {
-        spatial->Release();
-        FreeLibrary(module);
-        return Fail(L"IsSpatialAudioStreamAvailable expected unavailable", hr);
-    }
 
-    void* stream = reinterpret_cast<void*>(1);
-    hr = spatial->ActivateSpatialAudioStream(
-        nullptr,
-        __uuidof(ISpatialAudioObjectRenderStream),
-        &stream);
-    if (hr != SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE || stream != nullptr) {
-        spatial->Release();
-        FreeLibrary(module);
-        return Fail(L"ActivateSpatialAudioStream expected unavailable", hr);
+    if (!expectRuntime) {
+        if (hr != SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE) {
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"IsSpatialAudioStreamAvailable expected unavailable", hr);
+        }
+
+        void* stream = reinterpret_cast<void*>(1);
+        hr = spatial->ActivateSpatialAudioStream(
+            nullptr,
+            __uuidof(ISpatialAudioObjectRenderStream),
+            &stream);
+        if (hr != SPTLAUDCLNT_E_STREAM_NOT_AVAILABLE || stream != nullptr) {
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"ActivateSpatialAudioStream expected unavailable", hr);
+        }
+    } else {
+        if (FAILED(hr)) {
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"IsSpatialAudioStreamAvailable expected available", hr);
+        }
+
+        HANDLE eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!eventHandle) {
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"CreateEventW", HRESULT_FROM_WIN32(GetLastError()));
+        }
+
+        WAVEFORMATEX activationFormat{};
+        activationFormat.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+        activationFormat.nChannels = 1;
+        activationFormat.nSamplesPerSec = 48'000;
+        activationFormat.wBitsPerSample = 32;
+        activationFormat.nBlockAlign = sizeof(float);
+        activationFormat.nAvgBytesPerSec = 48'000 * sizeof(float);
+
+        SpatialAudioObjectRenderStreamActivationParams params{};
+        params.ObjectFormat = &activationFormat;
+        params.StaticObjectTypeMask = AudioObjectType_FrontLeft;
+        params.MinDynamicObjectCount = 1;
+        params.MaxDynamicObjectCount = 2;
+        params.Category = AudioCategory_GameEffects;
+        params.EventHandle = eventHandle;
+        params.NotifyObject = nullptr;
+
+        PROPVARIANT activation{};
+        PropVariantInit(&activation);
+        activation.vt = VT_BLOB;
+        activation.blob.cbSize = sizeof(params);
+        activation.blob.pBlobData = reinterpret_cast<BYTE*>(&params);
+
+        ISpatialAudioObjectRenderStream* stream = nullptr;
+        hr = spatial->ActivateSpatialAudioStream(
+            &activation,
+            __uuidof(ISpatialAudioObjectRenderStream),
+            reinterpret_cast<void**>(&stream));
+        if (FAILED(hr) || !stream) {
+            CloseHandle(eventHandle);
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"ActivateSpatialAudioStream expected runtime stream", hr);
+        }
+
+        UINT32 availableDynamic = 0;
+        hr = stream->GetAvailableDynamicObjectCount(&availableDynamic);
+        if (FAILED(hr) || availableDynamic != 2) {
+            stream->Release();
+            CloseHandle(eventHandle);
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"GetAvailableDynamicObjectCount(runtime)", FAILED(hr) ? hr : E_FAIL);
+        }
+
+        // Deliberately do not Start(). This smoke proves provider availability,
+        // activation, exact-endpoint RAW initialization, and stopped-stream
+        // reset without producing physical audio.
+        hr = stream->Reset();
+        stream->Release();
+        CloseHandle(eventHandle);
+        if (FAILED(hr)) {
+            spatial->Release();
+            FreeLibrary(module);
+            return Fail(L"Reset(runtime stream)", hr);
+        }
     }
 
     spatial->Release();
@@ -214,7 +291,9 @@ int wmain(int argc, wchar_t** argv) {
     std::wcout << L"SPATIAL_PROVIDER_STATIC_8_1_4_4_OK 1\n";
     std::wcout << L"SPATIAL_PROVIDER_OBJECT_FORMAT FLOAT32_48000_MONO\n";
     std::wcout << L"SPATIAL_PROVIDER_MAX_DYNAMIC_OBJECTS " << kExpectedDynamicObjects << L"\n";
-    std::wcout << L"SPATIAL_PROVIDER_STREAM_AVAILABLE 0\n";
+    std::wcout << L"SPATIAL_PROVIDER_STREAM_AVAILABLE " << (expectRuntime ? 1 : 0) << L"\n";
+    std::wcout << L"SPATIAL_PROVIDER_RUNTIME_ACTIVATION_OK " << (expectRuntime ? 1 : 0) << L"\n";
+    std::wcout << L"SPATIAL_PROVIDER_RUNTIME_STREAM_STARTED 0\n";
     std::wcout << L"SPATIAL_PROVIDER_CAPABILITY_SMOKE_OK 1\n";
     return 0;
 }
