@@ -19,6 +19,8 @@ class OmniphonySpatialObjectQuantumTransport {
 public:
     virtual ~OmniphonySpatialObjectQuantumTransport() = default;
 
+    virtual HRESULT Reset() noexcept = 0;
+
     virtual HRESULT Process(
         const float* staticInputPlanar,
         const OmniphonySpatialDynamicObjectDescriptor* dynamicObjects,
