@@ -647,32 +647,64 @@ impl BinauralRenderer {
                     // Relative to the direct path so the direct sound keeps
                     // zero common propagation latency (A/V sync unchanged).
                     let rel_delay_s = (d_img - dist_m).max(0.0) / c_sound;
-                    // Head-relative image direction. The cheap reflection bank
-                    // carries both broadband ILD and analytic ITD, while the
-                    // direct object retains full HRIR convolution.
+                    // Head-relative image direction. Every wall retains the
+                    // analytic reflection ITD. The front/vertical HRTF shell
+                    // additionally receives the active HRIR grid, while the
+                    // remaining walls keep the existing cheap broadband ILD.
                     let ih = head_pose.rotate([img[0] as f64, img[1] as f64, img[2] as f64]);
                     let ix = ih[0] as f32;
                     let iy = ih[1] as f32;
                     let iz = ih[2] as f32;
                     let inorm = (ix * ix + iy * iy + iz * iz).sqrt().max(1e-6);
-                    let lat = (ix / inorm).clamp(-1.0, 1.0);
                     let img_az = ix.atan2(iy);
                     let img_horiz = (ix * ix + iy * iy).sqrt();
                     let img_el = iz.atan2(img_horiz);
                     let (refl_itd_l, refl_itd_r) =
                         itd::ear_delays_seconds(img_az, img_el, head_radius_m);
-                    const SHADOW: f32 = 0.5;
-                    let g_r = ((1.0 + SHADOW * lat) / (1.0 + SHADOW)).sqrt();
-                    let g_l = ((1.0 - SHADOW * lat) / (1.0 + SHADOW)).sqrt();
                     let g_dist = (REF_DISTANCE_M / d_img).clamp(0.0, MAX_DISTANCE_GAIN);
                     let g = reflections.level.clamp(0.0, 1.0) * g_dist;
-                    bank.set_targets_binaural(
-                        i,
-                        rel_delay_s + refl_itd_l,
-                        rel_delay_s + refl_itd_r,
-                        g * g_l,
-                        g * g_r,
-                    );
+
+                    if ReflectionBank::uses_hrtf(i) {
+                        if bank.hrtf_needs_update(i, self.hrir_generation, img_az, img_el) {
+                            let reflection_dir = self.hrir.quantize_direction(
+                                img_az.to_degrees(),
+                                img_el.to_degrees(),
+                                None,
+                            );
+                            self.hrir.at_key(reflection_dir, &mut self.hrir_scratch);
+                            bank.set_hrtf(
+                                i,
+                                self.hrir_generation,
+                                img_az,
+                                img_el,
+                                &self.hrir_scratch.left,
+                                &self.hrir_scratch.right,
+                                sample_length.min(HRIR_LEN),
+                            );
+                        }
+                        // The HRIR already carries directional ILD/head shadow.
+                        // Keep one scalar wall/distance gain so it is not counted
+                        // twice. Analytic ITD remains separate, matching direct.
+                        bank.set_targets_binaural(
+                            i,
+                            rel_delay_s + refl_itd_l,
+                            rel_delay_s + refl_itd_r,
+                            g,
+                            g,
+                        );
+                    } else {
+                        let lat = (ix / inorm).clamp(-1.0, 1.0);
+                        const SHADOW: f32 = 0.5;
+                        let g_r = ((1.0 + SHADOW * lat) / (1.0 + SHADOW)).sqrt();
+                        let g_l = ((1.0 - SHADOW * lat) / (1.0 + SHADOW)).sqrt();
+                        bank.set_targets_binaural(
+                            i,
+                            rel_delay_s + refl_itd_l,
+                            rel_delay_s + refl_itd_r,
+                            g * g_l,
+                            g * g_r,
+                        );
+                    }
                 }
             } else if dsp.refl.is_some() {
                 // Drop the bank when disabled — the ring is the big allocation.
