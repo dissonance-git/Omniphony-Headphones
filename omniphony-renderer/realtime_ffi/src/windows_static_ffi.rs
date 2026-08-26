@@ -5,7 +5,7 @@
 //! reads delayed stereo from another ring. A dedicated worker owns
 //! `WindowsStaticObjectPipeline` and therefore the existing Omniphony renderer.
 
-use crate::windows_object_scene::WindowsStaticObjectPipeline;
+use crate::windows_objects_scene::WindowsSpatialObjectPipeline;
 use crate::windows_spatial_contract::{
     WindowsSpatialPosition, WindowsStaticObject, WindowsStaticObjectRole,
 };
@@ -42,29 +42,6 @@ struct StaticDescriptor {
     position: Option<WindowsSpatialPosition>,
 }
 
-fn role_from_index(index: u32) -> Option<WindowsStaticObjectRole> {
-    Some(match index {
-        0 => WindowsStaticObjectRole::FrontLeft,
-        1 => WindowsStaticObjectRole::FrontRight,
-        2 => WindowsStaticObjectRole::FrontCenter,
-        3 => WindowsStaticObjectRole::LowFrequency,
-        4 => WindowsStaticObjectRole::SideLeft,
-        5 => WindowsStaticObjectRole::SideRight,
-        6 => WindowsStaticObjectRole::BackLeft,
-        7 => WindowsStaticObjectRole::BackRight,
-        8 => WindowsStaticObjectRole::BackCenter,
-        9 => WindowsStaticObjectRole::TopFrontLeft,
-        10 => WindowsStaticObjectRole::TopFrontRight,
-        11 => WindowsStaticObjectRole::TopBackLeft,
-        12 => WindowsStaticObjectRole::TopBackRight,
-        13 => WindowsStaticObjectRole::BottomFrontLeft,
-        14 => WindowsStaticObjectRole::BottomFrontRight,
-        15 => WindowsStaticObjectRole::BottomBackLeft,
-        16 => WindowsStaticObjectRole::BottomBackRight,
-        _ => return None,
-    })
-}
-
 fn copy_descriptors(
     input: &[OmniphonySpatialStaticObjectDescriptor],
 ) -> Result<Vec<StaticDescriptor>, String> {
@@ -75,7 +52,7 @@ fn copy_descriptors(
     let mut seen = [false; 17];
     let mut out = Vec::with_capacity(input.len());
     for descriptor in input {
-        let role = role_from_index(descriptor.role)
+        let role = WindowsStaticObjectRole::from_canonical_scene_index(descriptor.role)
             .ok_or_else(|| format!("invalid static object role {}", descriptor.role))?;
         let index = role.canonical_scene_index();
         if seen[index] {
@@ -209,7 +186,7 @@ impl AsyncStaticObjects {
         let worker = thread::Builder::new()
             .name("omniphony-spatial-static".to_string())
             .spawn(move || {
-                let mut pipeline = match WindowsStaticObjectPipeline::new(sample_rate_hz) {
+                let mut pipeline = match WindowsSpatialObjectPipeline::new(sample_rate_hz) {
                     Ok(pipeline) => {
                         let _ = init_tx.send(Ok(()));
                         pipeline
@@ -246,7 +223,8 @@ impl AsyncStaticObjects {
                             });
                         }
 
-                        match pipeline.process(&objects) {
+                        objects.sort_by_key(|object| object.role.canonical_scene_index());
+                        match pipeline.process(&objects, &[]) {
                             Ok(rendered) => rendered,
                             Err(_) => {
                                 failed_worker.store(true, Ordering::Release);
@@ -511,10 +489,15 @@ mod tests {
     #[test]
     fn canonical_role_indices_are_total_and_bounded() {
         for index in 0..17 {
-            assert_eq!(role_from_index(index).unwrap().canonical_scene_index(), index as usize);
+            assert_eq!(
+                WindowsStaticObjectRole::from_canonical_scene_index(index)
+                    .unwrap()
+                    .canonical_scene_index(),
+                index as usize
+            );
         }
-        assert!(role_from_index(17).is_none());
-        assert!(role_from_index(u32::MAX).is_none());
+        assert!(WindowsStaticObjectRole::from_canonical_scene_index(17).is_none());
+        assert!(WindowsStaticObjectRole::from_canonical_scene_index(u32::MAX).is_none());
     }
 
     #[test]
