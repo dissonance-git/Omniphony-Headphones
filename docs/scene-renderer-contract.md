@@ -69,6 +69,8 @@ Do not demote a dynamic object to a fixed speaker lane merely to simplify routin
 
 A stream may contain fixed channels, dynamic objects, or both.
 
+When a host supplies listener-relative metric geometry, preserve metric XYZ and its radial magnitude as source truth. Direction and radial distance are separate authored facts. Do not normalize a metric object onto a unit shell and later pretend its original distance can be recovered.
+
 ## 4. There is no global “spatial mode”
 
 Object presence is a live source fact, not a rendering mode that reinterprets unrelated material.
@@ -135,6 +137,10 @@ lifetime / EOS
 ```
 
 Declarations are cached and replaced on declared changes/reset. Timed events retain source timing and are not quantized merely for callback convenience.
+
+The portable authored-object timeline uses sample spans rather than callback numbers. A motion segment owns stable object identity, a half-open sample interval, and start/end metric XYZ. Interpolation is defined on that sample interval so splitting the same audio into different host callbacks cannot redefine the trajectory.
+
+Adapter-specific metadata may be less expressive than this canonical form. Such adapters must make their interpolation convention explicit rather than silently turning one position update per callback into the scene's timing law.
 
 ## 8. Rich source truth outranks inference
 
@@ -268,6 +274,8 @@ Spatial scale may not dissolve the groove floor.
 Authored object motion remains source truth. Presentation smoothing may make transitions artifact-free but may not freeze or invent authored trajectories.
 
 Head tracking modifies listener-relative rendering, not source authority. World-stable head-tracked rendering is a renderer/listener transform layered after source semantics.
+
+Head tracking is optional capability, not a prerequisite for the default listening path. If publicly advertised, it must consume the same authored scene and metric geometry rather than introducing a second scene model.
 
 ## 16. Validation lanes
 
