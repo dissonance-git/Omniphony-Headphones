@@ -1,0 +1,59 @@
+name: Helix early directional apply
+
+on:
+  push:
+    paths:
+      - ".helix/apply_early_directional.py"
+      - ".github/workflows/helix-early-directional-apply.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply bounded early-direction patch
+        run: python .helix/apply_early_directional.py
+
+      - name: Format affected Rust package
+        working-directory: omniphony-renderer
+        run: cargo fmt -p orender_engine
+
+      - name: Verify patch scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only | sort)
+          printf '%s\n' "${changed[@]}"
+          expected=$'omniphony-renderer/orender_engine/src/music_early_reflections.rs\nomniphony-renderer/orender_engine/src/music_support.rs'
+          actual="$(printf '%s\n' "${changed[@]}")"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "unexpected patch scope"
+            exit 1
+          fi
+
+      - name: Test early reflection field
+        working-directory: omniphony-renderer
+        run: cargo test -p orender_engine --lib music_early_reflections
+
+      - name: Test Current support integration
+        working-directory: omniphony-renderer
+        run: cargo test -p orender_engine --lib music_support
+
+      - name: Commit source and remove one-shot helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "helix-ci"
+          git config user.email "helix-ci@users.noreply.github.com"
+          git add omniphony-renderer/orender_engine/src/music_early_reflections.rs
+          git add omniphony-renderer/orender_engine/src/music_support.rs
+          git rm .helix/apply_early_directional.py
+          git rm .github/workflows/helix-early-directional-apply.yml
+          git commit -m "feat(current): cluster early reflection HRTF directions"
+          git push origin HEAD:main
