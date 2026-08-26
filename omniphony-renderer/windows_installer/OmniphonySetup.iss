@@ -51,13 +51,14 @@ Type: filesandordirs; Name: "{app}\support"
 Name: "{commonappdata}\Omniphony"; Permissions: users-modify
 
 [Files]
-; Runtime files are staged only for setup. The Windows installer establishes the
-; proven endpoint baseline, then upgrades to the pre-mix native-surround SFX only
-; after its own lifecycle smoke succeeds. Failure stops without claiming a state
-; restoration that has not been read back and verified.
+; Runtime files are staged only for setup. The adaptive installer promotes
+; Current to exactly one Windows processing slot while preserving the endpoint's
+; pre-install mix geometry. The experimental Spatial Sound provider is shipped
+; only as a diagnostic/support component and is never auto-enabled here.
 Source: "{#PayloadDir}\runtime\*"; DestDir: "{tmp}\OmniphonyAPOPayload"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
 Source: "{#PayloadDir}\support\*"; DestDir: "{app}\support"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "endpoint_apo\Install-OmniphonyWindows.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
+Source: "endpoint_apo\Install-OmniphonyAdaptive.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
+Source: "endpoint_apo\Install-OmniphonyAPO.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "endpoint_apo\Uninstall-OmniphonyWindows.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "endpoint_apo\OmniphonyTray.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
 Source: "endpoint_apo\Restart-OmniphonyAudio.ps1"; DestDir: "{app}\support"; Flags: ignoreversion
@@ -99,17 +100,34 @@ var
   ResultCode: Integer;
   PowerShell: String;
   Params: String;
-  SpatialParams: String;
+  DisableSpatialParams: String;
   SpatialReceipt: String;
 begin
   if CurStep = ssPostInstall then
   begin
     PowerShell := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
 
-    { Establish the proven stereo endpoint baseline first, then swap to pre-mix
-      SFX when the native-surround path validates on this machine. }
+    { Never auto-stack the experimental Omniphony Spatial Sound provider on top
+      of the endpoint/stream APO path. If an older build registered it, remove
+      that registration before selecting the one-and-only render path. }
+    DisableSpatialParams := '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      ExpandConstant('{app}\support\Disable-OmniphonySpatialProvider.ps1') + '"';
+    ResultCode := -1;
+    Exec(PowerShell, DisableSpatialParams, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    SpatialReceipt := ExpandConstant('{commonappdata}\Omniphony\spatial-enable-install.txt');
+    SaveStringToFile(
+      SpatialReceipt,
+      'OMNIPHONY_SPATIAL_AUTO_ENABLE=0'#13#10 +
+      'INSTALL_MODE=single-render-path'#13#10 +
+      'DISABLE_EXIT_CODE=' + IntToStr(ResultCode) + #13#10,
+      False
+    );
+
+    { Preserve the endpoint's existing mix geometry. On multichannel endpoints,
+      promote Current to the stream SFX and remove the stereo-only endpoint EFX
+      so the renderer is never applied twice. }
     Params := '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
-      ExpandConstant('{app}\support\Install-OmniphonyWindows.ps1') +
+      ExpandConstant('{app}\support\Install-OmniphonyAdaptive.ps1') +
       '" -PackageRoot "' + ExpandConstant('{tmp}\OmniphonyAPOPayload') +
       '" -AppRoot "' + ExpandConstant('{app}') + '" -AllowUnprotectedAudioDG';
 
@@ -117,30 +135,7 @@ begin
        (ResultCode <> 0) then
     begin
       RaiseException(
-        'Omniphony could not validate attachment to the current Windows output, so setup stopped without claiming success. Diagnostic log: C:\ProgramData\Omniphony\install-last.log'
-      );
-    end;
-
-    { Spatial Sound is an additive product path. Ask Windows to select the exact
-      Omniphony format GUID headlessly and require readback inside the helper.
-      A Windows ownership/support rejection must not destroy a proven stereo/APO
-      install, so record the result and leave the core product installed. }
-    SpatialParams := '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
-      ExpandConstant('{app}\support\Enable-OmniphonySpatialProvider.ps1') + '"';
-    SpatialReceipt := ExpandConstant('{commonappdata}\Omniphony\spatial-enable-install.txt');
-    ResultCode := -1;
-    if Exec(PowerShell, SpatialParams, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
-       (ResultCode = 0) then
-    begin
-      SaveStringToFile(SpatialReceipt, 'OMNIPHONY_SPATIAL_AUTO_ENABLE=1'#13#10, False);
-    end
-    else
-    begin
-      SaveStringToFile(
-        SpatialReceipt,
-        'OMNIPHONY_SPATIAL_AUTO_ENABLE=0'#13#10 +
-        'EXIT_CODE=' + IntToStr(ResultCode) + #13#10,
-        False
+        'Omniphony could not validate a single processing path on the current Windows output, so setup stopped without claiming success. Diagnostic log: C:\ProgramData\Omniphony\install-last.log'
       );
     end;
   end;
