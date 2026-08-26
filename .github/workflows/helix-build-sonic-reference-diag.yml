@@ -260,18 +260,14 @@ jobs:
           [System.IO.File]::WriteAllText($source, $text, [System.Text.UTF8Encoding]::new($false))
 
           $ps = [System.IO.File]::ReadAllText($installer)
-          $oldVar = "$logPath = Join-Path $stateRoot 'install-last.log'"
-          $newVar = "$logPath = Join-Path $stateRoot 'install-last.log'`r`n$topologyLogPath = Join-Path $stateRoot 'apo-topology.log'"
+          $oldVar = '$logPath = Join-Path $stateRoot ''install-last.log'''
+          $topologyVar = '$topologyLogPath = Join-Path $stateRoot ''apo-topology.log'''
           if (-not $ps.Contains($oldVar)) { throw 'installer log variable anchor drifted' }
-          $ps = $ps.Replace($oldVar, $newVar)
+          $ps = $ps.Replace($oldVar, $oldVar + "`n" + $topologyVar)
 
-          $oldBaseline = @'
-          & $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG
-
-          $transcriptStarted = $false
-          '@.Trim()
-          $newBaseline = @'
-          & $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG
+          $baselineLine = '& $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG'
+          if (-not $ps.Contains($baselineLine)) { throw 'installer baseline anchor drifted' }
+          $traceBlock = @'
 
           try {
               New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
@@ -283,11 +279,8 @@ jobs:
           catch {
               Write-Warning "Could not prepare APO topology trace: $($_.Exception.Message)"
           }
-
-          $transcriptStarted = $false
-          '@.Trim()
-          if (-not $ps.Contains($oldBaseline)) { throw 'installer baseline anchor drifted' }
-          $ps = $ps.Replace($oldBaseline, $newBaseline)
+          '@
+          $ps = $ps.Replace($baselineLine, $baselineLine + $traceBlock)
           [System.IO.File]::WriteAllText($installer, $ps, [System.Text.UTF8Encoding]::new($false))
 
           git diff --check
