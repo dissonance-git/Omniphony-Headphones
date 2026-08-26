@@ -121,6 +121,7 @@ $files = @(
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialRawOutputProbe.exe'); Name = 'OmniphonySpatialRawOutputProbe.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialRawOutputSinkProbe.exe'); Name = 'OmniphonySpatialRawOutputSinkProbe.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'CaptureSpatialProviderState.ps1'); Name = 'CaptureSpatialProviderState.ps1' },
+    @{ Source = (Get-RequiredFile $packageRootResolved 'Preflight-OmniphonySpatialProvider.ps1'); Name = 'Preflight-OmniphonySpatialProvider.ps1' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'Test-OmniphonySpatialProviderActivation.ps1'); Name = 'Test-OmniphonySpatialProviderActivation.ps1' }
 )
 
@@ -232,6 +233,8 @@ $manifest = [ordered]@{
     provider_sha256 = $providerHash
     realtime_dll = (Join-Path $generationRoot 'omniphony_realtime.dll')
     realtime_sha256 = $runtimeHash
+    preflight_script = (Join-Path $generationRoot 'Preflight-OmniphonySpatialProvider.ps1')
+    activation_test_script = (Join-Path $generationRoot 'Test-OmniphonySpatialProviderActivation.ps1')
     object_stream_smoke = (Join-Path $generationRoot 'OmniphonySpatialObjectStreamSmoke.exe')
     object_realtime_smoke = (Join-Path $generationRoot 'OmniphonySpatialObjectRealtimeSmoke.exe')
     stereo_queue_smoke = (Join-Path $generationRoot 'OmniphonySpatialStereoQueueSmoke.exe')
