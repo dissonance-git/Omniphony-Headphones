@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $EncoderPath = 'SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder'
+$ProviderRuntimePath = 'SOFTWARE\Omniphony\SpatialProvider'
 $SpatialEndpointPath = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\SpatialAudioEndpoint'
 $WindowsVersionPath = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
 
@@ -233,6 +234,16 @@ try {
         if ($controlExit -ne 0) {
             throw "OmniphonySpatialProbeCtl list failed with exit code $controlExit"
         }
+
+        $runtimeOutput = & $ControlPath runtime-status 2>&1
+        $runtimeExit = $LASTEXITCODE
+        foreach ($line in @($runtimeOutput)) {
+            Write-Output ("CONTROL_RUNTIME_STATUS`t{0}" -f [string]$line)
+        }
+        Write-Output "CONTROL_RUNTIME_STATUS_EXIT`t$runtimeExit"
+        if ($runtimeExit -ne 0) {
+            throw "OmniphonySpatialProbeCtl runtime-status failed with exit code $runtimeExit"
+        }
     } else {
         Write-JsonRecord -Tag 'CONTROL_LIST' -Payload ([ordered]@{
             status = 'control_not_found'
@@ -242,6 +253,9 @@ try {
 
     Write-Output "REGISTRY_SECTION`tSPATIAL_ENCODER"
     Write-RegistryTree -BaseKey $base -RelativePath $EncoderPath
+
+    Write-Output "REGISTRY_SECTION`tOMNIPHONY_PROVIDER_RUNTIME"
+    Write-RegistryTree -BaseKey $base -RelativePath $ProviderRuntimePath
 
     Write-Output "REGISTRY_SECTION`tSPATIAL_AUDIO_ENDPOINT"
     Write-RegistryTree -BaseKey $base -RelativePath $SpatialEndpointPath
