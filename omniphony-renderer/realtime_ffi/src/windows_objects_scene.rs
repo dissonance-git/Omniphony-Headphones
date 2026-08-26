@@ -345,7 +345,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn dynamic_order_is_canonical_and_persistent_motion_gets_a_quantum_ramp() {
         let pcm = [0.0f32; 8];
         let objects = [
@@ -382,6 +381,7 @@ mod tests {
         assert_eq!(previous.binary_search(&11), Err(2));
     }
 
+    #[test]
     fn dynamic_ids_must_be_unique_inside_one_quantum() {
         let pcm = [0.0f32; 8];
         let object = WindowsDynamicObject {
