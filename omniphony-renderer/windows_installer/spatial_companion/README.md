@@ -16,6 +16,7 @@ This package therefore provides:
 - a Windows Runtime background component that answers the observed license-broker message shape;
 - a packaged CLI that can register the current media-extension package on Windows 11 24H2+, report license/configuration changes, discover the default multimedia render endpoint through Core Audio, inspect endpoint spatial state, and ask Windows to select Omniphony from package identity;
 - a one-command physical ownership verifier;
+- a broker-routing discriminator that can prove whether Windows itself contacted the packaged license AppService during notification or setter execution;
 - a single-file development bootstrapper that carries the signed MSIX and its public test certificate inside one EXE;
 - a development build/signing script and CI artifact.
 
@@ -57,7 +58,7 @@ CI verifies that the MSIX and CER embedded in `OmniphonySpatialSetup.exe` are by
 
 CI still emits the signed development MSIX plus its public development certificate alongside the single EXE so the bundle can be independently inspected. The certificate is disposable and is only for sideload testing.
 
-After package installation, the app execution alias exposes:
+After package installation, the app execution aliases expose:
 
 ```text
 OmniphonySpatialCompanion.exe identity
@@ -66,6 +67,7 @@ OmniphonySpatialCompanion.exe notify
 OmniphonySpatialCompanion.exe status <endpoint-id>
 OmniphonySpatialCompanion.exe select <endpoint-id>
 OmniphonySpatialCompanion.exe verify-default
+OmniphonySpatialBrokerProbeV22.exe
 ```
 
 `identity` must print `PACKAGE_IDENTITY_OK 1`.
@@ -105,3 +107,45 @@ SPATIAL_OWNERSHIP_VERIFY_DEFAULT_OK	1
 If Windows still rejects the package/subtype relationship, the command preserves the exact setter status, including `LicenseNotValidForAudioEndpoint`, and ends without the success bit. That failure remains evidence about the ownership/license boundary rather than being collapsed into a generic setup error.
 
 The earlier explicit commands remain available for diagnosis when the one-command gate fails. Successful MSIX installation, media-extension registration, AppService activation, or endpoint discovery alone is not sufficient.
+
+## V22 Windows-broker routing discriminator
+
+When `verify-default` still returns `LicenseNotValidForAudioEndpoint`, run:
+
+```text
+OmniphonySpatialBrokerProbeV22.exe
+```
+
+V22 deliberately makes **zero AppService requests of its own**. Before touching the Windows spatial APIs it clears a package-local diagnostic breadcrumb written only when `OmniphonySpatialLicenseService` actually receives a request. It then:
+
+```text
+RegisterMediaExtensionPackage
+→ clear broker-request breadcrumb
+→ ReportLicenseChangedAsync
+→ ReportConfigurationChangedAsync
+→ record AppService request count after notification
+→ SetDefaultSpatialAudioFormatAsync on the default multimedia render endpoint
+→ record AppService request count after the setter
+```
+
+The decisive fields are:
+
+```text
+BROKER_V22_WINDOWS_APP_SERVICE_CONTACT_OBSERVED
+BROKER_V22_SETTER_ADDED_APP_SERVICE_REQUEST
+BROKER_V22_LAST_COMMAND
+BROKER_V22_LAST_DEVICE_ID
+BROKER_V22_LAST_MEDIA_CODEC_NAME
+BROKER_V22_LAST_SPATIAL_AUDIO_SUBTYPE
+BROKER_V22_LAST_DEVICE_MATCHES_ENDPOINT
+BROKER_V22_LAST_SUBTYPE_MATCHES_FORMAT
+BROKER_V22_SET_STATUS
+```
+
+Interpret the result narrowly:
+
+- `BROKER_V22_WINDOWS_APP_SERVICE_CONTACT_OBSERVED 0` means our direct AppService self-test was a false friend for this question: Windows never routed the spatial-license operation into Omniphony's broker. The next work belongs in package/media-component discovery or format-owner registration, not in the AppService response payload.
+- contact observed with `BROKER_V22_SETTER_ADDED_APP_SERVICE_REQUEST 1`, matching endpoint and subtype, but setter status 3 means Windows reached the broker for the exact target and still rejected endpoint validity. The next work belongs in the broker response/entitlement semantics after routing.
+- a nonmatching endpoint or subtype exposes the association mismatch directly and becomes the next correction target.
+
+The breadcrumb is diagnostic state only. It does not grant a license, alter the endpoint decision, or convert a failed ownership gate into success.
