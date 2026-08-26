@@ -1,19 +1,12 @@
 # Omniphony for Windows
 
-This document is the canonical **durable Windows product/host contract** for Omniphony.
+This document is the canonical **Windows product, ingress, egress, lifecycle, and installation contract** for Omniphony.
 
-It does **not** own current implementation status, the active engineering frontier, or historical experiments.
-
-- unresolved current work and acceptance gates → `../ROADMAP.md`;
-- executable behavior → `../omniphony-renderer/`, tests, and `.github/`;
-- physical listening evidence → `listening-history.md`;
-- Windows spatial-source semantics → `windows-spatial-input-contract.md`;
-- experimental provider findings → the focused Windows provider research/experiment documents;
-- chronology and former implementations → Git history.
+It does not own current implementation status, experiment history, registry research notes, temporary development transports, or completed diagnostics. Current unresolved gates live in `../ROADMAP.md`; executable behavior lives in code/tests/CI; Git owns chronology.
 
 > **The Windows host may change. The Omniphony renderer and source-authority laws must survive the host.**
 
-## Product boundary
+## 1. Product boundary
 
 Omniphony for Windows is a system-wide spatial renderer for headphones.
 
@@ -21,58 +14,90 @@ The intended user experience is deliberately small:
 
 ```text
 install once
-→ choose / retain the physical headphone endpoint
+→ select/retain physical headphone endpoint
 → Omniphony renders system audio headlessly
-→ optional tray/preferences surface
+→ optional tray/preferences control surface
 → headphones
 ```
 
 Normal product operation should require:
 
 - one installer path;
-- no virtual cable as a user-facing product requirement;
+- no user-facing virtual cable requirement;
 - no loopback host that must remain open;
-- no console or foreground audio-host window;
+- no console/foreground audio-host window;
 - no resident UI process carrying the audio stream;
-- a small control/recovery surface at most;
-- rendering that continues when that UI surface is closed.
+- rendering that continues when the UI closes;
+- ordinary stereo physical output even when richer source geometry exists upstream.
 
-Windows is the first host, not the architecture of Omniphony. A future macOS, Linux, game-engine, XR, or media-player host should reuse the portable scene and renderer contracts without inheriting WASAPI, WDK, registry, endpoint, tray, or Windows-service concepts.
+Windows is the first host, not the architecture of Omniphony.
 
-## One renderer across source types
+## 2. Host/core ownership
 
-Omniphony is not a stereo enhancer plus a separate surround/object renderer. It is one renderer whose behavior becomes more source-authoritative as richer input arrives.
+Windows owns:
+
+```text
+device/session discovery
+Windows audio APIs
+endpoint association
+source ingress
+format translation
+clock/cadence adaptation
+lifecycle and recovery
+transparent physical egress
+installation / update / rollback / uninstall
+Windows UI/service integration
+```
+
+The portable core owns:
+
+```text
+source scene
+source authority
+fixed-channel/object semantics
+presentation state
+spatial rendering
+binaural output
+```
+
+Do not move endpoint identities, registry state, WASAPI concepts, COM lifetime rules, provider registration, tray/service state, or installer state into portable renderer semantics.
+
+## 3. One renderer across Windows source types
 
 ```text
 stereo
-→ preserve the finished master
-→ infer only missing spatial support
+→ preserve finished master
+→ infer only missing support
 
 authored PCM bed
-→ preserve supplied channels / positions
+→ preserve supplied roles
 → infer less
 
-static spatial objects
-→ preserve supplied roles and PCM
+Windows static spatial roles
+→ preserve supplied role + PCM
 
-dynamic objects
-→ preserve identity, PCM, and continuous geometry
+Windows dynamic objects
+→ preserve identity + PCM + continuous geometry
 
-all trustworthy source forms
-→ one Omniphony scene
+all trustworthy forms
+→ canonical Omniphony scene
 → one final binaural render
 → stereo headphones
 ```
 
-> **The richer the source truth, the less Omniphony invents.**
+Already-binaural stereo is different from raw spatial input. When trustworthy provenance says another renderer already produced the final headphone presentation, Omniphony must not blindly virtualize it again.
 
-Already-binaural stereo is not equivalent to raw spatial objects. When reliable provenance says another renderer has already produced the final headphone presentation, Omniphony must not blindly perform a second HRTF virtualization pass.
+## 4. Windows source representations remain distinct
 
-## Source authority
+Conventional shared-mode PCM and Windows Spatial Audio are different ingress representations into the same portable scene.
 
-The Windows adapter must preserve provenance rather than silently reclassify inferred information as authored information.
+### Conventional PCM
 
-The fixed spatial vocabulary is the 17-position **8.1.4.4** static scene:
+Preserve every trustworthy authored channel identity supplied by the host. Missing roles remain missing. Do not synthesize absent roles and label them authored.
+
+### Static Spatial Audio roles
+
+The complete fixed semantic vocabulary is **8.1.4.4 / 17 roles**:
 
 ```text
 horizontal
@@ -85,70 +110,49 @@ lower
 BFL BFR BBL BBR
 ```
 
-Each static lane has one authority state:
+The frame is a semantic vocabulary, not a claim that every source contains all roles.
+
+### Dynamic objects
+
+Dynamic objects remain continuous objects beside the fixed frame. Preserve:
+
+- stable object identity;
+- PCM association;
+- continuous XYZ where supplied;
+- object gain/volume;
+- update timing;
+- lifetime/EOS;
+- other authoritative host metadata that belongs to the source contract.
+
+Do not snap moving objects to static anchors merely for implementation convenience.
+
+## 5. Authority states
+
+Every static role has one source-authority state:
 
 ```text
-AUTHORED  source or host supplied the signal / position
-DERIVED   Omniphony inferred bounded support
+AUTHORED  source/host supplied this signal or position
+DERIVED   Omniphony inferred bounded presentation support
 EMPTY     no trustworthy signal is assigned
 ```
 
-The 17-position scene is a semantic source vocabulary, not a claim that every stream contains seventeen channels.
-
-Dynamic XYZ objects remain continuous objects beside the static scene. Do not snap them to static anchors merely to fit an implementation convenience.
-
 LFE remains semantically distinct from directional sources.
 
-## Portable-core boundary
+The physical endpoint staying stereo does not reduce source authority upstream.
 
-Windows owns host concerns:
+## 6. Conventional PCM and Spatial Audio are separate host seams
 
-```text
-device/session discovery
-Windows audio APIs
-endpoint association
-format translation
-clock/cadence adaptation
-lifecycle and recovery
-installation / update / uninstall
-Windows UI and service integration
-```
+A conventional SFX/APO path may carry stereo and authored multichannel PCM. That does **not** prove raw `ISpatialAudioClient` object interception.
 
-The portable Omniphony core owns:
+A claimed Spatial Audio provider/object path must prove that authored static/dynamic source state reaches Omniphony **before** another headphone renderer collapses it to binaural stereo.
 
-```text
-source scene
-source authority
-channel/object geometry
-presentation state
-spatial rendering
-binaural output
-```
+Opening `ISpatialAudioClient`, compiling a provider, observing registry keys, constructing COM objects, or initializing a probe is not equivalent to receiving another application's authored objects.
 
-Do not move Windows endpoint identities, device names, registry state, WASAPI concepts, COM lifetime rules, or installer state into portable renderer semantics to solve a host problem.
+Do not reconstruct object positions from already-rendered binaural audio and call them native objects.
 
-## Ingress law
+If Windows exposes no supported richer scene seam, preserve that as a boundary rather than fabricating one through process injection, hooks, or a user-visible capture device.
 
-Conventional PCM and Windows Spatial Audio are different ingress representations into the same portable scene.
-
-For conventional PCM, the host must preserve every trustworthy authored channel identity it receives. Missing roles remain missing rather than being synthesized and relabeled as authored.
-
-For Windows Spatial Audio, a claimed object path must prove that the original static/dynamic representation reaches Omniphony **before** another headphone renderer collapses it to binaural stereo.
-
-A valid object ingress preserves, as applicable:
-
-- static role identity;
-- object identity;
-- PCM;
-- continuous coordinates;
-- object volume;
-- update timing;
-- lifetime / end-of-stream semantics;
-- authoritative host metadata.
-
-Opening or probing `ISpatialAudioClient`, observing registry state, constructing a COM object, or compiling a provider is not by itself evidence that another application's authored objects reach Omniphony. Current proof obligations belong in `../ROADMAP.md`.
-
-## Single-render egress law
+## 7. One-render law
 
 Every source may be spatially rendered by Omniphony at most once.
 
@@ -164,99 +168,155 @@ Forbidden:
 ```text
 source
 → Omniphony spatial render
-→ Omniphony spatial render again
+→ Omniphony spatial processing again
 → headphones
 ```
 
-Any Windows egress seam used after Omniphony has already produced final binaural stereo must therefore be demonstrably transparent to Omniphony's own spatial processing.
+This applies equally to ordinary PCM and a future Spatial Sound provider.
 
-The physical endpoint may remain ordinary stereo even when richer source geometry exists upstream.
+## 8. Provider egress must bypass Omniphony's ordinary ingress processing
 
-## Realtime law
+If a Windows Spatial Sound provider has already produced final binaural stereo, that output must not re-enter Omniphony's ordinary stream SFX/stereo inference path.
 
-Windows realtime callbacks must remain bounded and deterministic.
+A RAW shared stereo stream is a preferred Windows candidate because Windows documents RAW processing as bypassing ordinary SFX processing, but RAW capability is not assumed on every endpoint.
 
-They must not perform:
+A provider egress is acceptable only after the exact physical endpoint proves the chosen path is transparent to Omniphony's own ordinary spatial processing.
 
-- filesystem or network I/O;
-- device/session enumeration;
-- model or research-time inference;
-- SOFA/profile parsing;
-- unbounded allocation;
-- renderer graph construction;
-- thread creation;
-- blocking logging;
-- unbounded waits.
+For RAW specifically, treat these as separate evidence states:
 
-Prepare, allocate, discover, validate, and publish state outside the realtime callback. Callback-facing paths use bounded/preallocated state, explicit discontinuity semantics, and observable overflow/underrun behavior.
+```text
+endpoint reports RAW support
+≠ RAW stereo client initializes
+≠ final provider audio reaches physical endpoint
+≠ one-render path is physically verified
+```
 
-If a worker-based renderer is used, the callback boundary must fail safely without turning host scheduling into source-authority or DSP semantics.
+If RAW cannot be created, do not silently route final binaural output through the normal Omniphony SFX. Any fallback must independently prove transparent egress or coordinate a safe explicit bypass.
 
-## Clock and continuity law
+Exclusive-mode ownership is not the default fallback merely because it can avoid SFX; it may interfere with ordinary system audio and must earn its product semantics separately.
 
-Renderer-internal processing quantum and endpoint cadence are separate obligations.
+## 9. Already-binaural policy
 
-The Windows host owns adaptation between them. It must not require a physical endpoint to adopt a renderer-internal block size merely because that size is convenient upstream.
+Three cases remain distinct:
 
-Power cycling, temporary endpoint absence, device restart, sample-rate changes, and audio-service restarts are availability/lifecycle events, not permission to erase product installation state.
+```text
+raw authored scene reaches Omniphony
+→ Omniphony performs final spatial render
 
-A genuinely changed endpoint identity may require reattachment, but temporary absence must remain recoverable.
+another renderer already produced binaural stereo
+→ Omniphony spatial bypass
+→ only separately validated non-spatial correction may remain
 
-## Installation and rollback law
+unknown stereo
+→ conservative deterministic policy
+```
 
-Installation, upgrade, activation, repair, and uninstall are transactions.
+Stereo channel count alone is not sufficient provenance.
 
-Before mutating a working audio graph, Omniphony must retain enough prior state to recover ordinary audio if the richer path fails.
+## 10. Realtime and cadence law
+
+Windows realtime callbacks remain bounded and deterministic and obey `realtime-control-contract.md`.
+
+The host owns adaptation between:
+
+```text
+Windows callback / endpoint cadence
+renderer processing quantum
+worker queue cadence
+physical output cadence
+```
+
+The physical endpoint must not be forced into an internal renderer block size merely because it is convenient upstream.
+
+Overflow, underrun, recovery, mute, drop, and backpressure behavior must be bounded and observable. Continuity-critical processed audio must not be silently discarded.
+
+## 11. Single physical route
+
+A trustworthy listening or product path has exactly one audible route to the physical headphones.
+
+```text
+source
+→ Omniphony
+→ physical endpoint
+```
+
+not:
+
+```text
+source ─────────────→ physical endpoint
+   └→ Omniphony ───→ physical endpoint
+```
+
+Duplicate delayed physical routes can create combing, hollow tone, echo, and false renderer conclusions.
+
+Bypass must also be route-clean: no stale wet tail, duplicate dry path, or old forwarding path may remain audible after the state change.
+
+## 12. Lifecycle and recovery
+
+Power cycling, temporary endpoint absence, default-device changes, audio-service restart, suspend/resume, and format/period changes are host lifecycle events.
+
+They are not permission to erase installation state or source authority.
+
+A genuinely new endpoint identity may require reattachment. Temporary absence should remain recoverable.
+
+Host recovery must not make source semantics depend on callback accidents or stale device generations.
+
+## 13. Installation, activation, and rollback are transactions
+
+Before mutating a working audio graph, retain enough prior state to recover ordinary audio if the richer path fails.
 
 Required properties:
 
 - fail closed before claiming an unproven richer ingress;
-- never leave Windows selected on a provider/path that accepts audio but cannot deliver it;
-- preserve the previous known-good state until the replacement is verified;
-- do not overwrite in-use immutable binaries as an update strategy;
+- never leave Windows selected on a provider/path that cannot render;
+- preserve previous known-good state until replacement is verified;
+- use immutable/versioned deployment generations rather than overwriting in-use binaries;
 - keep machine-specific mutations attributable to Omniphony;
-- restore Omniphony-owned changes on rollback/uninstall;
-- never remove or replace the user's physical audio driver as part of ordinary uninstall.
+- restore Omniphony-owned mutations on rollback/uninstall;
+- never remove/replace the user's physical audio driver during ordinary uninstall;
+- provider selection/deselection and uninstall recovery must be safe even after partial failure.
 
-Signing or DriverStore packaging may change deployment mechanics. It must not create a second renderer architecture or weaken these transaction laws.
+Signing, DriverStore packaging, or deployment mechanics may change. They must not create a second renderer architecture or weaken rollback law.
 
-## UI and profile law
+## 14. UI and profile law
 
 The normal UI is a control surface, not an audio transport.
 
-Closing a tray/preferences process must not stop rendering.
+Closing tray/preferences must not stop rendering.
 
-Public/default tuning and listener-specific tuning are separate authority layers. Hardware EQ, hearing-asymmetry compensation, individualized HRTF selection, comfort level, and other personal settings belong in an explicit profile unless separately generalized and validated.
+Public/default tuning and listener-specific tuning are separate authority layers. Hardware EQ, hearing-asymmetry compensation, individualized HRTF selection, comfort level, and other personal settings belong in explicit calibration/profile state unless separately generalized and validated.
 
 A successful personal configuration is evidence for personalization, not automatic evidence for a public default.
 
-## Evidence and promotion law
+## 15. Capability evidence
 
 Keep these states distinct:
 
 ```text
 source compiles
 ≠ tests pass
-≠ host API negotiates
-≠ endpoint path initializes
-≠ a real application supplies the claimed source representation
-≠ physical headphones receive the intended one-render output
+≠ Windows API negotiates
+≠ endpoint/client path initializes
+≠ provider enumerates/selects
+≠ real application supplies claimed authored representation
+≠ Omniphony receives that representation
+≠ physical endpoint receives one-render output
 ≠ physical listening confirms the percept
 ```
 
 Do not promote Windows capability beyond the strongest boundary actually crossed.
 
-Current implementation status is derived from code, tests, CI, and current physical evidence. Do not recreate a hand-maintained implementation dashboard in this contract.
+Current unresolved proof obligations belong in `../ROADMAP.md`. Once resolved, fold only the durable product consequence here or into executable tests/code. Do not create a provider research archive.
 
-## Stable product target
+## 16. Stable product target
 
-The Windows host should be able to grow upward in source authority without changing Omniphony's identity:
+The Windows host should grow upward in source authority without changing Omniphony's identity:
 
 ```text
 stereo
 → authored surround / height
-→ static spatial objects
+→ static spatial roles
 → dynamic spatial objects
 ```
 
-Each richer source representation should preserve more source truth, require less inference, and converge on the same portable renderer and one final binaural output.
+Each richer representation should preserve more source truth, require less inference, converge on the same portable renderer, and reach the headphones through exactly one final binaural render.
