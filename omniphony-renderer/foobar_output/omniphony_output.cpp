@@ -13,7 +13,8 @@ constexpr GUID kDeviceGuid = {
     0xa7df4e92, 0x91a6, 0x4c8e, {0xa6, 0xcf, 0x7b, 0xe8, 0x5d, 0x8e, 0xc3, 0x01}};
 
 constexpr std::uint32_t kSampleRate = 48'000;
-constexpr std::uint32_t kChannels = 2;
+constexpr std::uint32_t kChannels = 2; // physical binaural endpoint width
+constexpr std::uint32_t kSurroundChannels = 8;
 const char kModuleAnchor = 0;
 
 void ThrowOutputError(HRESULT hr) {
@@ -173,6 +174,158 @@ private:
     ResetFn reset_ = nullptr;
 };
 
+
+class RealtimeNativeBed {
+public:
+    ~RealtimeNativeBed() {
+        close();
+    }
+
+    bool open(
+        std::uint32_t sampleRate,
+        std::uint32_t channels,
+        std::uint32_t channelMask) noexcept {
+        close();
+
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&kModuleAnchor),
+                &self)) {
+            return false;
+        }
+
+        std::array<wchar_t, 32'768> path{};
+        const DWORD length = GetModuleFileNameW(
+            self, path.data(), static_cast<DWORD>(path.size()));
+        if (length == 0 || length >= path.size()) {
+            return false;
+        }
+        std::wstring sibling(path.data(), length);
+        const auto separator = sibling.find_last_of(L"\\/");
+        if (separator == std::wstring::npos) {
+            return false;
+        }
+        sibling.resize(separator + 1);
+        sibling.append(L"omniphony_realtime.dll");
+
+        module_ = LoadLibraryExW(
+            sibling.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (!module_) {
+            return false;
+        }
+
+        abiMajor_ = resolve<AbiFn>("omniphony_realtime_abi_major");
+        abiMinor_ = resolve<AbiFn>("omniphony_realtime_abi_minor");
+        create_ = resolve<CreateFn>("omniphony_native_bed_create");
+        destroy_ = resolve<DestroyFn>("omniphony_native_bed_destroy");
+        process_ = resolve<ProcessFn>("omniphony_native_bed_process_f32");
+        latency_ = resolve<LatencyFn>("omniphony_native_bed_latency_frames");
+        sampleRate_ = resolve<SampleRateFn>("omniphony_native_bed_sample_rate_hz");
+        channels_ = resolve<ChannelsFn>("omniphony_native_bed_channels");
+        channelMask_ = resolve<ChannelMaskFn>("omniphony_native_bed_channel_mask");
+        if (!abiMajor_ || !abiMinor_ || !create_ || !destroy_ || !process_ ||
+            !latency_ || !sampleRate_ || !channels_ || !channelMask_ ||
+            abiMajor_() != OMNIPHONY_REALTIME_ABI_MAJOR ||
+            abiMinor_() < OMNIPHONY_REALTIME_ABI_MINOR) {
+            close();
+            return false;
+        }
+
+        const OmniphonyNativeBedConfig config{sampleRate, channels, channelMask};
+        processor_ = create_(&config);
+        if (!processor_ ||
+            sampleRate_(processor_) != sampleRate ||
+            channels_(processor_) != channels ||
+            channelMask_(processor_) != channelMask) {
+            close();
+            return false;
+        }
+
+        configuredSampleRate_ = sampleRate;
+        configuredChannels_ = channels;
+        configuredChannelMask_ = channelMask;
+        return true;
+    }
+
+    void close() noexcept {
+        if (processor_ && destroy_) {
+            destroy_(processor_);
+        }
+        processor_ = nullptr;
+        abiMajor_ = nullptr;
+        abiMinor_ = nullptr;
+        create_ = nullptr;
+        destroy_ = nullptr;
+        process_ = nullptr;
+        latency_ = nullptr;
+        sampleRate_ = nullptr;
+        channels_ = nullptr;
+        channelMask_ = nullptr;
+        configuredSampleRate_ = 0;
+        configuredChannels_ = 0;
+        configuredChannelMask_ = 0;
+        // The realtime DLL pins itself for detached worker safety. Release only
+        // this host reference; worker lifetime remains owned by the Rust module.
+        if (module_) {
+            FreeLibrary(module_);
+            module_ = nullptr;
+        }
+    }
+
+    bool process(const float* input, float* output, std::size_t frames) noexcept {
+        return processor_ && process_ &&
+            process_(processor_, input, output, frames) == 0;
+    }
+
+    std::size_t latencyFrames() const noexcept {
+        return processor_ && latency_ ? latency_(processor_) : 0;
+    }
+
+    bool reset() noexcept {
+        const auto sampleRate = configuredSampleRate_;
+        const auto channels = configuredChannels_;
+        const auto channelMask = configuredChannelMask_;
+        if (sampleRate == 0 || channels == 0 || channelMask == 0) {
+            return false;
+        }
+        return open(sampleRate, channels, channelMask);
+    }
+
+private:
+    using AbiFn = std::uint32_t (*)();
+    using CreateFn = OmniphonyNativeBedProcessor* (*)(
+        const OmniphonyNativeBedConfig*);
+    using DestroyFn = void (*)(OmniphonyNativeBedProcessor*);
+    using ProcessFn = std::int32_t (*)(
+        OmniphonyNativeBedProcessor*, const float*, float*, std::size_t);
+    using LatencyFn = std::size_t (*)(const OmniphonyNativeBedProcessor*);
+    using SampleRateFn = std::uint32_t (*)(const OmniphonyNativeBedProcessor*);
+    using ChannelsFn = std::uint32_t (*)(const OmniphonyNativeBedProcessor*);
+    using ChannelMaskFn = std::uint32_t (*)(const OmniphonyNativeBedProcessor*);
+
+    template <typename T>
+    T resolve(const char* name) noexcept {
+        return reinterpret_cast<T>(GetProcAddress(module_, name));
+    }
+
+    HMODULE module_ = nullptr;
+    OmniphonyNativeBedProcessor* processor_ = nullptr;
+    AbiFn abiMajor_ = nullptr;
+    AbiFn abiMinor_ = nullptr;
+    CreateFn create_ = nullptr;
+    DestroyFn destroy_ = nullptr;
+    ProcessFn process_ = nullptr;
+    LatencyFn latency_ = nullptr;
+    SampleRateFn sampleRate_ = nullptr;
+    ChannelsFn channels_ = nullptr;
+    ChannelMaskFn channelMask_ = nullptr;
+    std::uint32_t configuredSampleRate_ = 0;
+    std::uint32_t configuredChannels_ = 0;
+    std::uint32_t configuredChannelMask_ = 0;
+};
+
 class OmniphonyOutput : public output_impl {
 public:
     OmniphonyOutput(const GUID&, double bufferLength, bool, t_uint32)
@@ -212,7 +365,9 @@ public:
     static std::uint32_t g_extra_flags() { return 0; }
 
     unsigned get_forced_sample_rate() override { return kSampleRate; }
-    unsigned get_forced_channel_mask() override { return audio_chunk::channel_config_stereo; }
+    // Preserve authored multichannel input. The physical endpoint remains stereo
+    // after Omniphony performs the one final binaural render.
+    unsigned get_forced_channel_mask() override { return 0; }
 
     pfc::eventHandle_t get_trigger_event() override {
         return event_;
@@ -259,12 +414,15 @@ protected:
     }
 
     t_size get_latency_samples() override {
-        if (!client_) return lastWriteUsedSourceSession_ ? 0 : current_.latencyFrames();
+        const std::size_t rendererLatency = lastWriteUsedSourceSession_
+            ? 0u
+            : (inputChannels_ == kSurroundChannels
+                ? nativeBed_.latencyFrames()
+                : current_.latencyFrames());
+        if (!client_) return static_cast<t_size>(rendererLatency);
         UINT32 padding = 0;
         Check(client_->GetCurrentPadding(&padding));
-        const std::size_t renderLatency =
-            lastWriteUsedSourceSession_ ? 0u : current_.latencyFrames();
-        return static_cast<t_size>(padding) + renderLatency;
+        return static_cast<t_size>(padding) + rendererLatency;
     }
 
     void on_flush() override {
@@ -276,15 +434,26 @@ protected:
             Check(client_->Reset());
         }
         omniphony_source_session_flush_output();
-        current_.reset();
+        if (inputChannels_ == kSurroundChannels) {
+            (void)nativeBed_.reset();
+        } else {
+            current_.reset();
+        }
         lastWriteUsedSourceSession_ = false;
         writableFrames_ = bufferFrames_;
         haveWritten_ = false;
     }
 
     void open(const audio_chunk::spec_t& spec) override {
-        if (spec.sampleRate != kSampleRate || spec.chanCount != kChannels ||
-            spec.chanMask != audio_chunk::channel_config_stereo) {
+        const bool stereoInput =
+            spec.sampleRate == kSampleRate &&
+            spec.chanCount == kChannels &&
+            spec.chanMask == audio_chunk::channel_config_stereo;
+        const bool surroundInput =
+            spec.sampleRate == kSampleRate &&
+            spec.chanCount == kSurroundChannels &&
+            spec.chanMask == audio_chunk::channel_config_7point1;
+        if (!stereoInput && !surroundInput) {
             throw exception_output_unsupported_stream_format();
         }
 
@@ -340,19 +509,34 @@ protected:
         Check(client_->GetBufferSize(&bufferFrames_));
         Check(client_->GetService(IID_PPV_ARGS(render_.ReleaseAndGetAddressOf())));
 
-        inputScratch_.assign(static_cast<std::size_t>(bufferFrames_) * kChannels, 0.0f);
+        inputChannels_ = spec.chanCount;
+        inputChannelMask_ = spec.chanMask;
+        inputScratch_.assign(
+            static_cast<std::size_t>(bufferFrames_) * inputChannels_, 0.0f);
         scratch_.assign(static_cast<std::size_t>(bufferFrames_) * kChannels, 0.0f);
         writableFrames_ = bufferFrames_;
-        if (!current_.open(kSampleRate)) {
+
+        current_.close();
+        nativeBed_.close();
+        if (stereoInput) {
+            if (!current_.open(kSampleRate)) {
+                throw exception_output_device_not_found();
+            }
+        } else if (!nativeBed_.open(
+                kSampleRate,
+                static_cast<std::uint32_t>(inputChannels_),
+                static_cast<std::uint32_t>(inputChannelMask_))) {
             throw exception_output_device_not_found();
         }
+
         lastWriteUsedSourceSession_ = false;
         omniphony_source_session_set_output_active(true);
     }
 
     void write(const audio_chunk& data) override {
         const std::size_t frames = data.get_sample_count();
-        if (!render_ || data.get_channels() != kChannels || data.get_srate() != kSampleRate ||
+        if (!render_ || data.get_channels() != inputChannels_ ||
+            data.get_srate() != kSampleRate ||
             frames > writableFrames_ || frames > bufferFrames_) {
             throw exception_io_data();
         }
@@ -361,30 +545,41 @@ protected:
         if (!input && frames != 0) {
             throw exception_io_data();
         }
-        const std::size_t samples = frames * kChannels;
-        for (std::size_t sample = 0; sample < samples; ++sample) {
+        const std::size_t inputSamples = frames * inputChannels_;
+        const std::size_t outputSamples = frames * kChannels;
+        for (std::size_t sample = 0; sample < inputSamples; ++sample) {
             inputScratch_[sample] = static_cast<float>(input[sample]);
         }
 
         float* processed = scratch_.data();
-        const bool usedSourceSession = omniphony_source_session_try_consume(
-            inputScratch_.data(), processed, frames, kSampleRate);
-        if (!usedSourceSession) {
-            // Current did not process source-session blocks. Reset it before the
-            // first ordinary-stereo block after a source scene so stale room or
-            // inference history can never leak across routing modes.
-            if (lastWriteUsedSourceSession_) {
-                current_.reset();
+        bool usedSourceSession = false;
+        if (inputChannels_ == kChannels) {
+            usedSourceSession = omniphony_source_session_try_consume(
+                inputScratch_.data(), processed, frames, kSampleRate);
+            if (!usedSourceSession) {
+                // Current did not process source-session blocks. Reset it before
+                // the first ordinary-stereo block after a source scene so stale
+                // source-scene state can never leak across routing modes.
+                if (lastWriteUsedSourceSession_) {
+                    current_.reset();
+                }
+                if (!current_.process(inputScratch_.data(), processed, frames)) {
+                    std::copy_n(inputScratch_.data(), outputSamples, processed);
+                }
             }
-            if (!current_.process(inputScratch_.data(), processed, frames)) {
-                std::copy_n(inputScratch_.data(), samples, processed);
+        } else {
+            // Authored 7.1 enters the native-bed path directly. The native-bed
+            // worker owns spatial rendering and an aligned safety fold-down, so
+            // this callback still produces one final stereo endpoint stream.
+            if (!nativeBed_.process(inputScratch_.data(), processed, frames)) {
+                throw exception_io_data();
             }
         }
         lastWriteUsedSourceSession_ = usedSourceSession;
 
         const float gain = volumeGain_.load(std::memory_order_acquire);
         if (gain != 1.0f) {
-            for (std::size_t sample = 0; sample < samples; ++sample) {
+            for (std::size_t sample = 0; sample < outputSamples; ++sample) {
                 processed[sample] *= gain;
             }
         }
@@ -395,7 +590,7 @@ protected:
             (void)render_->ReleaseBuffer(0, 0);
             throw exception_io_data();
         }
-        std::memcpy(endpoint, processed, frames * kChannels * sizeof(float));
+        std::memcpy(endpoint, processed, outputSamples * sizeof(float));
         Check(render_->ReleaseBuffer(static_cast<UINT32>(frames), 0));
         writableFrames_ -= static_cast<UINT32>(frames);
         haveWritten_ = true;
@@ -430,6 +625,9 @@ private:
         bufferFrames_ = 0;
         inputScratch_.clear();
         scratch_.clear();
+        inputChannels_ = 0;
+        inputChannelMask_ = 0;
+        nativeBed_.close();
         current_.close();
         render_.Reset();
         client_.Reset();
@@ -448,10 +646,13 @@ private:
     bool lastWriteUsedSourceSession_ = false;
     UINT32 bufferFrames_ = 0;
     UINT32 writableFrames_ = 0;
+    std::size_t inputChannels_ = 0;
+    unsigned inputChannelMask_ = 0;
     std::atomic<float> volumeGain_{1.0f};
     std::vector<float> inputScratch_;
     std::vector<float> scratch_;
     RealtimeCurrent current_;
+    RealtimeNativeBed nativeBed_;
     ComPtr<IMMDevice> device_;
     ComPtr<IAudioClient2> client_;
     ComPtr<IAudioRenderClient> render_;
