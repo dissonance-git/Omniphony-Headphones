@@ -1,0 +1,335 @@
+name: Helix build clean Sonic reference diagnostic
+
+on:
+  push:
+    branches: [helix/sonic-reference-ab]
+    paths:
+      - '.github/workflows/helix-build-sonic-reference-diag.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-build-dispatch:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/sonic-reference-ab
+          fetch-depth: 0
+
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: choco install windowsdriverkit11 -y --no-progress
+
+      - name: Add non-realtime SFX topology trace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:GITHUB_WORKSPACE 'omniphony-renderer\windows_installer\endpoint_apo\OmniphonyStreamAPO.cpp'
+          $installer = Join-Path $env:GITHUB_WORKSPACE 'omniphony-renderer\windows_installer\endpoint_apo\Install-OmniphonyAdaptive.ps1'
+          $text = [System.IO.File]::ReadAllText($source)
+
+          $oldIncludes = @'
+          #include <atomic>
+          #include <cstring>
+          #include <limits>
+          #include <new>
+          #include <string>
+          #include <vector>
+          '@.Trim()
+          $newIncludes = @'
+          #include <atomic>
+          #include <cstdio>
+          #include <cstring>
+          #include <limits>
+          #include <new>
+          #include <string>
+          #include <vector>
+          '@.Trim()
+          if (-not $text.Contains($oldIncludes)) { throw 'include anchor drifted' }
+          $text = $text.Replace($oldIncludes, $newIncludes)
+
+          $anchor = @'
+          HINSTANCE g_module = nullptr;
+          volatile LONG g_factoryLocks = 0;
+
+          bool ReadAudioFormat(IAudioMediaType* mediaType, UNCOMPRESSEDAUDIOFORMAT& format) noexcept {
+          '@.Trim()
+          $replacement = @'
+          HINSTANCE g_module = nullptr;
+          volatile LONG g_factoryLocks = 0;
+
+          constexpr char kTopologyLogPath[] = "C:\\ProgramData\\Omniphony\\apo-topology.log";
+
+          void AppendTopologyLog(const char* eventName, const void* instance, const char* detail) noexcept {
+              if (!eventName || !detail) return;
+              SYSTEMTIME now = {};
+              GetSystemTime(&now);
+              char line[1024] = {};
+              const int count = sprintf_s(
+                  line,
+                  "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ\tPID=%lu\tTID=%lu\tINSTANCE=%p\tEVENT=%s\t%s\r\n",
+                  static_cast<unsigned>(now.wYear),
+                  static_cast<unsigned>(now.wMonth),
+                  static_cast<unsigned>(now.wDay),
+                  static_cast<unsigned>(now.wHour),
+                  static_cast<unsigned>(now.wMinute),
+                  static_cast<unsigned>(now.wSecond),
+                  static_cast<unsigned>(now.wMilliseconds),
+                  static_cast<unsigned long>(GetCurrentProcessId()),
+                  static_cast<unsigned long>(GetCurrentThreadId()),
+                  instance,
+                  eventName,
+                  detail);
+              if (count <= 0) return;
+
+              const HANDLE file = CreateFileA(
+                  kTopologyLogPath,
+                  FILE_APPEND_DATA,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr,
+                  OPEN_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL,
+                  nullptr);
+              if (file == INVALID_HANDLE_VALUE) return;
+              DWORD written = 0;
+              WriteFile(file, line, static_cast<DWORD>(count), &written, nullptr);
+              CloseHandle(file);
+          }
+
+          bool ReadAudioFormat(IAudioMediaType* mediaType, UNCOMPRESSEDAUDIOFORMAT& format) noexcept {
+          '@.Trim()
+          if (-not $text.Contains($anchor)) { throw 'topology helper anchor drifted' }
+          $text = $text.Replace($anchor, $replacement)
+
+          $oldCtor = @'
+              explicit OmniphonyStreamAPO(IUnknown* outer)
+                  : CBaseAudioProcessingObject(registration),
+                    outer_(outer ? outer : reinterpret_cast<IUnknown*>(static_cast<INonDelegatingUnknown*>(this))) {
+                  InterlockedIncrement(&instanceCount);
+              }
+
+              ~OmniphonyStreamAPO() override {
+                  resetProcessing();
+                  InterlockedDecrement(&instanceCount);
+              }
+          '@.Trim()
+          $newCtor = @'
+              explicit OmniphonyStreamAPO(IUnknown* outer)
+                  : CBaseAudioProcessingObject(registration),
+                    outer_(outer ? outer : reinterpret_cast<IUnknown*>(static_cast<INonDelegatingUnknown*>(this))) {
+                  const LONG live = InterlockedIncrement(&instanceCount);
+                  char detail[96] = {};
+                  sprintf_s(detail, "LIVE=%ld", live);
+                  AppendTopologyLog("CONSTRUCT", this, detail);
+              }
+
+              ~OmniphonyStreamAPO() override {
+                  char detail[160] = {};
+                  sprintf_s(
+                      detail,
+                      "CALLS=%llu FRAMES=%llu LIVE_BEFORE=%ld",
+                      static_cast<unsigned long long>(processCalls_.load(std::memory_order_relaxed)),
+                      static_cast<unsigned long long>(processedFrames_.load(std::memory_order_relaxed)),
+                      InterlockedCompareExchange(&instanceCount, 0, 0));
+                  AppendTopologyLog("DESTROY", this, detail);
+                  resetProcessing();
+                  InterlockedDecrement(&instanceCount);
+              }
+          '@.Trim()
+          if (-not $text.Contains($oldCtor)) { throw 'constructor anchor drifted' }
+          $text = $text.Replace($oldCtor, $newCtor)
+
+          $oldInit = @'
+                  rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);
+                  m_bIsInitialized = true;
+                  return S_OK;
+          '@.Trim()
+          $newInit = @'
+                  rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);
+                  char detail[192] = {};
+                  sprintf_s(
+                      detail,
+                      "SIZE=%u RAW=%u MODE=%08lX-%04hX-%04hX",
+                      static_cast<unsigned>(dataSize),
+                      rawBypass_ ? 1u : 0u,
+                      static_cast<unsigned long>(processingMode.Data1),
+                      processingMode.Data2,
+                      processingMode.Data3);
+                  AppendTopologyLog("INITIALIZE", this, detail);
+                  m_bIsInitialized = true;
+                  return S_OK;
+          '@.Trim()
+          if (-not $text.Contains($oldInit)) { throw 'initialize anchor drifted' }
+          $text = $text.Replace($oldInit, $newInit)
+
+          $oldFormat = @'
+                  inputBytesPerFrame_ = static_cast<size_t>(inputChannels_) * sizeof(float);
+                  outputBytesPerFrame_ = static_cast<size_t>(outputChannels_) * sizeof(float);
+
+                  // RAW mode is an identity transform. Do not allocate a worker-facing
+          '@.Trim()
+          $newFormat = @'
+                  inputBytesPerFrame_ = static_cast<size_t>(inputChannels_) * sizeof(float);
+                  outputBytesPerFrame_ = static_cast<size_t>(outputChannels_) * sizeof(float);
+                  processCalls_.store(0, std::memory_order_relaxed);
+                  processedFrames_.store(0, std::memory_order_relaxed);
+                  char detail[256] = {};
+                  sprintf_s(
+                      detail,
+                      "RAW=%u IN_CH=%u OUT_CH=%u RATE=%.0f IN_MASK=0x%08lX OUT_MASK=0x%08lX MAX_FRAMES=%u LIVE=%ld",
+                      rawBypass_ ? 1u : 0u,
+                      static_cast<unsigned>(inputFormat.dwSamplesPerFrame),
+                      static_cast<unsigned>(outputFormat.dwSamplesPerFrame),
+                      static_cast<double>(inputFormat.fFramesPerSecond),
+                      static_cast<unsigned long>(inputFormat.dwChannelMask),
+                      static_cast<unsigned long>(outputFormat.dwChannelMask),
+                      static_cast<unsigned>(inputs[0]->u32MaxFrameCount),
+                      InterlockedCompareExchange(&instanceCount, 0, 0));
+                  AppendTopologyLog("LOCK", this, detail);
+
+                  // RAW mode is an identity transform. Do not allocate a worker-facing
+          '@.Trim()
+          if (-not $text.Contains($oldFormat)) { throw 'lock format anchor drifted' }
+          $text = $text.Replace($oldFormat, $newFormat)
+
+          $oldUnlock = @'
+              HRESULT STDMETHODCALLTYPE UnlockForProcess() override {
+                  resetProcessing();
+                  return CBaseAudioProcessingObject::UnlockForProcess();
+              }
+          '@.Trim()
+          $newUnlock = @'
+              HRESULT STDMETHODCALLTYPE UnlockForProcess() override {
+                  char detail[160] = {};
+                  sprintf_s(
+                      detail,
+                      "CALLS=%llu FRAMES=%llu LIVE=%ld",
+                      static_cast<unsigned long long>(processCalls_.load(std::memory_order_relaxed)),
+                      static_cast<unsigned long long>(processedFrames_.load(std::memory_order_relaxed)),
+                      InterlockedCompareExchange(&instanceCount, 0, 0));
+                  AppendTopologyLog("UNLOCK", this, detail);
+                  resetProcessing();
+                  return CBaseAudioProcessingObject::UnlockForProcess();
+              }
+          '@.Trim()
+          if (-not $text.Contains($oldUnlock)) { throw 'unlock anchor drifted' }
+          $text = $text.Replace($oldUnlock, $newUnlock)
+
+          $oldFrames = @'
+                  auto* input = inputs[0];
+                  auto* output = outputs[0];
+                  const UINT32 frames = input->u32ValidFrameCount;
+                  if (inputBytesPerFrame_ == 0 || outputBytesPerFrame_ == 0) {
+          '@.Trim()
+          $newFrames = @'
+                  auto* input = inputs[0];
+                  auto* output = outputs[0];
+                  const UINT32 frames = input->u32ValidFrameCount;
+                  processCalls_.fetch_add(1, std::memory_order_relaxed);
+                  processedFrames_.fetch_add(frames, std::memory_order_relaxed);
+                  if (inputBytesPerFrame_ == 0 || outputBytesPerFrame_ == 0) {
+          '@.Trim()
+          if (-not $text.Contains($oldFrames)) { throw 'process counter anchor drifted' }
+          $text = $text.Replace($oldFrames, $newFrames)
+
+          $oldMembers = @'
+              std::vector<float> silentInput_;
+              bool rawBypass_ = false;
+              IUnknown* outer_ = nullptr;
+              RealtimeBridge realtime_;
+          '@.Trim()
+          $newMembers = @'
+              std::vector<float> silentInput_;
+              std::atomic<unsigned long long> processCalls_{0};
+              std::atomic<unsigned long long> processedFrames_{0};
+              bool rawBypass_ = false;
+              IUnknown* outer_ = nullptr;
+              RealtimeBridge realtime_;
+          '@.Trim()
+          if (-not $text.Contains($oldMembers)) { throw 'member anchor drifted' }
+          $text = $text.Replace($oldMembers, $newMembers)
+
+          [System.IO.File]::WriteAllText($source, $text, [System.Text.UTF8Encoding]::new($false))
+
+          $ps = [System.IO.File]::ReadAllText($installer)
+          $oldVar = "$logPath = Join-Path $stateRoot 'install-last.log'"
+          $newVar = "$logPath = Join-Path $stateRoot 'install-last.log'`r`n$topologyLogPath = Join-Path $stateRoot 'apo-topology.log'"
+          if (-not $ps.Contains($oldVar)) { throw 'installer log variable anchor drifted' }
+          $ps = $ps.Replace($oldVar, $newVar)
+
+          $oldBaseline = @'
+          & $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG
+
+          $transcriptStarted = $false
+          '@.Trim()
+          $newBaseline = @'
+          & $baselineInstaller -PackageRoot $PackageRoot -AppRoot $AppRoot -AllowUnprotectedAudioDG:$AllowUnprotectedAudioDG
+
+          try {
+              New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+              Set-Content -LiteralPath $topologyLogPath -Value "OMNIPHONY_APO_TOPOLOGY_TRACE`tVERSION=1" -Encoding Ascii
+              & icacls.exe $stateRoot /grant '*S-1-5-19:(RX)' | Out-Null
+              & icacls.exe $topologyLogPath /grant '*S-1-5-19:(M)' | Out-Null
+              Write-Host "APO_TOPOLOGY_TRACE_READY PATH=$topologyLogPath"
+          }
+          catch {
+              Write-Warning "Could not prepare APO topology trace: $($_.Exception.Message)"
+          }
+
+          $transcriptStarted = $false
+          '@.Trim()
+          if (-not $ps.Contains($oldBaseline)) { throw 'installer baseline anchor drifted' }
+          $ps = $ps.Replace($oldBaseline, $newBaseline)
+          [System.IO.File]::WriteAllText($installer, $ps, [System.Text.UTF8Encoding]::new($false))
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'patch produced whitespace errors' }
+
+      - name: Parse PowerShell diagnostic installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $path = Join-Path $env:GITHUB_WORKSPACE 'omniphony-renderer\windows_installer\endpoint_apo\Install-OmniphonyAdaptive.ps1'
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | Format-List | Out-String | Write-Host
+            throw 'PowerShell parse failed'
+          }
+
+      - name: Compile instrumented Stream APO
+        shell: pwsh
+        run: |
+          $src = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\endpoint_apo"
+          $build = "$env:GITHUB_WORKSPACE\build\apo"
+          cmake -S $src -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+          cmake --build $build --config Release --target OmniphonyStreamAPO OmniphonyStreamApoSmoke
+          if ($LASTEXITCODE -ne 0) { throw 'instrumented Stream APO compile failed' }
+
+      - name: Commit diagnostic source
+        shell: pwsh
+        run: |
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp omniphony-renderer/windows_installer/endpoint_apo/Install-OmniphonyAdaptive.ps1
+          git commit -m 'diag(windows): trace Stream APO graph topology'
+          if ($LASTEXITCODE -ne 0) { throw "diagnostic commit failed: $LASTEXITCODE" }
+          git push origin HEAD:helix/sonic-reference-ab
+          if ($LASTEXITCODE -ne 0) { throw "diagnostic push failed: $LASTEXITCODE" }
+
+      - name: Dispatch full Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-installer.yml --ref helix/sonic-reference-ab
+          if ($LASTEXITCODE -ne 0) { throw 'installer dispatch failed' }
