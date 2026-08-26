@@ -99,6 +99,7 @@ jobs:
           if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_STABLE_ID_OK\s+1') { throw 'dynamic stable-ID contract failed' }
           if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_XYZ_PERSISTENCE_OK\s+1') { throw 'dynamic XYZ persistence contract failed' }
           if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_RELEASE_RECLAIM_OK\s+1') { throw 'dynamic release/reclaim contract failed' }
+          if ($objectText -notmatch 'SPATIAL_OBJECT_STREAM_RESET_PROPAGATION_OK\s+1') { throw 'dynamic reset propagation contract failed' }
 
           # Read-only enumeration may legitimately find no third-party providers
           # on a clean GitHub-hosted runner. It must not crash or require elevation.
