@@ -3,8 +3,9 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap5 rescap">
+  IgnorableNamespaces="uap uap5 uap10 rescap">
 
   <Identity
     Name="Omniphony.SpatialCompanion"
@@ -45,7 +46,8 @@
     <Application
       Id="Companion"
       Executable="OmniphonySpatialCompanion.exe"
-      EntryPoint="Windows.FullTrustApplication">
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         DisplayName="Omniphony Spatial Companion"
         Description="Omniphony Spatial Sound ownership and license companion"
@@ -74,7 +76,8 @@
     <Application
       Id="AppServiceProbe"
       Executable="OmniphonySpatialAppServiceProbeV17.exe"
-      EntryPoint="Windows.FullTrustApplication">
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         DisplayName="Omniphony Spatial AppService Probe"
         Description="Omniphony Spatial Sound AppService diagnostic probe"
@@ -93,7 +96,8 @@
     <Application
       Id="BrokerProbe"
       Executable="OmniphonySpatialBrokerProbeV22.exe"
-      EntryPoint="Windows.FullTrustApplication">
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         DisplayName="Omniphony Spatial Broker Probe"
         Description="Omniphony Spatial Sound Windows license-broker correlation probe"
