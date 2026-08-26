@@ -36,6 +36,7 @@ mod validation;
 pub use head_pose::HeadPose;
 pub use tracking::{HeadTracking, HeadTrackingFormat};
 
+use crate::authored_scene::ear_relative_directions;
 use crate::delay_line::DelayLine;
 use crate::live_params::{BinauralReflections, BinauralReverb};
 use convolver::EarConvolver;
@@ -203,7 +204,7 @@ struct ChannelDsp {
     air_coeff: f32,
     /// Exact direction whose HRIR kernels are currently loaded, tagged
     /// with the active grid generation so source swaps cannot reuse stale kernels.
-    last_dir: Option<(u32, DirectionKey)>,
+    last_dir: Option<(u32, DirectionKey, DirectionKey)>,
 }
 
 impl ChannelDsp {
@@ -258,6 +259,7 @@ pub struct BinauralFrameParams {
     pub reflections: BinauralReflections,
     pub reverb: BinauralReverb,
     pub air_absorption: bool,
+    pub near_field_parallax: bool,
 }
 
 /// Owns the per-channel binaural DSP state and the HRIR set; renders all input
@@ -500,6 +502,7 @@ impl BinauralRenderer {
             ref reflections,
             ref reverb,
             air_absorption,
+            near_field_parallax,
         } = *params;
         debug_assert_eq!(out.len(), sample_length * 2);
         if input_channel_count == 0 || sample_length == 0 {
@@ -582,26 +585,59 @@ impl BinauralRenderer {
             let dist_m = (dist_norm * unit_scale_m).max(0.0);
 
             // ITD remains continuous and cheap. HRIR interpolation is much more
-            // expensive, so cache the exact direction that produced the loaded kernels.
-            // `None` means no angular quantisation: unchanged directions are bit-identical
-            // skips, while any real movement still rebuilds exactly as before.
+            // expensive, so cache the exact per-ear directions that produced the
+            // loaded kernels. Default playback uses one listener-centre direction
+            // for both ears. Authored metric objects may instead use the source ray
+            // from each physical ear, following the near-field geometry used by
+            // mature binaural renderers while leaving centre-based playback intact.
             let (itd_l, itd_r) = itd::ear_delays_seconds(az_rad, el_rad, head_radius_m);
-            let dir = (
-                self.hrir_generation,
+            let center_key =
                 self.hrir
-                    .quantize_direction(az_rad.to_degrees(), el_rad.to_degrees(), None),
-            );
+                    .quantize_direction(az_rad.to_degrees(), el_rad.to_degrees(), None);
+            let (left_key, right_key) = if near_field_parallax
+                && dist_m > head_radius_m.max(0.0)
+            {
+                let source_m = [
+                    hp[0] * unit_scale_m as f64,
+                    hp[1] * unit_scale_m as f64,
+                    hp[2] * unit_scale_m as f64,
+                ];
+                let (left_ray, right_ray) =
+                    ear_relative_directions(source_m, head_radius_m.max(0.0) as f64);
+                let angles = |ray: [f64; 3]| {
+                    let x = ray[0] as f32;
+                    let y = ray[1] as f32;
+                    let z = ray[2] as f32;
+                    let az = x.atan2(y);
+                    let el = z.atan2((x * x + y * y).sqrt());
+                    (az.to_degrees(), el.to_degrees())
+                };
+                let (left_az, left_el) = angles(left_ray);
+                let (right_az, right_el) = angles(right_ray);
+                (
+                    self.hrir
+                        .quantize_direction(left_az, left_el, None),
+                    self.hrir
+                        .quantize_direction(right_az, right_el, None),
+                )
+            } else {
+                (center_key, center_key)
+            };
+            let dir = (self.hrir_generation, left_key, right_key);
 
             let rate = self.sample_rate;
             let dsp = self.channels[c].get_or_insert_with(|| ChannelDsp::new(rate));
             if dsp.last_dir != Some(dir) {
-                self.hrir.at_key(dir.1, &mut self.hrir_scratch);
+                self.hrir.at_key(left_key, &mut self.hrir_scratch);
+                let left_hrir = self.hrir_scratch.left;
+                self.hrir.at_key(right_key, &mut self.hrir_scratch);
+                let right_hrir = self.hrir_scratch.right;
                 // Kernel changes (moving object / head) crossfade over the block
                 // — capped at HRIR_LEN samples for large offline blocks — so the
                 // transfer function never jumps at a block boundary (issue #155).
                 let fade = sample_length.min(HRIR_LEN);
-                dsp.conv_l.set_coeffs_smooth(&self.hrir_scratch.left, fade);
-                dsp.conv_r.set_coeffs_smooth(&self.hrir_scratch.right, fade);
+                dsp.conv_l.set_coeffs_smooth(&left_hrir, fade);
+                dsp.conv_r.set_coeffs_smooth(&right_hrir, fade);
                 dsp.last_dir = Some(dir);
             }
             dsp.delay_l.set_target_ms(itd_l * 1000.0, self.sample_rate);
@@ -742,6 +778,7 @@ mod tests {
                 ..Default::default()
             },
             air_absorption: false,
+            near_field_parallax: false,
         }
     }
 
