@@ -82,29 +82,6 @@ impl PacketLayout {
     }
 }
 
-fn role_from_index(index: u32) -> Option<WindowsStaticObjectRole> {
-    Some(match index {
-        0 => WindowsStaticObjectRole::FrontLeft,
-        1 => WindowsStaticObjectRole::FrontRight,
-        2 => WindowsStaticObjectRole::FrontCenter,
-        3 => WindowsStaticObjectRole::LowFrequency,
-        4 => WindowsStaticObjectRole::SideLeft,
-        5 => WindowsStaticObjectRole::SideRight,
-        6 => WindowsStaticObjectRole::BackLeft,
-        7 => WindowsStaticObjectRole::BackRight,
-        8 => WindowsStaticObjectRole::BackCenter,
-        9 => WindowsStaticObjectRole::TopFrontLeft,
-        10 => WindowsStaticObjectRole::TopFrontRight,
-        11 => WindowsStaticObjectRole::TopBackLeft,
-        12 => WindowsStaticObjectRole::TopBackRight,
-        13 => WindowsStaticObjectRole::BottomFrontLeft,
-        14 => WindowsStaticObjectRole::BottomFrontRight,
-        15 => WindowsStaticObjectRole::BottomBackLeft,
-        16 => WindowsStaticObjectRole::BottomBackRight,
-        _ => return None,
-    })
-}
-
 fn copy_static_descriptors(
     input: &[OmniphonySpatialObjectStaticDescriptor],
 ) -> Result<Vec<StaticDescriptor>, String> {
@@ -115,7 +92,7 @@ fn copy_static_descriptors(
     let mut seen = [false; 17];
     let mut out = Vec::with_capacity(input.len());
     for descriptor in input {
-        let role = role_from_index(descriptor.role)
+        let role = WindowsStaticObjectRole::from_canonical_scene_index(descriptor.role)
             .ok_or_else(|| format!("invalid static object role {}", descriptor.role))?;
         let index = role.canonical_scene_index();
         if seen[index] {
