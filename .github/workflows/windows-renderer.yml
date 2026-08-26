@@ -55,6 +55,9 @@ jobs:
       - name: Test portable PCM stream contract
         run: cargo test -p audio_contract
 
+      - name: Test authored scene contract
+        run: cargo test -p scene_contract
+
       - name: Test native-host realtime PCM ABI
         run: cargo test -p realtime_ffi
 

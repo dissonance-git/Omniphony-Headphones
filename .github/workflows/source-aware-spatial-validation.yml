@@ -6,6 +6,7 @@ on:
     paths:
       - "omniphony-renderer/orender_engine/**"
       - "omniphony-renderer/renderer/**"
+      - "omniphony-renderer/scene_contract/**"
       - "omniphony-renderer/source_ffi/**"
       - "omniphony-renderer/realtime_ffi/**"
       - "omniphony-renderer/windows_host/src/spatial_ingress.rs"

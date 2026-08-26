@@ -2,6 +2,7 @@
 members = [
     "renderer",
     "audio_contract",
+    "scene_contract",
     "audio_input",
     "audio_output",
     "sys",

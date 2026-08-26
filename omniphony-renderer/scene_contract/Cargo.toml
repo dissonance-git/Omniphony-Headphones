@@ -1,0 +1,11 @@
+[package]
+name = "scene_contract"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+license = "GPL-3.0-or-later"
+description = "OS-neutral authored scene, metric geometry, and stable source-slot contract for Omniphony"
+repository = "https://github.com/dissonance-git/Omniphony-Headphones"
+publish = false
+
+[dependencies]
