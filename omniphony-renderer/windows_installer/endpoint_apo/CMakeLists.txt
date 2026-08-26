@@ -28,14 +28,14 @@ set_target_properties(OmniphonyAPO PROPERTIES PREFIX "" OUTPUT_NAME "OmniphonyAP
 # multichannel beds use the native-bed ABI and emerge as binaural stereo before
 # the endpoint mixer. Samples-per-frame is intentionally allowed to differ.
 add_library(OmniphonyStreamAPO SHARED
-    OmniphonyStreamAPO.cpp
+    OmniphonyStreamAPOExternalSpatial.cpp
     OmniphonyStreamAPO.def
 )
 target_compile_features(OmniphonyStreamAPO PRIVATE cxx_std_17)
 target_compile_definitions(OmniphonyStreamAPO PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(OmniphonyStreamAPO PRIVATE /W4 /WX /permissive-)
 target_include_directories(OmniphonyStreamAPO PRIVATE "${OMNIPHONY_REALTIME_INCLUDE}")
-target_link_libraries(OmniphonyStreamAPO PRIVATE ole32 uuid advapi32 audioeng AudioBaseProcessingObjectV140 legacy_stdio_definitions audiomediatypecrt)
+target_link_libraries(OmniphonyStreamAPO PRIVATE ole32 uuid advapi32 audioeng AudioBaseProcessingObjectV140 legacy_stdio_definitions audiomediatypecrt windowsapp)
 target_link_options(OmniphonyStreamAPO PRIVATE /MANIFEST:NO)
 set_target_properties(OmniphonyStreamAPO PROPERTIES PREFIX "" OUTPUT_NAME "OmniphonyStreamAPO")
 
