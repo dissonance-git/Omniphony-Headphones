@@ -15,9 +15,9 @@
 //!
 //! The transient-aware excitation in this file is intentionally narrower than
 //! transient separation or transient reshaping. Each support lane compares a
-//! fast energy envelope with a slow energy envelope. A sharp positive rise may
-//! briefly increase only that lane's signal entering the early-reflection delay
-//! bank. The protected stereo master, coherent foundation, primary support
+//! fast low-frequency energy envelope with a slow low-frequency envelope. A
+//! kick/bass-like positive rise may briefly increase only the low-passed part of
+//! that lane entering the early-reflection delay bank. The protected stereo master, coherent foundation, primary support
 //! render and late room field are not modified here.
 
 use anyhow::bail;
@@ -26,6 +26,9 @@ use renderer::binaural::hrir::{HRIR_LEN, HrirPair, HrirSet};
 use renderer::binaural::itd;
 use renderer::binaural::measured::MeasuredHrirData;
 use renderer::binaural::reflections::{self, NUM_REFLECTIONS};
+use renderer::crossover::filter::{
+    BiquadCoeffs, BiquadState, biquad, butterworth2_hp, butterworth2_lp,
+};
 use renderer::delay_line::DelayLine;
 use renderer::music_field::MUSIC_FIELD_CHANNELS;
 
@@ -63,6 +66,13 @@ const TRANSIENT_MIN_RMS: f32 = 0.0015;
 const TRANSIENT_RISE_THRESHOLD: f32 = 0.75;
 const TRANSIENT_FULL_RISE: f32 = 3.0;
 const TRANSIENT_MAX_GAIN_DB: f32 = 2.5;
+const TRANSIENT_DETECT_LP_HZ: f32 = 180.0;
+const TRANSIENT_MIN_LF_SHARE: f32 = 0.35;
+
+// Keep the bigger 10-direction bubble where directional HRTF structure is
+// useful, but do not let ten independent ITDs comb the early-reflection bass.
+// This matches the retained late enclosure's low-frequency coherence boundary.
+const EARLY_COHERENCE_XOVER_HZ: f32 = 300.0;
 
 // The legacy analytic reflection panner has total L+R power 4/3 for a unit
 // reflection gain (`SHADOW=0.5`, denominator 1.5). A diffuse-normalized HRIR
@@ -132,6 +142,10 @@ struct TransientReflectionExciter {
     slow_alpha: f32,
     release_coeff: f32,
     max_delta: f32,
+    low_state_1: f32,
+    low_state_2: f32,
+    low_alpha: f32,
+    broadband_fast_energy: f32,
 }
 
 impl TransientReflectionExciter {
@@ -147,16 +161,35 @@ impl TransientReflectionExciter {
             slow_alpha: one_pole_alpha(TRANSIENT_SLOW_MS),
             release_coeff: (-1.0 / (0.001 * TRANSIENT_RELEASE_MS.max(0.01) * sample_rate_hz)).exp(),
             max_delta: 10.0_f32.powf(TRANSIENT_MAX_GAIN_DB / 20.0) - 1.0,
+            low_state_1: 0.0,
+            low_state_2: 0.0,
+            low_alpha: 1.0
+                - (-std::f32::consts::TAU * TRANSIENT_DETECT_LP_HZ / sample_rate_hz).exp(),
+            broadband_fast_energy: 0.0,
         }
     }
 
     #[inline]
-    fn gain(&mut self, input: f32) -> f32 {
-        let energy = input * input;
+    fn process(&mut self, input: f32) -> f32 {
+        // Detect and boost only low-frequency transient content. The old law
+        // multiplied the full-band reflection input whenever any lane's onset
+        // detector fired, which could make vocals/snares pull the apparent room
+        // level around. Two one-pole stages keep bright attacks out of the
+        // detector while remaining cheap and causal.
+        self.low_state_1 += self.low_alpha * (input - self.low_state_1);
+        self.low_state_2 += self.low_alpha * (self.low_state_1 - self.low_state_2);
+        let low = self.low_state_2;
+        let energy = low * low;
         self.fast_energy += self.fast_alpha * (energy - self.fast_energy);
         self.slow_energy += self.slow_alpha * (energy - self.slow_energy);
+        let broadband_energy = input * input;
+        self.broadband_fast_energy +=
+            self.fast_alpha * (broadband_energy - self.broadband_fast_energy);
+        let lf_share = self.fast_energy / (self.broadband_fast_energy + 1.0e-9);
 
-        let target = if self.fast_energy > TRANSIENT_MIN_RMS * TRANSIENT_MIN_RMS {
+        let target = if self.fast_energy > TRANSIENT_MIN_RMS * TRANSIENT_MIN_RMS
+            && lf_share >= TRANSIENT_MIN_LF_SHARE
+        {
             let positive_rise = (self.fast_energy - self.slow_energy).max(0.0);
             let relative_rise = positive_rise / (self.slow_energy + 1.0e-9);
             ((relative_rise - TRANSIENT_RISE_THRESHOLD)
@@ -172,6 +205,14 @@ impl TransientReflectionExciter {
             self.envelope *= self.release_coeff;
         }
 
+        // Exact identity when the transient envelope is closed. When open,
+        // only the detector's low-passed component is added, so broadband
+        // program level does not breathe with the room excitation.
+        input + low * self.max_delta * self.envelope
+    }
+
+    #[cfg(test)]
+    fn current_gain(&self) -> f32 {
         1.0 + self.max_delta * self.envelope
     }
 }
@@ -295,7 +336,7 @@ impl SourceReflectionBank {
         // Only the signal entering the early-reflection delay bank receives the
         // transient-dependent gain. The direct master and primary spatial field
         // are outside this module and therefore cannot be reshaped by it.
-        input *= self.transient.gain(input);
+        input = self.transient.process(input);
 
         if self.air_coeff > 0.0 {
             self.air_state += (input - self.air_state) * (1.0 - self.air_coeff);
@@ -323,6 +364,45 @@ impl SourceReflectionBank {
             self.write_pos = 0;
         }
         out
+    }
+}
+
+struct EarlyCoherenceSplit {
+    lp: BiquadCoeffs,
+    hp: BiquadCoeffs,
+    lp1: BiquadState,
+    lp2: BiquadState,
+    hp1: BiquadState,
+    hp2: BiquadState,
+}
+
+impl EarlyCoherenceSplit {
+    fn new(sample_rate_hz: u32) -> Self {
+        Self {
+            lp: butterworth2_lp(EARLY_COHERENCE_XOVER_HZ, sample_rate_hz),
+            hp: butterworth2_hp(EARLY_COHERENCE_XOVER_HZ, sample_rate_hz),
+            lp1: BiquadState::default(),
+            lp2: BiquadState::default(),
+            hp1: BiquadState::default(),
+            hp2: BiquadState::default(),
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, input: f32) -> (f32, f32) {
+        // LR4: two cascaded BW2 sections per branch. LP+HP is magnitude-flat
+        // with a shared all-pass phase rotation, avoiding a crossover bump/dip.
+        let low = biquad(
+            biquad(input, self.lp, &mut self.lp1),
+            self.lp,
+            &mut self.lp2,
+        );
+        let high = biquad(
+            biquad(input, self.hp, &mut self.hp1),
+            self.hp,
+            &mut self.hp2,
+        );
+        (low, high)
     }
 }
 
@@ -518,6 +598,7 @@ pub(crate) struct HrtfEarlyReflectionField {
     sources: Vec<Option<SourceReflectionBank>>,
     routes: Vec<Option<[usize; NUM_REFLECTIONS]>>,
     buses: [HrtfDirectionBus; EARLY_HRTF_BUSES],
+    splits: [EarlyCoherenceSplit; EARLY_HRTF_BUSES],
 }
 
 impl HrtfEarlyReflectionField {
@@ -555,11 +636,14 @@ impl HrtfEarlyReflectionField {
         let buses: [HrtfDirectionBus; EARLY_HRTF_BUSES] = std::array::from_fn(|cluster| {
             HrtfDirectionBus::new(sample_rate_hz, &hrir, directions[cluster])
         });
+        let splits: [EarlyCoherenceSplit; EARLY_HRTF_BUSES] =
+            std::array::from_fn(|_| EarlyCoherenceSplit::new(sample_rate_hz));
 
         Self {
             sources,
             routes,
             buses,
+            splits,
         }
     }
 
@@ -589,11 +673,21 @@ impl HrtfEarlyReflectionField {
                 }
             }
             let o = frame * 2;
-            for (cluster, bus) in self.buses.iter_mut().enumerate() {
-                let (l, r) = bus.process(direction_bus[cluster]);
+            let mut coherent_low = 0.0f32;
+            for cluster in 0..EARLY_HRTF_BUSES {
+                let (low, high) = self.splits[cluster].process(direction_bus[cluster]);
+                coherent_low += low;
+                let (l, r) = self.buses[cluster].process(high);
                 out[o] += l;
                 out[o + 1] += r;
             }
+            // Below the crossover, preserve the reflection timing/envelope but
+            // collapse directional ITD so the early room cannot comb the bass.
+            // sqrt((4/3)/2) is the same total-ear power match used by the HRTF
+            // branch, so this is a coherence change rather than a bass boost.
+            let low_ear = coherent_low * HRTF_POWER_MATCH;
+            out[o] += low_ear;
+            out[o + 1] += low_ear;
         }
         Ok(out)
     }
@@ -812,55 +906,91 @@ mod tests {
     }
 
     #[test]
-    fn transient_exciter_is_bounded_and_returns_to_unity() {
+    fn transient_exciter_is_low_frequency_only_and_returns_to_identity() {
         let mut exciter = TransientReflectionExciter::new(48_000);
         for _ in 0..1_024 {
-            assert!((exciter.gain(0.0) - 1.0).abs() < 1.0e-7);
+            assert_eq!(exciter.process(0.0).to_bits(), 0.0f32.to_bits());
         }
 
-        let peak = exciter.gain(0.5);
+        // A short 70 Hz burst should open the LF transient envelope.
+        for sample in 0..2_400 {
+            let x = (std::f32::consts::TAU * 70.0 * sample as f32 / 48_000.0).sin() * 0.35;
+            let _ = exciter.process(x);
+        }
+        let peak = exciter.current_gain();
         let maximum = 10.0_f32.powf(TRANSIENT_MAX_GAIN_DB / 20.0);
-        assert!(
-            peak > 1.25,
-            "impulse did not excite early room enough: {peak}"
-        );
+        assert!(peak > 1.05, "LF burst did not excite early room: {peak}");
         assert!(
             peak <= maximum + 1.0e-6,
             "transient gain exceeded bound: {peak}"
         );
 
-        let mut settled = peak;
         for _ in 0..4_800 {
-            settled = exciter.gain(0.0);
+            let _ = exciter.process(0.0);
         }
         assert!(
-            settled < 1.01,
-            "transient room gain did not decay: {settled}"
+            exciter.current_gain() < 1.01,
+            "LF transient room gain did not decay: {}",
+            exciter.current_gain()
         );
     }
 
     #[test]
-    fn steady_tone_does_not_sustain_transient_excitation() {
+    fn bright_attack_does_not_pump_the_early_room() {
+        let mut exciter = TransientReflectionExciter::new(48_000);
+        let mut peak = 1.0f32;
+        for sample in 0..2_400 {
+            let x = (std::f32::consts::TAU * 4_000.0 * sample as f32 / 48_000.0).sin() * 0.35;
+            let _ = exciter.process(x);
+            peak = peak.max(exciter.current_gain());
+        }
+        assert!(peak < 1.01, "bright attack pumped early-room level: {peak}");
+    }
+
+    #[test]
+    fn steady_low_tone_does_not_sustain_transient_excitation() {
         let mut exciter = TransientReflectionExciter::new(48_000);
         let mut max_tail = 1.0f32;
         for sample in 0..48_000 {
-            let x = (std::f32::consts::TAU * 1_000.0 * sample as f32 / 48_000.0).sin() * 0.2;
-            let gain = exciter.gain(x);
+            let x = (std::f32::consts::TAU * 80.0 * sample as f32 / 48_000.0).sin() * 0.2;
+            let _ = exciter.process(x);
             if sample > 9_600 {
-                max_tail = max_tail.max(gain);
+                max_tail = max_tail.max(exciter.current_gain());
             }
         }
         assert!(
             max_tail < 1.005,
-            "steady tone kept transient room excitation alive: {max_tail}"
+            "steady bass kept transient room excitation alive: {max_tail}"
         );
     }
 
     #[test]
-    fn sub_threshold_impulse_does_not_excitate_room() {
-        let mut exciter = TransientReflectionExciter::new(48_000);
-        let gain = exciter.gain(0.0001);
-        assert!((gain - 1.0).abs() < 1.0e-7);
+    fn early_coherence_split_sends_bass_low_and_presence_high() {
+        fn branch_rms(freq_hz: f32) -> (f32, f32) {
+            let mut split = EarlyCoherenceSplit::new(48_000);
+            let mut low_energy = 0.0f32;
+            let mut high_energy = 0.0f32;
+            for sample in 0..48_000 {
+                let x = (std::f32::consts::TAU * freq_hz * sample as f32 / 48_000.0).sin();
+                let (low, high) = split.process(x);
+                if sample >= 24_000 {
+                    low_energy += low * low;
+                    high_energy += high * high;
+                }
+            }
+            (low_energy.sqrt(), high_energy.sqrt())
+        }
+
+        let (bass_low, bass_high) = branch_rms(80.0);
+        assert!(
+            bass_low > bass_high * 8.0,
+            "80 Hz leaked into directional branch"
+        );
+        let (presence_low, presence_high) = branch_rms(2_000.0);
+        assert!(
+            presence_high > presence_low * 8.0,
+            "2 kHz leaked into coherent branch"
+        );
     }
 
     #[test]
