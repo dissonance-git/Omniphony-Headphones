@@ -28,7 +28,9 @@ Normal product operation should require:
 - no console/foreground audio-host window;
 - no resident UI process carrying the audio stream;
 - rendering that continues when the UI closes;
-- ordinary stereo physical output even when richer source geometry exists upstream.
+- a final binaural headphone render even when richer source geometry exists upstream;
+- preservation of the selected endpoint's verified baseline mix geometry rather than forcing a project-chosen channel count merely to prove a route;
+- ordinary Current processing that does not depend on Windows Sonic or another Spatial Sound provider being selected.
 
 Windows is the first host, not the architecture of Omniphony.
 
@@ -82,10 +84,12 @@ Windows dynamic objects
 all trustworthy forms
 → canonical Omniphony scene
 → one final binaural render
-→ stereo headphones
+→ headphones
 ```
 
 Already-binaural stereo is different from raw spatial input. When trustworthy provenance says another renderer already produced the final headphone presentation, Omniphony must not blindly virtualize it again.
+
+The conventional PCM Current path is an Omniphony path in its own right. It must remain functional with Windows Spatial Sound disabled. A selected Windows Sonic or other provider is a separate host state and may not be treated as a hidden dependency of ordinary Current rendering.
 
 ## 4. Windows source representations remain distinct
 
@@ -138,7 +142,7 @@ EMPTY     no trustworthy signal is assigned
 
 LFE remains semantically distinct from directional sources.
 
-The physical endpoint staying stereo does not reduce source authority upstream.
+The endpoint's Windows mix geometry does not reduce source authority upstream. A multichannel `GetMixFormat` result is not by itself evidence that Omniphony failed to produce a binaural headphone render.
 
 ## 6. Conventional PCM and Spatial Audio are separate host seams
 
@@ -172,7 +176,9 @@ source
 → headphones
 ```
 
-This applies equally to ordinary PCM and a future Spatial Sound provider.
+For the conventional APO route, successful steady state must not leave both the stream SFX and the stereo EFX processing the same graph. The promoted stream SFX is the ordinary processing route; the EFX is a rollback floor for supported stereo graphs and must be absent from the promoted steady state.
+
+This one-render law applies equally to ordinary PCM and a future Spatial Sound provider.
 
 ## 8. Provider egress must bypass Omniphony's ordinary ingress processing
 
@@ -226,7 +232,7 @@ worker queue cadence
 physical output cadence
 ```
 
-The physical endpoint must not be forced into an internal renderer block size merely because it is convenient upstream.
+The physical endpoint must not be forced into an internal renderer block size or channel-count assumption merely because it is convenient upstream.
 
 Overflow, underrun, recovery, mute, drop, and backpressure behavior must be bounded and observable. Continuity-critical processed audio must not be silently discarded.
 
@@ -249,7 +255,7 @@ source ─────────────→ physical endpoint
 
 Duplicate delayed physical routes can create combing, hollow tone, echo, and false renderer conclusions.
 
-Bypass must also be route-clean: no stale wet tail, duplicate dry path, or old forwarding path may remain audible after the state change.
+Bypass must also be route-clean: no stale wet tail, duplicate dry path, old forwarding path, or simultaneous Omniphony SFX+EFX route may remain audible after the state change.
 
 ## 12. Lifecycle and recovery
 
@@ -270,6 +276,7 @@ Required properties:
 - fail closed before claiming an unproven richer ingress;
 - never leave Windows selected on a provider/path that cannot render;
 - preserve previous known-good state until replacement is verified;
+- snapshot and preserve the selected endpoint's baseline mix geometry rather than requiring a universal stereo floor;
 - use immutable/versioned deployment generations rather than overwriting in-use binaries;
 - keep machine-specific mutations attributable to Omniphony;
 - restore Omniphony-owned mutations on rollback/uninstall;
@@ -277,6 +284,8 @@ Required properties:
 - provider selection/deselection and uninstall recovery must be safe even after partial failure.
 
 Signing, DriverStore packaging, or deployment mechanics may change. They must not create a second renderer architecture or weaken rollback law.
+
+A client-format probe and an endpoint-mix probe answer different questions. A diagnostic that refuses to test a richer client format solely because `GetMixFormat` is multichannel is not evidence that the SFX or renderer is inactive; it is an insufficient diagnostic for that endpoint geometry.
 
 ## 14. UI and profile law
 
@@ -288,7 +297,34 @@ Public/default tuning and listener-specific tuning are separate authority layers
 
 A successful personal configuration is evidence for personalization, not automatic evidence for a public default.
 
-## 15. Capability evidence
+## 15. Conventional APO steady-state evidence
+
+The conventional Windows APO route has several distinct proof layers.
+
+A healthy promoted graph should satisfy the structural invariant:
+
+```text
+stream SFX attached
++ stereo EFX absent
++ system effects enabled
++ selected physical endpoint retained
+```
+
+Registry attachment alone does not prove the Windows audio engine instantiated the processing path. While real playback is active, stronger runtime evidence is:
+
+```text
+AudioDG process exists
+→ OmniphonyStreamAPO.dll is loaded in that AudioDG process
+→ omniphony_realtime.dll is loaded in that AudioDG process
+```
+
+Module presence proves live instantiation/loading, not mathematically that every source sample took the intended transform. Sample-path tests, route-clean physical playback, and listening remain separate evidence layers.
+
+Endpoint geometry is independent evidence. A valid graph may coexist with a stereo or multichannel Windows mix format. Health checks must report the actual geometry and compare it with the preserved baseline rather than declaring any non-stereo mix intrinsically broken.
+
+Ordinary Current rendering must also remain effective with Windows Sonic disabled. Similar listening with Sonic enabled and disabled may support the conclusion that Current is not relying on Sonic, but it does not prove native Windows Spatial Audio object interception or provider integration.
+
+## 16. Capability evidence
 
 Keep these states distinct:
 
@@ -297,6 +333,11 @@ source compiles
 ≠ tests pass
 ≠ Windows API negotiates
 ≠ endpoint/client path initializes
+≠ SFX registry attachment succeeds
+≠ AudioDG instantiates the Stream APO
+≠ AudioDG loads the realtime renderer DLL
+≠ the intended source representation enters that graph
+≠ the intended samples are transformed exactly once
 ≠ provider enumerates/selects
 ≠ real application supplies claimed authored representation
 ≠ Omniphony receives that representation
@@ -308,7 +349,7 @@ Do not promote Windows capability beyond the strongest boundary actually crossed
 
 Current unresolved proof obligations belong in `../ROADMAP.md`. Once resolved, fold only the durable product consequence here or into executable tests/code. Do not create a provider research archive.
 
-## 16. Stable product target
+## 17. Stable product target
 
 The Windows host should grow upward in source authority without changing Omniphony's identity:
 
