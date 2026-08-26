@@ -111,11 +111,26 @@ Level-match where needed, separate localization from tonal preference, separate 
 
 The immediate perceptual problem is frontal depth/externalization, not more frontal quantity.
 
+A dense first-order measured-HRTF late-field projection has earned physical-listening acceptance as the preferred late-enclosure direction, but that accepted candidate is not yet integrated into current `main`. Integrate that retained late-field rule first without changing the protected master, host routing, late-field energy budget, decay behavior, or predelay simply to make the effect more obvious.
+
+After that integration, move the perceptual frontier to the **early field**. The current six final-wall HRTF grouping is too coarse to be treated as the final directional resolution. Increase early-reflection directional resolution while preserving per-tap timing and total reflection power, so improvement comes from better geometry rather than more wet energy.
+
+Immediate sequence:
+
+```text
+integrate accepted continuous first-order late-field projection into main
+→ keep late energy / decay / predelay bounded
+→ replace coarse early HRTF grouping with higher-resolution directional clustering
+→ preserve exact tap timing and power
+→ compare against the accepted baseline
+→ only then revisit second-order share or transient excitation
+```
+
 Investigate bounded front-specific early-field structure, HRTF interaction, direct-to-early/reverberant evidence, binaural coherence, radial-distance cues, near-field behavior, and source extent without sacrificing directness, bass, transients, center solidity, or side/rear envelopment.
 
 Do not buy externalization with indiscriminate late reverb, synthetic width, or another copied wet path.
 
-**Gate:** frontal sources occupy stable external space with useful distance variation while protected musical invariants remain intact.
+**Gate:** `main` carries the accepted continuous late-field baseline, and frontal sources occupy stable external space with useful distance variation while protected musical invariants remain intact and the early field no longer exposes a coarse directional grouping.
 
 ---
 
@@ -170,9 +185,13 @@ Complete unattended-use reliability across:
 - stream/object lifecycle abuse, queue overflow/underrun, worker starvation/recovery;
 - provider selection/deselection, transactional activation, rollback, upgrade, repair, immutable generations, and clean uninstall;
 - release artifact identity, signing/reputation strategy, and transparent elevated behavior;
-- compatibility across stereo players, browsers, communications, authored multichannel, Spatial Audio apps/games, already-binaural media, and relevant processing modes.
+- compatibility across stereo players, browsers, communications, authored multichannel, Spatial Audio apps/games, already-binaural media, and relevant processing modes;
+- diagnostics that preserve and report the endpoint's actual baseline mix geometry rather than treating stereo as a universal health floor;
+- separate proof of SFX registry attachment, AudioDG Stream-APO instantiation, realtime-renderer DLL loading, intended source ingress, and actual once-only sample transformation.
 
-**Gate:** Omniphony can remain installed as ordinary system audio software without requiring the user to nurse the audio graph.
+The current `--shared-7.1` health path must be hardened so a multichannel endpoint mix does not fail merely because the probe assumes `stereo-float32-48000` before testing the client boundary.
+
+**Gate:** Omniphony can remain installed as ordinary system audio software without requiring the user to nurse the audio graph, and its diagnostics distinguish endpoint geometry from live APO/runtime activity instead of collapsing them into one pass/fail assumption.
 
 ---
 
@@ -220,6 +239,8 @@ prove closed-gate physical spatial egress
 → receive dynamic XYZ objects
 → prove a real spatial application/game
 → controlled renderer comparisons
+→ integrate accepted continuous late-field baseline
+→ increase early-field directional resolution
 → finish frontal externalization / distance
 → HRTF personalization + optional head tracking
 → already-binaural policy + Windows hardening
