@@ -1,0 +1,187 @@
+name: Helix apply spatial handoff v2
+
+on:
+  push:
+    branches: [helix/omniphony-endpoint-geometry-fix]
+    paths:
+      - '.github/workflows/helix-apply-spatial-handoff-v2.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply-test-dispatch:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/omniphony-endpoint-geometry-fix
+          fetch-depth: 0
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: choco install windowsdriverkit11 -y --no-progress
+      - name: Apply direct external-spatial handoff
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          root = Path(r"${{ github.workspace }}")
+          source = root / 'omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp'
+          cmake = root / 'omniphony-renderer/windows_installer/endpoint_apo/CMakeLists.txt'
+
+          text = source.read_text(encoding='utf-8')
+
+          def replace_one(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected one match, got {count}')
+              text = text.replace(old, new, 1)
+
+          replace_one(
+              '#include <ksmedia.h>\n',
+              '#include <ksmedia.h>\n#include <mmdeviceapi.h>\n#include <wrl/client.h>\n\n#include <winrt/base.h>\n#include <winrt/Windows.Foundation.h>\n#include <winrt/Windows.Media.Audio.h>\n',
+              'WinRT includes')
+
+          helper = r'''
+          // Windows Spatial Sound is downstream of this pre-mix SFX. When the
+          // user has selected an external spatial renderer (Windows Sonic,
+          // Dolby Atmos for Headphones, DTS Headphone:X, or a provider), that
+          // renderer must receive the authored stream without a first binaural
+          // pass through Omniphony. APOInitSystemEffects2/3 both expose the
+          // exact endpoint as the last item in pDeviceCollection.
+          bool ExternalSpatialRendererSelected(UINT32 dataSize, BYTE* data) noexcept {
+              if (!data) return false;
+
+              IMMDeviceCollection* devices = nullptr;
+              BOOL discoveryOnly = FALSE;
+              if (dataSize == sizeof(APOInitSystemEffects3)) {
+                  auto* init = reinterpret_cast<APOInitSystemEffects3*>(data);
+                  devices = init->pDeviceCollection;
+                  discoveryOnly = init->InitializeForDiscoveryOnly;
+              } else if (dataSize == sizeof(APOInitSystemEffects2)) {
+                  auto* init = reinterpret_cast<APOInitSystemEffects2*>(data);
+                  devices = init->pDeviceCollection;
+                  discoveryOnly = init->InitializeForDiscoveryOnly;
+              } else {
+                  return false;
+              }
+              if (discoveryOnly || !devices) return false;
+
+              try {
+                  UINT count = 0;
+                  if (FAILED(devices->GetCount(&count)) || count == 0) return false;
+
+                  Microsoft::WRL::ComPtr<IMMDevice> endpoint;
+                  if (FAILED(devices->Item(count - 1, endpoint.ReleaseAndGetAddressOf())) || !endpoint) {
+                      return false;
+                  }
+
+                  LPWSTR rawId = nullptr;
+                  if (FAILED(endpoint->GetId(&rawId)) || !rawId) return false;
+                  const winrt::hstring endpointId{rawId};
+                  CoTaskMemFree(rawId);
+
+                  const auto configuration =
+                      winrt::Windows::Media::Audio::SpatialAudioDeviceConfiguration::GetForDeviceId(endpointId);
+                  // DefaultSpatialAudioFormat is the user's selection. Active can
+                  // temporarily differ, so either non-empty value means another
+                  // spatial renderer owns presentation and Omniphony must be identity.
+                  return !configuration.DefaultSpatialAudioFormat().empty() ||
+                         !configuration.ActiveSpatialAudioFormat().empty();
+              } catch (...) {
+                  // Fail toward normal Omniphony rather than failing graph creation.
+                  return false;
+              }
+          }
+          '''.strip('\n')
+
+          replace_one(
+              'HINSTANCE g_module = nullptr;\nvolatile LONG g_factoryLocks = 0;\n',
+              'HINSTANCE g_module = nullptr;\nvolatile LONG g_factoryLocks = 0;\n\n' + helper + '\n',
+              'handoff helper')
+
+          old_raw = '''bool IsRawBypassFormat(const UNCOMPRESSEDAUDIOFORMAT& format) noexcept {
+              return IsFloat32Format(format) && format.dwSamplesPerFrame == 2;
+          }
+          '''.replace('          ', '')
+          new_raw = '''bool IsRawBypassFormat(const UNCOMPRESSEDAUDIOFORMAT& format) noexcept {
+              if (!IsFloat32Format(format) || format.dwSamplesPerFrame == 0 ||
+                  format.dwSamplesPerFrame > 18) {
+                  return false;
+              }
+              return format.dwSamplesPerFrame == 2 || format.dwChannelMask != 0;
+          }
+          '''.replace('          ', '')
+          replace_one(old_raw, new_raw, 'bypass format')
+
+          replace_one(
+              '           input.fFramesPerSecond == output.fFramesPerSecond &&\n           input.dwBytesPerSampleContainer == output.dwBytesPerSampleContainer &&',
+              '           input.fFramesPerSecond == output.fFramesPerSecond &&\n           input.dwSamplesPerFrame == output.dwSamplesPerFrame &&\n           input.dwBytesPerSampleContainer == output.dwBytesPerSampleContainer &&',
+              'bypass pair channel count')
+
+          replace_one(
+              'class OmniphonyStreamAPO final : public CBaseAudioProcessingObject,\n                                 public IAudioSystemEffects,',
+              'class OmniphonyStreamAPO final : public CBaseAudioProcessingObject,\n                                 public IAudioSystemEffects2,',
+              'IAudioSystemEffects2 inheritance')
+
+          replace_one(
+              '} else if (IsEqualIID(riid, __uuidof(IAudioSystemEffects))) {\n            *object = static_cast<IAudioSystemEffects*>(this);',
+              '} else if (IsEqualIID(riid, __uuidof(IAudioSystemEffects)) ||\n                   IsEqualIID(riid, __uuidof(IAudioSystemEffects2))) {\n            *object = static_cast<IAudioSystemEffects2*>(this);',
+              'IAudioSystemEffects2 QI')
+
+          replace_one(
+              '        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW);',
+              '        rawBypass_ = IsEqualGUID(processingMode, AUDIO_SIGNALPROCESSINGMODE_RAW) ||\n                     ExternalSpatialRendererSelected(dataSize, data);',
+              'automatic spatial handoff')
+
+          source.write_text(text, encoding='utf-8', newline='\n')
+
+          cmake_text = cmake.read_text(encoding='utf-8')
+          wrapper = '    OmniphonyStreamAPOExternalSpatial.cpp\n'
+          if cmake_text.count(wrapper) != 1:
+              raise RuntimeError('CMake wrapper source did not match exactly once')
+          cmake_text = cmake_text.replace(wrapper, '    OmniphonyStreamAPO.cpp\n', 1)
+          if 'audiomediatypecrt windowsapp)' not in cmake_text:
+              raise RuntimeError('windowsapp link dependency missing')
+          cmake.write_text(cmake_text, encoding='utf-8', newline='\n')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "source patch failed: $LASTEXITCODE" }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'patch has whitespace errors' }
+          git diff -- omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp omniphony-renderer/windows_installer/endpoint_apo/CMakeLists.txt
+      - name: Compile Stream APO handoff
+        shell: pwsh
+        run: |
+          $src = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\endpoint_apo"
+          $build = "$env:GITHUB_WORKSPACE\build\apo-v2"
+          cmake -S $src -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
+          cmake --build $build --config Release --target OmniphonyStreamAPO --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Stream APO handoff compile failed: $LASTEXITCODE" }
+      - name: Commit tested handoff
+        shell: pwsh
+        run: |
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp omniphony-renderer/windows_installer/endpoint_apo/CMakeLists.txt
+          if (Test-Path omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPOExternalSpatial.cpp) {
+            git rm omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPOExternalSpatial.cpp
+          }
+          git commit -m 'fix(windows): bypass stream SFX for selected spatial sound'
+          if ($LASTEXITCODE -ne 0) { throw "handoff commit failed: $LASTEXITCODE" }
+          git push origin HEAD:helix/omniphony-endpoint-geometry-fix
+          if ($LASTEXITCODE -ne 0) { throw "handoff push failed: $LASTEXITCODE" }
+      - name: Dispatch full Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-installer.yml --repo "${{ github.repository }}" --ref helix/omniphony-endpoint-geometry-fix
+          if ($LASTEXITCODE -ne 0) { throw "installer dispatch failed: $LASTEXITCODE" }
