@@ -1,20 +1,24 @@
 # Baseline 1 spectral frontier
 
-Baseline 1 remains the canonical listening reference:
+> **Evidence status:** preserved historical spectral-frontier snapshot.
+>
+> This file records the measurements, hypotheses, mechanism stack, rollback ladder, and listening questions of the Baseline-1/post-baseline investigation. It does not own the current project frontier, current defaults, or current implementation state. Current unresolved work is owned by `../ROADMAP.md`; executable state is derived from code/tests/CI; later listening evidence is preserved in `listening-history.md`.
+
+Baseline 1 was recorded as the canonical listening reference for this investigation:
 
 ```text
 03dac8bb454444b47353c39f65b58ce82617d731
 ```
 
-The current post-baseline branch deliberately pushes beyond that reference while preserving a clean rollback ladder. The main unresolved perceptual defect motivating this work is intermittent **piercing / fatigue on bright transients**, especially cymbals and already-aggressive mixes.
+The post-baseline branch deliberately pushed beyond that reference while preserving a rollback ladder. The motivating perceptual defect was intermittent **piercing / fatigue on bright transients**, especially cymbals and already-aggressive mixes.
 
-The working hypothesis is no longer "the treble EQ is too high." The evidence supports a renderer-colour / coherence problem that manifests most audibly in the upper spectrum.
+The working hypothesis moved beyond "the treble EQ is too high" toward a renderer-colour / coherence problem that manifested most audibly in the upper spectrum.
 
 ## Measured SAF/KEMAR diffuse fingerprint
 
-`renderer/tests/hrtf_diffuse_spectrum.rs` measures the cos(elevation)-weighted direction-averaged power response of the interpolated embedded SAF/KEMAR HRTF grid.
+`renderer/tests/hrtf_diffuse_spectrum.rs` measured the cos(elevation)-weighted direction-averaged power response of the interpolated embedded SAF/KEMAR HRTF grid.
 
-Relative to 1 kHz, the measured profile is:
+Relative to 1 kHz, the recorded profile was:
 
 ```text
 500 Hz     -0.57 dB
@@ -33,59 +37,49 @@ Relative to 1 kHz, the measured profile is:
 
 Sampled span: **8.10 dB**.
 
-This is not evidence that the KEMAR HRTF should be flattened globally. Directional pinna structure is useful localization information. It does show that broadband HRTF energy normalization and frequency-dependent diffuse-field normalization are different jobs.
+This was not evidence that the KEMAR HRTF should be flattened globally. Directional pinna structure is useful localization information. It did show that broadband HRTF energy normalization and frequency-dependent diffuse-field normalization are different jobs.
 
-In the protected-master topology, the finished stereo recording is already present full-band. The additive spatial branch can therefore impose common HRTF colour a second time. That makes partial support-only compensation a plausible way to improve timbre without EQing or replacing the master.
+In the protected-master topology, the finished stereo recording was already present full-band. The additive spatial branch could therefore impose common HRTF colour again. That made partial support-only compensation a plausible experiment without EQing or replacing the master.
 
-## Literature and implementation convergence
+## External evidence used
 
 ### MPEG-H virtual-loudspeaker binaural rendering
 
-Hyeong-Joo Moon and Young-Cheol Park, **Quality Enhancement of MPEG-H 3DA Binaural Rendering Using a Spectral Compensation Technique** (Electronics, 2022, DOI `10.3390/electronics11091491`) reports comb-filter spectral artifacts in virtual-loudspeaker binaural downmix caused by phase differences among binaural filters. Frequency-dependent spectral compensation improved subjective rendering quality.
+Hyeong-Joo Moon and Young-Cheol Park, **Quality Enhancement of MPEG-H 3DA Binaural Rendering Using a Spectral Compensation Technique** (Electronics, 2022, DOI `10.3390/electronics11091491`) reported spectral artifacts in virtual-loudspeaker binaural downmix and subjective improvement from frequency-dependent compensation.
 
-The open `ittiam-systems/libmpegh` decoder is also useful structurally: its binaural filter design separates direct and diffuse BRIR/filter contributions rather than treating the entire binaural environment as one undifferentiated path.
+The open `ittiam-systems/libmpegh` decoder was also used structurally because it separates direct and diffuse BRIR/filter contributions.
 
 ### Diffuse-field HRTF equalization
 
-Thomas McKenzie, Damian Murphy and Gavin Kearney, **Diffuse-Field Equalisation of Binaural Ambisonic Rendering** (Applied Sciences, 2018, DOI `10.3390/app8101956`) applies direction-independent diffuse-field equalization to improve high-frequency reproduction and timbre in binaural rendering while documenting the limits of the method.
+Thomas McKenzie, Damian Murphy and Gavin Kearney, **Diffuse-Field Equalisation of Binaural Ambisonic Rendering** (Applied Sciences, 2018, DOI `10.3390/app8101956`) was used as evidence for direction-independent diffuse-field equalization while preserving directional residual structure.
 
-Spatial Audio Framework implements the same core idea in `diffuseFieldEqualiseHRTFs`: compute the direction-weighted mean squared HRTF magnitude for each band/ear, take its square root, then divide each directional HRTF by that common response.
-
-SAF's binaural examples also expose HRTF preprocessing, MagLS and diffuse matching rather than relying on raw measured filters alone.
+Spatial Audio Framework's `diffuseFieldEqualiseHRTFs` implementation provided an open implementation reference for weighted mean-squared HRTF magnitude normalization.
 
 ### HRTF gain normalization
 
-Valve Steam Audio independently treats HRTF gain management as a renderer responsibility. It exposes:
-
-- HRTF volume gain;
-- RMS normalization across HRTF directions;
-- a reference-loudness calculation in its HRTF database.
-
-This supports keeping renderer gain/colour management separate from programme EQ.
+Valve Steam Audio was used as independent evidence that HRTF gain management can be a renderer responsibility distinct from programme EQ.
 
 ### Coherence and transient preservation
 
-Jonathan B. Moore and Adam J. Hill, **Dynamic Diffuse Signal Processing for Sound Reinforcement and Reproduction** (JAES, 2018, DOI `10.17743/JAES.2018.0054`) documents how high inter-channel coherence can create comb-filter magnitude variation and discusses decorrelation with explicit attention to transient preservation.
+Jonathan B. Moore and Adam J. Hill, **Dynamic Diffuse Signal Processing for Sound Reinforcement and Reproduction** (JAES, 2018, DOI `10.17743/JAES.2018.0054`) informed the caution against broad decorrelation of direct musical structure.
 
-For Omniphony this argues against broad decorrelation of music. If decorrelation becomes necessary later, it should target redundant diffuse/reflection residue while keeping the protected master and important transients authoritative.
+## Recorded post-baseline mechanism stack
 
-## Current post-baseline mechanism stack
-
-### 1. Cascaded renderer remains the spatial core
+### Cascaded renderer
 
 ```text
-derived 7.1.4 support
-→ Omniphony virtual-speaker renderer
+derived support
+→ virtual-speaker renderer
 → virtual room
 → SAF/KEMAR HRTF + ITD
 → binaural support
 ```
 
-Direct binaural remains a generic reference path. Cascaded mode is the music architecture because physical listening found it significantly more continuous and bubble-like.
+Direct binaural remained a reference path. The cascaded path was retained in this investigation because listening found it more continuous and bubble-like.
 
-### 2. Larger frontier geometry
+### Larger frontier geometry
 
-Current music frontier:
+The snapshot recorded:
 
 ```text
 metric scale                 7.25 m / ADM unit
@@ -104,37 +98,19 @@ reflection level             0.38
 late field                   0.035 / 0.17 s / 28 ms
 ```
 
-Scale should come from geometry, timing, HRTF/ITD, early-field structure and source extent rather than a louder late reverb tail.
+The associated design hypothesis was that scale should come primarily from geometry, timing, HRTF/ITD, early-field structure, and source extent rather than a louder late tail.
 
-### 3. Reflection spectral realism
+### Reflection spectral realism
 
-The historical early-reflection bank used delayed, distance-scaled broadband copies. That was spatially useful but made a huge room behave too much like six spectrally perfect mirrors.
+The post-baseline reflection experiment added broad high-frequency loss to reflection-only paths based on generic wall HF retention and additional propagation distance, while preserving low/mid timing and distance structure.
 
-The post-baseline reflection path now adds broad frequency-dependent high-frequency loss based on:
+### High-band coherence cleanup
 
-- a generic wall HF-retention term inspired by mature material models;
-- additional upper-band attenuation for reflection-only propagation distance;
-- unchanged low/mid reflection timing and distance structure.
+A correlated stereo-mid shortcut into top-front support was disabled above 5 kHz to test whether the combination of direct center transient plus correlated HRTF-rendered overhead energy contributed to harshness.
 
-This is deliberately a physical-room mechanism rather than a programme treble shelf.
+### Partial SAF diffuse-field compensation
 
-### 4. High-band coherence cleanup
-
-The stereo evidence mapper previously injected a small correlated copy of the stereo mid directly into top-front support at every frequency. Above 5 kHz that created a particularly suspicious topology:
-
-```text
-protected dry center transient
-+
-correlated HRTF-rendered overhead copy
-```
-
-The direct top-front mid shortcut is now disabled above 5 kHz. Height remains available through relational / lateral / diffuse evidence and the enlarged geometry.
-
-### 5. Partial SAF diffuse-field compensation
-
-`renderer/src/binaural/diffuse_compensation.rs` implements a static, causal, identical-per-ear partial inverse of the measured common SAF/KEMAR colour.
-
-First profile:
+`renderer/src/binaural/diffuse_compensation.rs` recorded this first partial inverse:
 
 ```text
 4.8 kHz broad peak   -3.40 dB
@@ -142,38 +118,15 @@ First profile:
 12 kHz high shelf    -1.20 dB
 ```
 
-This is intentionally **not** a full inverse of the measured +7 dB regions. The first experiment removes only part of the common colour so directional HRTF residual structure remains available for localization.
+It was deliberately partial rather than a full inverse so directional HRTF residuals could remain available for localization.
 
-The compensation is generic-cascade **OFF by default**. The current music config explicitly opts in:
+At that time, the generic cascade kept compensation off by default and the music configuration explicitly opted into the SAF-specific profile.
 
-```yaml
-render:
-  binaural:
-    mode: cascaded
-    hrir_source: saf
-    spectral_compensation: saf_partial
-```
+### Reclaimed playback level
 
-The renderer also checks that the active HRTF source is SAF/KEMAR before applying the SAF profile.
+The snapshot recorded a host fixed gain change from `0.72` to `0.90`, about +1.94 dB of whole-program level, with ON and OFF using the same static gain and no content-dependent loudness stage.
 
-This preserves the generic invariant that an unconfigured cascade at an exact virtual-speaker direction can collapse numerically to the direct binaural renderer.
-
-### 6. Reclaimed playback level
-
-The Windows host fixed final gain is now:
-
-```text
-0.90 linear
-≈ -0.9 dB
-```
-
-Baseline 1 used `0.72` (≈ -2.85 dB), so the new frontier reclaims approximately **1.94 dB** of whole-program level. ON and OFF use the same static gain.
-
-No compressor, limiter, AGC or content-dependent loudness stage was added.
-
-Reduced static headroom means physical peak/clipping validation is now important.
-
-## Current rollback ladder
+## Recorded rollback ladder
 
 ```text
 03dac8bb  Baseline 1
@@ -185,30 +138,28 @@ cc186861  SAF diffuse-spectrum measurement
 7acde068  explicit SAF-only cascade compensation gating
 ```
 
-Baseline 1 remains the reference even as later layers accumulate.
+This ladder is historical evidence, not a current version/status table.
 
-## Listening questions for the current frontier
+## Listening questions recorded for that frontier
 
-1. Is whole-program volume now usable without nearly maxing the amplifier?
-2. Is the sphere clearly larger than Baseline 1?
-3. Are cymbals and the bright transients in `Jam` less needle-like?
-4. Does the correction sound **calmer**, not merely darker?
-5. Is height still strong after removing the correlated high-band top-front shortcut?
-6. Did bass pressure, kick weight and drum body remain unchanged?
-7. Are panned percussion and tom rolls still mobile through the sphere?
-8. Is there any new blur, hallway colour or late-field fog?
-9. Does `0.90` final gain cause real clipping on dense masters?
+1. Was whole-program volume usable without nearly maxing the amplifier?
+2. Was the sphere clearly larger than Baseline 1?
+3. Were cymbals and bright transients less needle-like?
+4. Did correction sound calmer rather than merely darker?
+5. Was height retained after the high-band top-front shortcut was removed?
+6. Did bass pressure, kick weight, and drum body remain unchanged?
+7. Did panned percussion and tom rolls remain mobile?
+8. Was any new blur, hallway colour, or late-field fog introduced?
+9. Did the higher fixed gain cause clipping on dense masters?
 
-## If piercing remains
+## Reopenable next hypotheses from that investigation
 
-Do not immediately deepen the static cuts.
+If the same piercing failure mode reappears, the historical next candidates were:
 
-Next candidates, in order:
-
-1. measure the **complete cascaded support transfer function**, not only the isolated HRTF diffuse response;
-2. derive a smoother minimum-phase FIR / frequency-domain compensation from that measured cascade response;
+1. measure the complete cascaded support transfer function rather than only isolated HRTF diffuse response;
+2. derive a smoother minimum-phase/FIR or frequency-domain compensation from the measured cascade;
 3. test transient-preserving decorrelation only on diffuse/reflection residue;
-4. investigate frequency-dependent virtual-speaker spread so upper support does not create unnecessary coherent HRTF copies;
-5. only after renderer spectral stability, perform systematic HRTF/SOFA selection or personalization.
+4. investigate frequency-dependent virtual-speaker spread;
+5. only after renderer spectral stability, compare HRTF/SOFA selection or personalization.
 
-The master remains outside every one of those experiments.
+The protected master remained outside those experiments.
