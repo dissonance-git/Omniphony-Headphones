@@ -28,6 +28,7 @@ pub mod virtual_bed;
 // Current support is renderer-core state, not Windows host state. Keep the
 // implementation modules private and expose narrow wrappers above.
 mod music_early_reflections;
+mod music_late_enclosure;
 mod music_support;
 
 pub use channel_layout::label_for_speaker_name;
