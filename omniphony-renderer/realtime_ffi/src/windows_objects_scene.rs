@@ -86,6 +86,7 @@ impl WindowsSpatialObjectPipeline {
             SourceRendererOptions {
                 mode: SourceSpatialMode::FullSphere,
                 externalization: false,
+                authored_metric_objects: true,
                 ..SourceRendererOptions::default()
             },
         )
