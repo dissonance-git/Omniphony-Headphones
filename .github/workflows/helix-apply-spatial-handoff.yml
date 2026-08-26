@@ -1,0 +1,71 @@
+name: Helix apply spatial handoff
+
+on:
+  push:
+    branches: [helix/omniphony-endpoint-geometry-fix]
+    paths:
+      - '.github/workflows/helix-apply-spatial-handoff.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply-and-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/omniphony-endpoint-geometry-fix
+          fetch-depth: 0
+
+      - name: Route Stream APO through external-spatial handoff shim
+        shell: pwsh
+        run: |
+          $repo = $env:GITHUB_WORKSPACE
+          $source = Join-Path $repo 'omniphony-renderer\windows_installer\endpoint_apo\OmniphonyStreamAPO.cpp'
+          $shim = Join-Path $repo 'omniphony-renderer\windows_installer\endpoint_apo\OmniphonyStreamAPOExternalSpatial.cpp'
+          $cmake = Join-Path $repo 'omniphony-renderer\windows_installer\endpoint_apo\CMakeLists.txt'
+
+          if (-not (Test-Path $shim)) { throw 'external-spatial shim missing' }
+          $sourceText = Get-Content $source -Raw
+          $rawRefs = ([regex]::Matches($sourceText, 'AUDIO_SIGNALPROCESSINGMODE_RAW')).Count
+          if ($rawRefs -ne 1) { throw "expected exactly one RAW-mode token in Stream APO, got $rawRefs" }
+
+          $text = Get-Content $cmake -Raw
+          $oldSource = "add_library(OmniphonyStreamAPO SHARED`r`n    OmniphonyStreamAPO.cpp`r`n    OmniphonyStreamAPO.def`r`n)"
+          if (-not $text.Contains($oldSource)) {
+            $oldSource = "add_library(OmniphonyStreamAPO SHARED`n    OmniphonyStreamAPO.cpp`n    OmniphonyStreamAPO.def`n)"
+          }
+          if (-not $text.Contains($oldSource)) { throw 'Stream APO CMake source block drifted' }
+          $newSource = $oldSource.Replace('OmniphonyStreamAPO.cpp', 'OmniphonyStreamAPOExternalSpatial.cpp')
+          $text = $text.Replace($oldSource, $newSource)
+
+          $oldLink = 'target_link_libraries(OmniphonyStreamAPO PRIVATE ole32 uuid advapi32 audioeng AudioBaseProcessingObjectV140 legacy_stdio_definitions audiomediatypecrt)'
+          if (-not $text.Contains($oldLink)) { throw 'Stream APO link line drifted' }
+          $newLink = $oldLink.TrimEnd(')') + ' windowsapp)'
+          $text = $text.Replace($oldLink, $newLink)
+          Set-Content -LiteralPath $cmake -Value $text -Encoding UTF8
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'patch produced whitespace errors' }
+          git diff -- $cmake
+
+      - name: Commit handoff wiring
+        shell: pwsh
+        run: |
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add omniphony-renderer/windows_installer/endpoint_apo/CMakeLists.txt
+          git commit -m 'fix(windows): hand off to active spatial renderer'
+          if ($LASTEXITCODE -ne 0) { throw "commit failed: $LASTEXITCODE" }
+          git push origin HEAD:helix/omniphony-endpoint-geometry-fix
+          if ($LASTEXITCODE -ne 0) { throw "push failed: $LASTEXITCODE" }
+
+      - name: Dispatch Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-installer.yml --repo "${{ github.repository }}" --ref helix/omniphony-endpoint-geometry-fix
+          if ($LASTEXITCODE -ne 0) { throw "installer dispatch failed: $LASTEXITCODE" }
