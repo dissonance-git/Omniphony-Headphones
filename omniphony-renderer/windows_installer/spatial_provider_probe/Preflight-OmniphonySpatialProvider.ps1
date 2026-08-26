@@ -184,15 +184,35 @@ foreach ($requiredField in @('provider_dll', 'realtime_dll', 'object_stream_smok
 
 $providerDll = [System.IO.Path]::GetFullPath([string]$manifest.provider_dll)
 $realtimeDll = [System.IO.Path]::GetFullPath([string]$manifest.realtime_dll)
+$providerCtl = Join-Path $generationRoot 'OmniphonySpatialProbeCtl.exe'
 $objectStreamSmoke = [System.IO.Path]::GetFullPath([string]$manifest.object_stream_smoke)
 $objectRealtimeSmoke = [System.IO.Path]::GetFullPath([string]$manifest.object_realtime_smoke)
 $stereoQueueSmoke = [System.IO.Path]::GetFullPath([string]$manifest.stereo_queue_smoke)
 $rawOutputProbe = [System.IO.Path]::GetFullPath([string]$manifest.raw_output_probe)
 $rawOutputSinkProbe = [System.IO.Path]::GetFullPath([string]$manifest.raw_output_sink_probe)
-foreach ($ownedPath in @($providerDll, $realtimeDll, $objectStreamSmoke, $objectRealtimeSmoke, $stereoQueueSmoke, $rawOutputProbe, $rawOutputSinkProbe)) {
+foreach ($ownedPath in @($providerDll, $realtimeDll, $providerCtl, $objectStreamSmoke, $objectRealtimeSmoke, $stereoQueueSmoke, $rawOutputProbe, $rawOutputSinkProbe)) {
     if (-not (Test-PathWithin -Child $ownedPath -Parent $generationRoot)) {
         throw "Spatial-provider manifest points outside its immutable generation: $ownedPath"
     }
+}
+
+$runtimeStatus = Invoke-NativeCaptured `
+    -Path $providerCtl `
+    -Arguments @('runtime-status') `
+    -Label 'Live provider runtime-gate status'
+$runtimeStatusText = @($runtimeStatus.output) -join "`n"
+if ($runtimeStatusText -notmatch 'SPATIAL_RUNTIME_STATUS\s+KEY=(?:0|1)\s+ENABLED=0\s+READY=0') {
+    throw 'Activation preflight requires the live Omniphony provider runtime gate to be closed.'
+}
+
+$selectionStatus = Invoke-NativeCaptured `
+    -Path $providerCtl `
+    -Arguments @('selection-status', $PhysicalEndpointId) `
+    -Label 'Live spatial provider selection status'
+$selectionText = @($selectionStatus.output) -join "`n"
+if ($selectionText -notmatch 'OMNIPHONY_DEFAULT\s+0' -or
+    $selectionText -notmatch 'OMNIPHONY_ACTIVE\s+0') {
+    throw 'Activation preflight requires Omniphony to be neither default nor active on the physical endpoint.'
 }
 
 $capability = Invoke-NativeCaptured `
@@ -285,6 +305,8 @@ $report = [ordered]@{
     process_64_bit = [Environment]::Is64BitProcess
     exact_file_set_verified = $true
     all_file_hashes_verified = $true
+    live_runtime_gate_closed = $true
+    omniphony_not_selected_before_preflight = $true
     final_path_capability_smoke_verified = $true
     final_path_static_stream_smoke_verified = $true
     final_path_dynamic_object_smoke_verified = $true
@@ -330,6 +352,8 @@ finally {
 Write-Host "SPATIAL_PROVIDER_PREFLIGHT_OK GENERATION=$($manifest.generation)"
 Write-Host "SPATIAL_PROVIDER_PREFLIGHT_ENDPOINT $PhysicalEndpointId"
 Write-Host "SPATIAL_PROVIDER_PREFLIGHT_REPORT $reportFullPath"
+Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_LIVE_RUNTIME_GATE_CLOSED 1'
+Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_OMNIPHONY_NOT_SELECTED 1'
 Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_COM_TO_CURRENT 1'
 Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_DYNAMIC_OBJECT_CONTRACT 1'
 Write-Host 'SPATIAL_PROVIDER_PREFLIGHT_OBJECT_ABI_RESET 1'
