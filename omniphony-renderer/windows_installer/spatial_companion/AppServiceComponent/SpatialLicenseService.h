@@ -9,6 +9,8 @@ namespace OmniphonySpatialLicenseService
         public Windows::ApplicationModel::Background::IBackgroundTask
     {
     public:
+        SpatialLicenseService();
+
         virtual void Run(
             Windows::ApplicationModel::Background::IBackgroundTaskInstance^ taskInstance);
 
