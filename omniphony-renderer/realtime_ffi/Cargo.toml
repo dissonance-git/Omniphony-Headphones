@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 orender_engine = { path = "../orender_engine" }
 renderer = { path = "../renderer" }
+scene_contract = { path = "../scene_contract" }
 
 [dev-dependencies]
 bridge_api = { path = "../bridge_api" }

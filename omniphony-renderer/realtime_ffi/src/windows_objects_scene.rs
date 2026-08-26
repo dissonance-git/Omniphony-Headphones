@@ -15,7 +15,7 @@ use orender_engine::{
 };
 use renderer::source_frame::SourceFrameRenderer;
 use renderer::source_scene::{SourceLaneKind, SourceSceneEvidence};
-use renderer::stable_source_slots::StableSourceSlots;
+use scene_contract::stable_source_slots::StableSourceSlots;
 use std::f32::consts::PI;
 
 const OBJECT_OUTPUT_GAIN: f32 = 0.90;

@@ -14,7 +14,7 @@
 
 use bridge_api::RChannelLabel;
 use renderer::source_scene::{SourceLaneKind, SourceSceneEvidence};
-use renderer::stable_source_slots::{StableSourceSlotError, StableSourceSlots};
+use scene_contract::stable_source_slots::{StableSourceSlotError, StableSourceSlots};
 
 use crate::spatial_ingress::{
     WindowsSpatialIngressError, WindowsSpatialIngressQuantum, WindowsStaticObjectRole,

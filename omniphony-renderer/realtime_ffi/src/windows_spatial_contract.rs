@@ -12,7 +12,7 @@
 //! +X right, +Y forward, and +Z up, so the lossless axis conversion is
 //! `[x, y, z] -> [x, -z, y]`.
 
-use renderer::authored_scene::{MetricPosition, radial_distance_m};
+use scene_contract::authored_scene::{MetricPosition, radial_distance_m};
 
 /// The 17 static spatial roles in the canonical Windows 8.1.4.4 bed.
 ///

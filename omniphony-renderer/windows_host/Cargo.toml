@@ -25,6 +25,7 @@ reference_bridge = { path = "../reference_bridge" }
 # Windows host. The host merely captures PCM, calls this processor, and sends
 # the derived support lanes through the normal Omniphony engine.
 renderer = { path = "../renderer" }
+scene_contract = { path = "../scene_contract" }
 
 # The native host also exercises the narrow PCM seam intended for a future APO
 # or virtual endpoint. Its first implementation remains bit-exact identity so
