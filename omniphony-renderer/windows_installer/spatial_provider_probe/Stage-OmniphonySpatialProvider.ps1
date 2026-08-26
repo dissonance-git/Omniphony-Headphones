@@ -114,6 +114,8 @@ $files = @(
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialProbeCtl.exe'); Name = 'OmniphonySpatialProbeCtl.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialProbeSmoke.exe'); Name = 'OmniphonySpatialProbeSmoke.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialStaticStreamSmoke.exe'); Name = 'OmniphonySpatialStaticStreamSmoke.exe' },
+    @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialObjectStreamSmoke.exe'); Name = 'OmniphonySpatialObjectStreamSmoke.exe' },
+    @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialObjectRealtimeSmoke.exe'); Name = 'OmniphonySpatialObjectRealtimeSmoke.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialRealtimeBridgeSmoke.exe'); Name = 'OmniphonySpatialRealtimeBridgeSmoke.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialStereoQueueSmoke.exe'); Name = 'OmniphonySpatialStereoQueueSmoke.exe' },
     @{ Source = (Get-RequiredFile $packageRootResolved 'OmniphonySpatialRawOutputProbe.exe'); Name = 'OmniphonySpatialRawOutputProbe.exe' },
@@ -182,7 +184,9 @@ else {
 
         Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialProbeSmoke.exe') -Arguments @((Join-Path $stagingRoot 'OmniphonySpatialProbe.dll')) -Label 'Spatial provider capability smoke'
         Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialStaticStreamSmoke.exe') -Label 'Spatial static stream lifecycle smoke'
-        Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialRealtimeBridgeSmoke.exe') -Arguments @((Join-Path $stagingRoot 'omniphony_realtime.dll')) -Label 'Spatial realtime bridge smoke'
+        Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialObjectStreamSmoke.exe') -Label 'Spatial dynamic object lifecycle smoke'
+        Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialObjectRealtimeSmoke.exe') -Arguments @((Join-Path $stagingRoot 'omniphony_realtime.dll')) -Label 'Spatial dynamic object ABI 0.7 smoke'
+        Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialRealtimeBridgeSmoke.exe') -Arguments @((Join-Path $stagingRoot 'omniphony_realtime.dll')) -Label 'Spatial composed static/dynamic realtime bridge smoke'
         Invoke-NativeChecked -Path (Join-Path $stagingRoot 'OmniphonySpatialStereoQueueSmoke.exe') -Label 'Spatial stereo clock-domain queue smoke'
 
         Move-Item -LiteralPath $stagingRoot -Destination $generationRoot
@@ -206,7 +210,9 @@ foreach ($file in $files) {
 }
 Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialProbeSmoke.exe') -Arguments @((Join-Path $generationRoot 'OmniphonySpatialProbe.dll')) -Label 'Final-path provider capability smoke'
 Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialStaticStreamSmoke.exe') -Label 'Final-path spatial static stream lifecycle smoke'
-Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialRealtimeBridgeSmoke.exe') -Arguments @((Join-Path $generationRoot 'omniphony_realtime.dll')) -Label 'Final-path realtime bridge smoke'
+Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialObjectStreamSmoke.exe') -Label 'Final-path spatial dynamic object lifecycle smoke'
+Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialObjectRealtimeSmoke.exe') -Arguments @((Join-Path $generationRoot 'omniphony_realtime.dll')) -Label 'Final-path spatial dynamic object ABI 0.7 smoke'
+Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialRealtimeBridgeSmoke.exe') -Arguments @((Join-Path $generationRoot 'omniphony_realtime.dll')) -Label 'Final-path composed static/dynamic realtime bridge smoke'
 Invoke-NativeChecked -Path (Join-Path $generationRoot 'OmniphonySpatialStereoQueueSmoke.exe') -Label 'Final-path stereo clock-domain queue smoke'
 
 $fileHashes = [ordered]@{}
@@ -225,6 +231,8 @@ $manifest = [ordered]@{
     provider_sha256 = $providerHash
     realtime_dll = (Join-Path $generationRoot 'omniphony_realtime.dll')
     realtime_sha256 = $runtimeHash
+    object_stream_smoke = (Join-Path $generationRoot 'OmniphonySpatialObjectStreamSmoke.exe')
+    object_realtime_smoke = (Join-Path $generationRoot 'OmniphonySpatialObjectRealtimeSmoke.exe')
     stereo_queue_smoke = (Join-Path $generationRoot 'OmniphonySpatialStereoQueueSmoke.exe')
     raw_output_probe = (Join-Path $generationRoot 'OmniphonySpatialRawOutputProbe.exe')
     raw_output_sink_probe = (Join-Path $generationRoot 'OmniphonySpatialRawOutputSinkProbe.exe')
@@ -234,6 +242,9 @@ $manifest = [ordered]@{
     process_64_bit = [Environment]::Is64BitProcess
     exact_file_set_verified = $true
     final_path_smokes_verified = $true
+    dynamic_object_contract_verified = $true
+    spatial_object_abi_reset_verified = $true
+    composed_dynamic_render_path_verified = $true
     clock_domain_queue_verified = $true
     registry_mutated = $false
     provider_selected = $false
@@ -255,6 +266,9 @@ Write-Host "SPATIAL_PROVIDER_STAGE_OK GENERATION=$generation PACKAGE_SHA256=$pac
 Write-Host "SPATIAL_PROVIDER_STAGE_MANIFEST $manifestPath"
 Write-Host 'SPATIAL_PROVIDER_EXACT_FILE_SET_VERIFIED 1'
 Write-Host 'SPATIAL_PROVIDER_FINAL_PATH_SMOKES_VERIFIED 1'
+Write-Host 'SPATIAL_PROVIDER_DYNAMIC_OBJECT_CONTRACT_VERIFIED 1'
+Write-Host 'SPATIAL_PROVIDER_OBJECT_ABI_RESET_VERIFIED 1'
+Write-Host 'SPATIAL_PROVIDER_COMPOSED_DYNAMIC_PATH_VERIFIED 1'
 Write-Host 'SPATIAL_PROVIDER_CLOCK_DOMAIN_QUEUE_VERIFIED 1'
 Write-Host 'SPATIAL_PROVIDER_RAW_OUTPUT_PREFLIGHT_STAGED 1'
 Write-Host 'SPATIAL_PROVIDER_RAW_OUTPUT_SINK_PROBE_STAGED 1'
