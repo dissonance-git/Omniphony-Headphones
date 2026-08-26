@@ -34,19 +34,21 @@ jobs:
           $build = "$env:GITHUB_WORKSPACE\build\apo"
           $log = "$env:GITHUB_WORKSPACE\STREAM_APO_COMPILER_ERROR.txt"
           $all = [System.Collections.Generic.List[string]]::new()
-          $all.Add('=== CMAKE CONFIGURE ===')
           cmake -S $src -B $build -A x64 2>&1 | ForEach-Object { $all.Add("$_"); Write-Host $_ }
           $configureExit = $LASTEXITCODE
           $all.Add("CONFIGURE_EXIT=$configureExit")
           if ($configureExit -eq 0) {
-            $all.Add('=== STREAM APO BUILD ===')
             cmake --build $build --config Release --target OmniphonyStreamAPO -- /v:detailed 2>&1 | ForEach-Object { $all.Add("$_"); Write-Host $_ }
             $buildExit = $LASTEXITCODE
           } else {
             $buildExit = -1
           }
           $all.Add("BUILD_EXIT=$buildExit")
-          [System.IO.File]::WriteAllLines($log, $all, [System.Text.UTF8Encoding]::new($false))
+          $filtered = @($all | Where-Object {
+            $_ -match '(?i)(OmniphonyStreamAPOExternalSpatial|error C[0-9]+|fatal error|warning C[0-9]+|LNK[0-9]+|BUILD_EXIT|CONFIGURE_EXIT)'
+          })
+          if ($filtered.Count -eq 0) { $filtered = @('NO_FILTERED_DIAGNOSTICS') }
+          [System.IO.File]::WriteAllLines($log, $filtered, [System.Text.UTF8Encoding]::new($false))
       - name: Commit compiler diagnostics
         if: always()
         shell: pwsh
@@ -55,7 +57,7 @@ jobs:
           git config user.name 'helix-ci'
           git config user.email 'helix-ci@users.noreply.github.com'
           git add STREAM_APO_COMPILER_ERROR.txt
-          git commit -m 'ci: record Stream APO compiler diagnostics'
+          git commit -m 'ci: record filtered Stream APO compiler diagnostics'
           if ($LASTEXITCODE -ne 0) { throw "diagnostic commit failed: $LASTEXITCODE" }
           git push origin HEAD:helix/omniphony-endpoint-geometry-fix
           if ($LASTEXITCODE -ne 0) { throw "diagnostic push failed: $LASTEXITCODE" }
