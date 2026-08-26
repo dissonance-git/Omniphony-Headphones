@@ -12,6 +12,7 @@
 //! feed once the system-instantiation experiment succeeds.
 
 use bridge_api::RChannelLabel;
+use renderer::authored_scene::MetricPosition;
 
 // Keep the already-landed Windows semantic contract as the single source of
 // truth while provider activation is still experimental. If that experiment
@@ -35,7 +36,7 @@ pub struct WindowsSpatialStaticLane<'a> {
     pub label: RChannelLabel,
     /// Endpoint-reported static geometry transformed into Omniphony axes when
     /// available. LFE is always `None` because it is non-directional.
-    pub endpoint_position: Option<[f32; 3]>,
+    pub endpoint_position: Option<MetricPosition>,
     pub mono_pcm: &'a [f32],
 }
 
@@ -46,7 +47,7 @@ pub struct WindowsSpatialDynamicLane<'a> {
     pub stable_id: u64,
     /// Exact authored dynamic position transformed only between coordinate
     /// conventions. No bed quantization or inferred presentation is applied.
-    pub authored_position: [f32; 3],
+    pub authored_position: MetricPosition,
     pub mono_pcm: &'a [f32],
 }
 
@@ -159,7 +160,7 @@ pub fn build_windows_spatial_ingress_quantum<'a>(
             static_lanes.push(WindowsSpatialStaticLane {
                 role,
                 label: windows_static_label(role),
-                endpoint_position: object.omniphony_position(),
+                endpoint_position: object.omniphony_metric_position(),
                 mono_pcm: object.mono_pcm,
             });
         }
@@ -170,7 +171,7 @@ pub fn build_windows_spatial_ingress_quantum<'a>(
         .copied()
         .map(|object| WindowsSpatialDynamicLane {
             stable_id: object.stable_id,
-            authored_position: object.omniphony_position(),
+            authored_position: object.omniphony_metric_position(),
             mono_pcm: object.mono_pcm,
         })
         .collect();
