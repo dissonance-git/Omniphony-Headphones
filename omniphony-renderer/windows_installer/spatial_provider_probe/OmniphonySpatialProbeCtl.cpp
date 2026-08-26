@@ -36,6 +36,7 @@ constexpr GUID kProviderClsid = {
 
 constexpr wchar_t kEncoderBase[] = L"SOFTWARE\\Microsoft\\Multimedia\\Audio\\Spatial\\Encoder";
 constexpr wchar_t kComBase[] = L"SOFTWARE\\Classes\\CLSID";
+constexpr wchar_t kRuntimeConfigPath[] = L"SOFTWARE\\Omniphony\\SpatialProvider";
 
 std::wstring Join(const wchar_t* left, const wchar_t* right) {
     std::wstring value(left);
@@ -116,6 +117,84 @@ LONG SetString(HKEY key, const wchar_t* name, const std::wstring& value) {
         REG_SZ,
         reinterpret_cast<const BYTE*>(value.c_str()),
         bytes);
+}
+
+LONG SetDword(HKEY key, const wchar_t* name, DWORD value) {
+    return RegSetValueExW(
+        key,
+        name,
+        0,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&value),
+        sizeof(value));
+}
+
+bool ReadRuntimeDword(const wchar_t* name, DWORD& value) {
+    HKEY key = nullptr;
+    LONG result = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        kRuntimeConfigPath,
+        0,
+        KEY_READ | KEY_WOW64_64KEY,
+        &key);
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+
+    DWORD type = 0;
+    DWORD bytes = sizeof(value);
+    result = RegQueryValueExW(
+        key,
+        name,
+        nullptr,
+        &type,
+        reinterpret_cast<BYTE*>(&value),
+        &bytes);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS &&
+           type == REG_DWORD &&
+           bytes == sizeof(value);
+}
+
+bool ReadRuntimeString(const wchar_t* name, std::wstring& value) {
+    HKEY key = nullptr;
+    LONG result = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        kRuntimeConfigPath,
+        0,
+        KEY_READ | KEY_WOW64_64KEY,
+        &key);
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+
+    DWORD type = 0;
+    DWORD bytes = 0;
+    result = RegQueryValueExW(key, name, nullptr, &type, nullptr, &bytes);
+    if (result != ERROR_SUCCESS ||
+        (type != REG_SZ && type != REG_EXPAND_SZ) ||
+        bytes < sizeof(wchar_t)) {
+        RegCloseKey(key);
+        return false;
+    }
+
+    std::wstring buffer(bytes / sizeof(wchar_t), L'\0');
+    result = RegQueryValueExW(
+        key,
+        name,
+        nullptr,
+        &type,
+        reinterpret_cast<BYTE*>(buffer.data()),
+        &bytes);
+    RegCloseKey(key);
+    if (result != ERROR_SUCCESS) {
+        return false;
+    }
+    while (!buffer.empty() && buffer.back() == L'\0') {
+        buffer.pop_back();
+    }
+    value = std::move(buffer);
+    return !value.empty();
 }
 
 bool ReadString(HKEY root, const std::wstring& path, const wchar_t* name, std::wstring& value) {
@@ -206,6 +285,8 @@ void PrintContract() {
     std::wcout << L"COM_CLSID\t" << kClsidText << L'\n';
     std::wcout << L"ENCODER_BASE\tHKLM\\" << kEncoderBase << L'\n';
     std::wcout << L"COM_BASE\tHKLM\\" << kComBase << L'\n';
+    std::wcout << L"RUNTIME_CONFIG\tHKLM\\" << kRuntimeConfigPath << L'\n';
+    std::wcout << L"RUNTIME_ENABLE_FAIL_CLOSED\t1\n";
     std::wcout << L"STATIC_OBJECTS\t17\n";
     std::wcout << L"MAX_DYNAMIC_OBJECTS\t16\n";
     std::wcout << L"SELECTION_API\tWindows.Media.Audio.SpatialAudioDeviceConfiguration\n";
@@ -292,6 +373,136 @@ int RegistrationStatus() {
         std::wcout << L"COM_SERVER\t" << (server.empty() ? L"<none>" : server) << L'\n';
     }
     return (encoder && com) ? 0 : kExitNotRegistered;
+}
+
+int RuntimeStatus() {
+    DWORD enabled = 0;
+    std::wstring endpoint;
+    std::wstring realtime;
+    const bool key = KeyExists(HKEY_LOCAL_MACHINE, kRuntimeConfigPath);
+    const bool enabledOk = ReadRuntimeDword(L"Enabled", enabled);
+    const bool endpointOk = ReadRuntimeString(L"EndpointId", endpoint);
+    const bool realtimeOk = ReadRuntimeString(L"RealtimeDll", realtime);
+    const bool dllExists = realtimeOk && FileExists(realtime);
+    const bool active = key && enabledOk && enabled == 1 &&
+                        endpointOk && realtimeOk && dllExists;
+
+    std::wcout << L"SPATIAL_RUNTIME_STATUS\tKEY=" << (key ? 1 : 0)
+               << L"\tENABLED=" << ((enabledOk && enabled == 1) ? 1 : 0)
+               << L"\tREADY=" << (active ? 1 : 0) << L'\n';
+    std::wcout << L"SPATIAL_RUNTIME_ENDPOINT\t"
+               << (endpointOk ? endpoint : L"<none>") << L'\n';
+    std::wcout << L"SPATIAL_RUNTIME_REALTIME_DLL\t"
+               << (realtimeOk ? realtime : L"<none>") << L'\n';
+    std::wcout << L"SPATIAL_RUNTIME_REALTIME_DLL_EXISTS\t"
+               << (dllExists ? 1 : 0) << L'\n';
+    return 0;
+}
+
+int RuntimeDisable() {
+    if (!IsElevated()) {
+        std::wcerr << L"ERROR\truntime-disable requires an elevated Administrator terminal\n";
+        return kExitAccess;
+    }
+
+    HKEY key = nullptr;
+    LONG result = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        kRuntimeConfigPath,
+        0,
+        KEY_SET_VALUE | KEY_WOW64_64KEY,
+        &key);
+    if (result == ERROR_SUCCESS) {
+        // Disable first. If deletion later fails, the provider remains closed.
+        result = SetDword(key, L"Enabled", 0);
+        RegCloseKey(key);
+        if (result != ERROR_SUCCESS) {
+            std::wcerr << L"ERROR\tdisable runtime gate\t" << Win32Text(result) << L'\n';
+            return kExitAccess;
+        }
+    } else if (result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND) {
+        std::wcerr << L"ERROR\topen runtime gate\t" << Win32Text(result) << L'\n';
+        return kExitAccess;
+    }
+
+    result = DeleteOwnedKey(kRuntimeConfigPath);
+    if (result != ERROR_SUCCESS) {
+        std::wcerr << L"ERROR\tdelete runtime gate\t" << Win32Text(result) << L'\n';
+        return kExitAccess;
+    }
+
+    std::wcout << L"SPATIAL_RUNTIME_DISABLED\t1\n";
+    return 0;
+}
+
+int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
+    if (!IsElevated()) {
+        std::wcerr << L"ERROR\truntime-enable requires an elevated Administrator terminal\n";
+        return kExitAccess;
+    }
+    if (!endpointArgument || !*endpointArgument || !dllArgument || !*dllArgument) {
+        return kExitUsage;
+    }
+
+    std::wstring dllPath;
+    if (!AbsolutePath(dllArgument, dllPath) || !FileExists(dllPath)) {
+        std::wcerr << L"ERROR\trealtime DLL not found\t" << dllArgument << L'\n';
+        return kExitUsage;
+    }
+
+    HKEY key = nullptr;
+    DWORD disposition = 0;
+    LONG result = RegCreateKeyExW(
+        HKEY_LOCAL_MACHINE,
+        kRuntimeConfigPath,
+        0,
+        nullptr,
+        REG_OPTION_NON_VOLATILE,
+        KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+        nullptr,
+        &key,
+        &disposition);
+    if (result != ERROR_SUCCESS) {
+        std::wcerr << L"ERROR\tcreate runtime gate\t" << Win32Text(result) << L'\n';
+        return kExitAccess;
+    }
+
+    // Fail closed throughout the transaction. The provider only opens when all
+    // fields exist, the DLL exists, and Enabled is exactly 1.
+    result = SetDword(key, L"Enabled", 0);
+    if (result == ERROR_SUCCESS) {
+        result = SetString(key, L"EndpointId", std::wstring(endpointArgument));
+    }
+    if (result == ERROR_SUCCESS) {
+        result = SetString(key, L"RealtimeDll", dllPath);
+    }
+    if (result == ERROR_SUCCESS) {
+        result = SetDword(key, L"Enabled", 1);
+    }
+    RegCloseKey(key);
+
+    if (result != ERROR_SUCCESS) {
+        // Best-effort fail-closed rollback. A malformed partial key cannot
+        // activate because Enabled was written false before any other field.
+        HKEY rollback = nullptr;
+        if (RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                kRuntimeConfigPath,
+                0,
+                KEY_SET_VALUE | KEY_WOW64_64KEY,
+                &rollback) == ERROR_SUCCESS) {
+            (void)SetDword(rollback, L"Enabled", 0);
+            RegCloseKey(rollback);
+        }
+        std::wcerr << L"ERROR\tconfigure runtime gate\t" << Win32Text(result) << L'\n';
+        return kExitAccess;
+    }
+
+    std::wcout << L"SPATIAL_RUNTIME_ENABLED\t1\n";
+    std::wcout << L"SPATIAL_RUNTIME_ENDPOINT\t" << endpointArgument << L'\n';
+    std::wcout << L"SPATIAL_RUNTIME_REALTIME_DLL\t" << dllPath << L'\n';
+    std::wcout << L"SPATIAL_RUNTIME_FAIL_CLOSED\t1\n";
+    return 0;
 }
 
 int UnregisterOwnedKeys() {
@@ -557,6 +768,9 @@ void Usage() {
         << L"  status                           inspect Omniphony registration (read-only)\n"
         << L"  register <provider-dll>          register Omniphony provider (Administrator)\n"
         << L"  diagnose                         verify registry plus provider COM construction\n"
+        << L"  runtime-status                    inspect private provider runtime gate (read-only)\n"
+        << L"  runtime-enable <endpoint> <dll>   enable exact endpoint/runtime DLL gate (Administrator)\n"
+        << L"  runtime-disable                   disable/delete only private runtime gate (Administrator)\n"
         << L"  unregister                       remove only Omniphony registration (Administrator)\n"
         << L"  selection-status <endpoint-id>   print Windows spatial selection state\n"
         << L"  selection-select <endpoint-id>   set Omniphony by GUID and read default back\n"
@@ -595,6 +809,19 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (command == L"diagnose") {
         return argc == 2 ? Diagnose() : kExitUsage;
+    }
+    if (command == L"runtime-status") {
+        return argc == 2 ? RuntimeStatus() : kExitUsage;
+    }
+    if (command == L"runtime-enable") {
+        if (argc != 4 || !argv[2] || !*argv[2] || !argv[3] || !*argv[3]) {
+            Usage();
+            return kExitUsage;
+        }
+        return RuntimeEnable(argv[2], argv[3]);
+    }
+    if (command == L"runtime-disable") {
+        return argc == 2 ? RuntimeDisable() : kExitUsage;
     }
     if (command == L"unregister") {
         return argc == 2 ? UnregisterOwnedKeys() : kExitUsage;
