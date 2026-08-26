@@ -450,6 +450,10 @@ pub struct BinauralLiveParams {
     /// Distance low-pass on the direct path (air absorption): physically
     /// true indoors and outdoors, the natural "far sounds dull" cue.
     pub air_absorption: bool,
+    /// Use each ear's own source ray when selecting HRTF direction. This is
+    /// intended for source geometry supplied in real metres; default playback
+    /// keeps the established listener-centre HRTF lookup.
+    pub near_field_parallax: bool,
 }
 
 impl Default for BinauralLiveParams {
@@ -466,6 +470,7 @@ impl Default for BinauralLiveParams {
             reflections: BinauralReflections::default(),
             reverb: BinauralReverb::default(),
             air_absorption: true,
+            near_field_parallax: false,
         }
     }
 }
