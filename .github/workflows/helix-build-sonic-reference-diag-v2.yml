@@ -1,0 +1,78 @@
+name: Helix build Sonic reference diagnostic v2
+
+on:
+  push:
+    branches: [helix/sonic-reference-ab]
+    paths:
+      - '.github/workflows/helix-build-sonic-reference-diag-v2.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch-build-dispatch:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: helix/sonic-reference-ab
+          fetch-depth: 0
+
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: choco install windowsdriverkit11 -y --no-progress
+
+      - name: Apply topology diagnostic
+        shell: pwsh
+        run: |
+          python .helix/apply_sonic_topology_diag.py
+          if ($LASTEXITCODE -ne 0) { throw 'diagnostic patch failed' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'diagnostic patch produced whitespace errors' }
+
+      - name: Parse diagnostic installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $path = Join-Path $env:GITHUB_WORKSPACE 'omniphony-renderer\windows_installer\endpoint_apo\Install-OmniphonyAdaptive.ps1'
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | Format-List | Out-String | Write-Host
+            throw 'PowerShell parse failed'
+          }
+
+      - name: Compile instrumented Stream APO
+        shell: pwsh
+        run: |
+          $src = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\endpoint_apo"
+          $build = "$env:GITHUB_WORKSPACE\build\apo"
+          cmake -S $src -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+          cmake --build $build --config Release --target OmniphonyStreamAPO OmniphonyStreamApoSmoke
+          if ($LASTEXITCODE -ne 0) { throw 'instrumented Stream APO compile failed' }
+
+      - name: Commit tested diagnostic
+        shell: pwsh
+        run: |
+          git config user.name 'helix-ci'
+          git config user.email 'helix-ci@users.noreply.github.com'
+          git add omniphony-renderer/windows_installer/endpoint_apo/OmniphonyStreamAPO.cpp omniphony-renderer/windows_installer/endpoint_apo/Install-OmniphonyAdaptive.ps1
+          git commit -m 'diag(windows): trace Stream APO graph topology'
+          if ($LASTEXITCODE -ne 0) { throw "diagnostic commit failed: $LASTEXITCODE" }
+          git push origin HEAD:helix/sonic-reference-ab
+          if ($LASTEXITCODE -ne 0) { throw "diagnostic push failed: $LASTEXITCODE" }
+
+      - name: Dispatch full Windows installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run windows-installer.yml --ref helix/sonic-reference-ab
+          if ($LASTEXITCODE -ne 0) { throw 'installer dispatch failed' }
