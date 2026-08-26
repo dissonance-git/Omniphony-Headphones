@@ -1,6 +1,7 @@
 use scene_contract::authored_scene::{
     AuthoredObjectBlock, MetricPosition, SampleSpan, ear_distances_m, radial_distance_m,
 };
+use scene_contract::rational_time::{RationalSeconds, sample_span_from_rational_times};
 
 fn approx(left: f64, right: f64) {
     assert!((left - right).abs() < 1.0e-10, "{left} != {right}");
@@ -10,6 +11,26 @@ fn approx_position(left: MetricPosition, right: MetricPosition) {
     for axis in 0..3 {
         approx(left[axis], right[axis]);
     }
+}
+
+#[test]
+fn fractional_metadata_time_lowers_to_reference_half_open_samples() {
+    // 0.5 samples <= s < 1.5 samples affects integer sample 1 only.
+    let first = sample_span_from_rational_times(
+        RationalSeconds::new(1, 96_000).unwrap(),
+        RationalSeconds::new(1, 48_000).unwrap(),
+        48_000,
+    )
+    .unwrap();
+    let second = sample_span_from_rational_times(
+        RationalSeconds::new(3, 96_000).unwrap(),
+        RationalSeconds::new(1, 48_000).unwrap(),
+        48_000,
+    )
+    .unwrap();
+    assert_eq!(first, SampleSpan::new(1, 1));
+    assert_eq!(second, SampleSpan::new(2, 1));
+    assert_eq!(first.end_sample_exclusive(), second.start_sample);
 }
 
 #[test]
