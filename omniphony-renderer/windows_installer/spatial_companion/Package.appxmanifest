@@ -46,6 +46,7 @@
     <Application
       Id="Companion"
       Executable="OmniphonySpatialCompanion.exe"
+      EntryPoint="windows.fullTrustApplication"
       uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
@@ -76,6 +77,7 @@
     <Application
       Id="AppServiceProbe"
       Executable="OmniphonySpatialAppServiceProbeV17.exe"
+      EntryPoint="windows.fullTrustApplication"
       uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
@@ -96,6 +98,7 @@
     <Application
       Id="BrokerProbe"
       Executable="OmniphonySpatialBrokerProbeV22.exe"
+      EntryPoint="windows.fullTrustApplication"
       uap10:RuntimeBehavior="packagedClassicApp"
       uap10:TrustLevel="mediumIL">
       <uap:VisualElements
