@@ -542,6 +542,62 @@ pub struct OmniphonySpatialObjectProcessor {
     inner: AsyncSpatialObjects,
 }
 
+impl OmniphonySpatialObjectProcessor {
+    pub(crate) fn new_static_only(
+        sample_rate_hz: u32,
+        frames_per_quantum: u32,
+        static_objects: &[OmniphonySpatialObjectStaticDescriptor],
+    ) -> Result<Self, String> {
+        if sample_rate_hz == 0
+            || frames_per_quantum == 0
+            || static_objects.is_empty()
+            || static_objects.len() > 17
+        {
+            return Err("invalid static spatial object configuration".to_string());
+        }
+        let static_descriptors = copy_static_descriptors(static_objects)?;
+        let inner = AsyncSpatialObjects::new(
+            sample_rate_hz,
+            frames_per_quantum as usize,
+            static_descriptors,
+            0,
+        )?;
+        Ok(Self {
+            sample_rate_hz,
+            frames_per_quantum,
+            static_object_count: static_objects.len() as u32,
+            max_dynamic_objects: 0,
+            inner,
+        })
+    }
+
+    pub(crate) fn latency_frames(&self) -> usize {
+        self.inner.latency_frames()
+    }
+
+    pub(crate) fn processed_blocks(&self) -> u64 {
+        self.inner.processed_blocks.load(Ordering::Relaxed)
+    }
+
+    pub(crate) unsafe fn process_static_only(
+        &mut self,
+        static_input_planar: *const f32,
+        output_stereo: *mut f32,
+        frames: usize,
+    ) -> i32 {
+        unsafe {
+            self.inner.process_raw(
+                static_input_planar,
+                ptr::null(),
+                0,
+                ptr::null(),
+                output_stereo,
+                frames,
+            )
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn omniphony_spatial_objects_create(
     config: *const OmniphonySpatialObjectConfig,
@@ -613,7 +669,7 @@ pub unsafe extern "C" fn omniphony_spatial_objects_latency_frames(
     if processor.is_null() {
         0
     } else {
-        unsafe { (*processor).inner.latency_frames() }
+        unsafe { (*processor).latency_frames() }
     }
 }
 
@@ -624,7 +680,7 @@ pub unsafe extern "C" fn omniphony_spatial_objects_processed_blocks(
     if processor.is_null() {
         0
     } else {
-        unsafe { (*processor).inner.processed_blocks.load(Ordering::Relaxed) }
+        unsafe { (*processor).processed_blocks() }
     }
 }
 
