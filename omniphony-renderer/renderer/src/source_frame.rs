@@ -183,12 +183,55 @@ impl SourceFrameRenderer {
         samples_buf: Vec<f32>,
         measure_breakdown: bool,
     ) -> Result<RenderedFrame> {
+        self.render_source_frame_with_lane_activity(
+            input_pcm,
+            sources,
+            route_gain_preapplied,
+            extent_retention,
+            presentation_ramp_frames,
+            None,
+            sample_pos,
+            ramp_length,
+            samples_buf,
+            measure_breakdown,
+        )
+    }
+
+    /// Render a fixed physical lane topology with an optional activity sidecar.
+    ///
+    /// Inactive lanes reserve their channel index but own no source identity,
+    /// emit no spatial metadata event, and must contain zero PCM. A lane that
+    /// transitions from active to inactive has only its own renderer history
+    /// cleared, so sparse stable object slots can stay cheap without resetting
+    /// unrelated sources.
+    pub fn render_source_frame_with_lane_activity(
+        &mut self,
+        input_pcm: &[f32],
+        sources: &[SourceSceneEvidence],
+        route_gain_preapplied: Option<&[bool]>,
+        extent_retention: Option<&[f32]>,
+        presentation_ramp_frames: Option<&[u32]>,
+        active_lanes: Option<&[bool]>,
+        sample_pos: u64,
+        ramp_length: u32,
+        samples_buf: Vec<f32>,
+        measure_breakdown: bool,
+    ) -> Result<RenderedFrame> {
         let channels = sources.len();
         if let Some(flags) = route_gain_preapplied {
             if flags.len() != channels {
                 bail!(
                     "route gain policy width {} does not match {} source channels",
                     flags.len(),
+                    channels
+                );
+            }
+        }
+        if let Some(active) = active_lanes {
+            if active.len() != channels {
+                bail!(
+                    "lane-activity width {} does not match {} source channels",
+                    active.len(),
                     channels
                 );
             }
@@ -270,6 +313,17 @@ impl SourceFrameRenderer {
         self.events.clear();
         self.events.reserve(channels);
         for (channel_idx, source) in sources.iter().copied().enumerate() {
+            let active = active_lanes
+                .and_then(|lanes| lanes.get(channel_idx))
+                .copied()
+                .unwrap_or(true);
+            if !active {
+                if self.presentation_identity_initialized[channel_idx] {
+                    self.reset_channel_runtime_state(channel_idx);
+                }
+                continue;
+            }
+
             let identity = source_presentation_identity(&source);
             let identity_changed = self.presentation_identity_initialized[channel_idx]
                 && self.presentation_identities[channel_idx] != identity;
@@ -348,8 +402,17 @@ impl SourceFrameRenderer {
         // advance it before render_frame succeeds, or a failed block could make
         // the following call inherit a continuity decision that never sounded.
         for (channel_idx, source) in sources.iter().enumerate() {
-            self.presentation_identities[channel_idx] = source_presentation_identity(source);
-            self.presentation_identity_initialized[channel_idx] = true;
+            let active = active_lanes
+                .and_then(|lanes| lanes.get(channel_idx))
+                .copied()
+                .unwrap_or(true);
+            if active {
+                self.presentation_identities[channel_idx] = source_presentation_identity(source);
+                self.presentation_identity_initialized[channel_idx] = true;
+            } else {
+                self.presentation_identities[channel_idx] = None;
+                self.presentation_identity_initialized[channel_idx] = false;
+            }
         }
 
         Ok(rendered)
