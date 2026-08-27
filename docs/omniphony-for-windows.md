@@ -4,7 +4,7 @@ This document is the canonical **Windows product, ingress, egress, lifecycle, an
 
 It does not own current implementation status, experiment history, registry research notes, temporary development transports, or completed diagnostics. Current unresolved gates live in `../ROADMAP.md`; executable behavior lives in code/tests/CI; Git owns chronology.
 
-> **The Windows host may change. The Omniphony renderer and source-authority laws must survive the host.**
+> **Windows is the reference host, not the product boundary. The Omniphony renderer and source-authority laws must survive every host.**
 
 ## 1. Product boundary
 
@@ -32,7 +32,9 @@ Normal product operation should require:
 - preservation of the selected endpoint's verified baseline mix geometry rather than forcing a project-chosen channel count merely to prove a route;
 - ordinary Current processing that does not depend on Windows Sonic or another Spatial Sound provider being selected.
 
-Windows is the first host, not the architecture of Omniphony.
+Windows is the first and current reference host, not the architecture of Omniphony. It is where endpoint behavior, native spatial ingress, physical listening, recovery, installer lifecycle, and the reference product experience are being perfected first because it is the actively used development environment.
+
+That priority is sequencing, not platform lock-in. The accepted renderer, canonical scene contract, source-authority rules, stereo presentation law, and final binaural stage are intended to be reused by future macOS, Linux, and Android hosts. Those ports may require different system-audio and spatial-ingress adapters, but they must not create separate Omniphony scene models or alternate product identities.
 
 ## 2. Host/core ownership
 
@@ -66,6 +68,8 @@ binaural output
 ```
 
 Windows adapters lower native role/object metadata into the host-neutral scene contract before renderer DSP. Compatibility entry points may wrap that canonical path, but they may not own a second worker model, fallback mixer, lifecycle model, scene vocabulary, or object renderer.
+
+The Windows adapter is the reference implementation of this boundary, not the definition of it. A future Core Audio, Linux audio-stack, or Android adapter must be able to supply the same canonical scene without importing WASAPI, WDK, COM, registry, APO, or Windows Spatial Sound concepts into portable code. When another platform exposes different source metadata, preserve the strongest trustworthy representation that platform actually supplies and adapt it into the same source-authority model.
 
 Do not move endpoint identities, registry state, WASAPI concepts, COM lifetime rules, provider registration, tray/service state, or installer state into portable renderer semantics.
 
@@ -359,7 +363,7 @@ Do not promote Windows capability beyond the strongest boundary actually crossed
 
 Current unresolved proof obligations belong in `../ROADMAP.md`. Once resolved, fold only the durable product consequence here or into executable tests/code. Do not create a provider research archive.
 
-## 17. Stable product target
+## 17. Stable Windows reference target
 
 The Windows host should grow upward in source authority without changing Omniphony's identity:
 
@@ -371,3 +375,5 @@ stereo
 ```
 
 Each richer representation should preserve more source truth, require less inference, converge on the same portable renderer, and reach the headphones through exactly one final binaural render.
+
+Once Windows has proven these semantics end to end, later platform hosts should reuse that portable core and repeat only the platform-specific ingress, egress, lifecycle, packaging, and application-compatibility proofs. A Windows-specific workaround is not a portable feature unless its durable semantic consequence can be expressed without Windows concepts.
