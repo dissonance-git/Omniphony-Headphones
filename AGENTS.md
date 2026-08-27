@@ -173,9 +173,11 @@ Pure mechanical build, packaging, CI, formatting, or compile repairs do not requ
 
 Research is an input to a decision, not a permanent documentation category.
 
-## 7. Core independence
+## 7. Core independence and host portability
 
-The renderer, inference, source scene, and DSP core remain portable and independent of Windows.
+The renderer, inference, source scene, spatial compilation, and DSP core remain portable and independent of any one operating system.
+
+Windows is the current reference/hardening host because it is the actively used environment for physical listening, endpoint integration, installer behavior, and native spatial-ingress proof. That priority must not turn Windows behavior into portable renderer law. Future macOS, Linux, and Android hosts are expected to reuse the same canonical scene, source-authority semantics, presentation rules, and final binaural renderer through platform-specific adapters.
 
 Portable core owns:
 
@@ -195,6 +197,8 @@ Keep the portable scene contract below the renderer. Host adapters and renderers
 
 The scene contract owns source identity continuity, metric geometry, exact rational-to-sample timing semantics, and bounded stable source slots. The renderer owns presentation and DSP. Platform adapters own translation from native APIs into the scene contract.
 
+A host port is an adapter and lifecycle implementation, not permission to fork product semantics. Windows Spatial Audio, Core Audio, Linux audio stacks, Android audio APIs, or any later platform seam may differ in what source truth they expose, but they must lower the strongest trustworthy representation they actually provide into the same portable contract. Do not flatten richer source truth merely to make two host implementations look structurally identical.
+
 Platform hosts own:
 
 ```text
@@ -207,7 +211,9 @@ platform UI/service integration
 installation/update/uninstall
 ```
 
-Do not move endpoint identities, registry rules, WASAPI/WDK state, tray/service concepts, or installer lifecycle into portable renderer semantics to solve host problems.
+Do not move endpoint identities, registry rules, WASAPI/WDK state, Core Audio state, Linux audio-server state, Android audio/session state, tray/service concepts, or installer/package lifecycle into portable renderer semantics to solve host problems.
+
+The portable acceptance test for architecture work is therefore stronger than “works on Windows”: the same canonical source scene and renderer behavior must remain usable by a future host without inheriting Windows-only concepts. Windows may be perfected first; it may not become the hidden ABI of Omniphony.
 
 ## 8. Source authority
 
