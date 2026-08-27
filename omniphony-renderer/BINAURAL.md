@@ -77,7 +77,7 @@ The provider is a rendering/calibration input. It does not define auditory-objec
 
 The important acceptance property is smooth filter evolution with direction.
 
-For irregular future HRTF datasets, native triangulated-sphere interpolation is a candidate to compare against the current regularized-grid approach. It must win measured continuity/error tests before replacing the current path.
+For irregular future HRTF datasets, native triangulated-sphere interpolation remains a future research option. It is not part of Current baseline cleanup; because it can change front/back/elevation spectral cues, it must be treated as a separately listening-gated sound change before replacing the accepted path.
 
 ---
 
@@ -175,41 +175,17 @@ Profile/calibration switching should reuse the same law.
 
 ## 7. Early room
 
-The early room currently uses six first-order shoebox image sources.
+Omniphony has two bounded early-room uses.
 
-Each reflection carries:
+For ordinary known-scene/object rendering, the generic room path uses six first-order shoebox image sources. Each reflection carries relative geometric propagation delay, directional per-ear ITD, and broadband interaural level difference. The common propagation delay is relative to the direct path, so the early room does not add blanket latency to the direct object.
 
-```text
-relative geometric propagation delay
-+
-directional per-ear ITD
-+
-broadband interaural level difference
-```
+The protected stereo-music presentation uses a richer but still bounded measured-HRTF early field. First-order support reflections are routed through a fixed clustered set of measured-HRTF direction buses. Front and top-front lanes additionally redistribute a bounded share of their existing early tap power into physically derived second-order shoebox image paths.
 
-The common propagation delay is relative to the direct path, so early-room rendering does not add a blanket latency to the direct object.
+Those promoted order-2 paths keep their actual image directions through four dedicated measured-HRTF precision buses instead of collapsing onto the final-wall direction. Their delay, wall tone, and distance loss remain path-specific. The total front early tap-power budget is conserved, so stronger frontal externalization is not purchased by adding room energy.
 
-### Why the reflection ITD matters
+Below 300 Hz, the music early field preserves reflection timing/envelope while collapsing directional ITD into a coherent return. Above that boundary, measured HRTF structure carries the directional spectral information. The rear, first-order field, late enclosure, direct master, and coherent foundation remain separate owners.
 
-The older path gave reflected energy left/right level differences but identical arrival times at both ears.
-
-That created an incomplete binaural room shell.
-
-The current reflection bank has independent left/right delay taps and derives each reflection's ITD from the reflected image direction using the same analytic ear-delay model as the direct path.
-
-### What early reflections do not yet do
-
-Each reflection does **not** currently receive a full separate HRTF convolution.
-
-That is intentional.
-
-The current layer is a cheap directional externalization cue:
-
-```text
-geometry + propagation delay + ITD + ILD
-```
-
-A full reflection HRTF path should be added only if controlled listening/measurement shows enough improvement to justify the CPU cost.
+A literal full HRTF convolution for every image of every support source is still intentionally avoided. Bounded clustering is the realtime compromise; any future replacement must preserve the accepted frontal boundary and musical invariants before it can replace this baseline.
 
 ---
 
