@@ -103,7 +103,7 @@ Measure localization, front/back, elevation, motion continuity, frontal external
 
 Level-match where needed, separate localization from tonal preference, separate source geometry from room/externalization effects, and preserve a winning baseline before each sound-changing experiment.
 
-Current bounded stereo listening candidate: preserve the true order-2 image direction of front/top-front early reflections through four dedicated measured-HRTF buses while conserving the accepted front early tap-power budget and sub-300 Hz coherent return. Keep it outside the protected default until physical A/B either promotes it or deletes it.
+The accepted stereo baseline now includes true-direction front/top-front order-2 early geometry. Current cleanup is conservative: strengthen regression/diagnostic coverage and simplify ownership without changing the accepted master, rear field, first-order geometry, late enclosure, bass/foundation, front early power budget, or sub-300 Hz coherence. Do not mix HRTF-set selection, personalization, or interpolation experiments into this cleanup.
 
 **Gate:** remaining deficits can be attributed to the binaural renderer itself because source geometry and source authority are controlled.
 
@@ -129,9 +129,9 @@ Any sound-changing distance/HRTF candidate must remain independently switchable 
 
 ---
 
-## 8. Turn HRTF flexibility into listener personalization
+## 8. Deferred optional HRTF personalization
 
-Create a coherent optional listener-facing HRTF workflow:
+This is a future feature, not part of the Current baseline-cleanup frontier. When deliberately reopened, create a coherent optional listener-facing HRTF workflow:
 
 - repeatable A/B comparison without unrelated DSP changes;
 - useful generic HRTF choices where evidence supports them;
@@ -239,10 +239,10 @@ prove closed-gate physical spatial egress
 → prove a real spatial application/game
 → offline authored-scene conformance + controlled renderer comparisons
 → authored radial-distance / near-field rendering
-→ HRTF personalization
 → already-binaural policy + Windows hardening
 → stable portable scene API
 → public release
+→ optional HRTF personalization
 → optional head-tracking integration when advertised
 ```
 
