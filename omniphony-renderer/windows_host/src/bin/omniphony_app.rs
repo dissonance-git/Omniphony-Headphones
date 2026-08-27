@@ -63,10 +63,9 @@ fn run_audio_engine() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        // Spatial is the private Windows-product shell. The renderer internals
-        // retain their Omniphony identity while the transport/product layer is
-        // replaced. A second copy of this executable is used only as the
-        // crash-isolated internal audio-engine child.
+        // Omniphony.exe is the Windows reference-host shell. A second copy of
+        // this executable is used only as the crash-isolated internal
+        // audio-engine child; portable renderer semantics remain outside it.
         if std::env::var_os("OMNIPHONY_INTERNAL_ENGINE").is_some() {
             return run_audio_engine();
         }
@@ -75,6 +74,6 @@ fn main() -> anyhow::Result<()> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        anyhow::bail!("Spatial is only available on Windows");
+        anyhow::bail!("Omniphony Windows host is only available on Windows");
     }
 }

@@ -3,6 +3,11 @@ name: Renderer perf-gate compile check
 on:
   push:
     branches: [main]
+    paths:
+      - "omniphony-renderer/renderer/**"
+      - "omniphony-renderer/Cargo.toml"
+      - "omniphony-renderer/Cargo.lock"
+      - ".github/workflows/perf-gate-compile.yml"
   workflow_dispatch:
 
 permissions:

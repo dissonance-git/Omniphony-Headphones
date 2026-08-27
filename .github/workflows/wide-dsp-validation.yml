@@ -25,7 +25,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: omniphony-wide-dsp-${{ github.ref }}
+  # Bind cancellation to duplicate validation of one commit, not to the shared
+  # main ref used by concurrent agents.
+  group: omniphony-wide-dsp-${{ github.sha }}
   cancel-in-progress: true
 
 env:

@@ -3,15 +3,25 @@ name: Omniphony renderer
 on:
   push:
     branches: [main]
+    paths:
+      - "omniphony-renderer/**"
+      - "layouts/**"
+      - ".github/workflows/windows-renderer.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "omniphony-renderer/**"
+      - "layouts/**"
+      - ".github/workflows/windows-renderer.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: omniphony-renderer-${{ github.ref }}
+  # Distinct main commits may belong to different concurrent agents. Do not
+  # cancel one exact-SHA validation merely because another commit landed.
+  group: omniphony-renderer-${{ github.sha }}
   cancel-in-progress: true
 
 env:
@@ -125,7 +135,7 @@ jobs:
         run: cargo test -p windows_host --bin omniphony_app music_engine::tests
 
   windows-live-artifact:
-    name: Windows x64 Omniphony prototype
+    name: Windows x64 Omniphony reference host
     runs-on: windows-latest
     needs: [portable-core, windows-core]
     timeout-minutes: 35
@@ -157,7 +167,7 @@ jobs:
       - name: Build causal source renderer DLL
         run: cargo build --profile release-deploy -p source_ffi
 
-      - name: Collect minimal development runtime
+      - name: Collect minimal reference runtime
         run: |
           $dist = Join-Path $PWD 'dist\windows-x64'
           New-Item -ItemType Directory -Path $dist -Force | Out-Null
@@ -189,7 +199,7 @@ jobs:
           }
           Get-ChildItem $dist | Format-Table Name, Length
 
-      - name: Upload native Windows prototype
+      - name: Upload Windows reference host
         uses: actions/upload-artifact@v6
         with:
           name: omniphony-windows-x64-${{ github.sha }}
