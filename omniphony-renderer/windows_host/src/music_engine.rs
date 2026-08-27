@@ -14,7 +14,7 @@ use wasapi::{
     make_channelmasks,
 };
 
-use crate::music_support::{MusicSupportRenderer, SpatialProfile};
+use orender_engine::current_music_support::CurrentMusicSupportRenderer;
 
 const SAMPLE_RATE_HZ: u32 = 48_000;
 /// Emergency burst reservoir between the capture/DSP producer and WASAPI.
@@ -336,7 +336,6 @@ fn report_playback_transport(telemetry: &PlaybackTelemetry) {
 
 pub fn run() -> anyhow::Result<()> {
     let args = parse_args()?;
-    let profile = SpatialProfile::from_env()?;
     let host = cpal::default_host();
     let output_device = choose_output_device(&host, args.output.as_deref())?;
     let output_name = output_device
@@ -344,10 +343,10 @@ pub fn run() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "<unavailable output name>".to_string());
     let (output_format, output_config) = choose_output_config(&output_device, SAMPLE_RATE_HZ)?;
     let mut loopback = LoopbackCapture::open_stereo(SAMPLE_RATE_HZ)?;
-    let mut support_renderer = MusicSupportRenderer::new(profile, SAMPLE_RATE_HZ)?;
+    let mut support_renderer = CurrentMusicSupportRenderer::new(SAMPLE_RATE_HZ)?;
 
     println!("Omniphony for Headphones - protected-master full-sphere renderer");
-    println!("  profile: {}", profile.as_str());
+    println!("  profile: current");
     println!("  capture: {SAMPLE_RATE_HZ} Hz / stereo / f32 process loopback");
     println!("  output:  {output_name}");
     println!("  direct:  captured stereo master remains authoritative");
@@ -355,14 +354,7 @@ pub fn run() -> anyhow::Result<()> {
     println!("  field:   below 320 Hz protected; 320+ Hz uses 12 evidence lanes");
     println!("  height:  vertical extent from already-spatial evidence + coherent transfer");
     println!("  foundation: coherent pressure/body delta, no LFE/compression/saturation");
-    println!(
-        "  support route: {}",
-        if support_renderer.is_hybrid() {
-            "8 non-height lanes -> cascaded world; 4 height lanes -> direct HRTF; exclusive recombination"
-        } else {
-            "single native Omniphony spatial path"
-        }
-    );
+    println!("  support route: single native Omniphony spatial path");
     println!(
         "  support: {:.0}% derived-field mix, linear master+foundation+support summing",
         FIELD_SUPPORT_GAIN * 100.0

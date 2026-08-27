@@ -37,21 +37,16 @@ const ID_TOGGLE: usize = 2002;
 const ID_RESTART: usize = 2003;
 const ID_AUTOSTART: usize = 2004;
 const ID_EXIT: usize = 2005;
-const ID_EQ: usize = 2006;
-const ID_NOIRE_X_ENHANCEMENT: usize = 2007;
-const ID_OUTPUT_TRIM: usize = 2008;
-
-const EQ_PRESET_FILE_NAME: &str = "eq-preset.txt";
-const ENHANCEMENT_FILE_NAME: &str = "noire-x-enhancement.txt";
-const OUTPUT_TRIM_FILE_NAME: &str = "output-trim.txt";
 
 const RESTART_DELAY: Duration = Duration::from_secs(2);
 const AUTOSTART_VALUE: &str = "Omniphony";
+const LEGACY_AUTOSTART_VALUE: &str = "Spatial";
 const AUTOSTART_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
 struct AppState {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
+    /// User intent. When false, there must be no audio-engine child process.
     enabled: bool,
     quitting: bool,
     next_restart: Option<Instant>,
@@ -109,6 +104,8 @@ fn taskbar_created_message() -> u32 {
 }
 
 fn claim_single_instance() -> anyhow::Result<Option<HandleGuard>> {
+    // Keep the long-lived mutex name so older private builds cannot run beside
+    // the installed tray supervisor.
     let name = wide("Local\\OmniphonyForHeadphones.Singleton");
     let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
     if handle.is_null() {
@@ -124,10 +121,10 @@ fn claim_single_instance() -> anyhow::Result<Option<HandleGuard>> {
 }
 
 fn executable_root() -> anyhow::Result<PathBuf> {
-    let exe = std::env::current_exe().context("failed to resolve Omniphony.exe path")?;
+    let exe = std::env::current_exe().context("failed to resolve Omniphony executable path")?;
     Ok(exe
         .parent()
-        .context("Omniphony.exe has no parent directory")?
+        .context("Omniphony executable has no parent directory")?
         .to_path_buf())
 }
 
@@ -138,62 +135,14 @@ fn settings_root() -> PathBuf {
         .join("Omniphony")
 }
 
-fn audio_settings_root() -> PathBuf {
-    std::env::var_os("ProgramData")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
-        .join("Omniphony")
-}
-
-fn audio_setting_path(name: &str) -> PathBuf {
-    audio_settings_root().join(name)
-}
-
-fn setting_is_enabled(name: &str, default_enabled: bool) -> bool {
-    let path = audio_setting_path(name);
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return default_enabled;
-    };
-    !matches!(
-        text.trim().to_ascii_lowercase().as_str(),
-        "0" | "0db" | "off" | "false" | "disabled" | "none" | "flat"
-    )
-}
-
-fn write_audio_setting(name: &str, value: &str) -> anyhow::Result<()> {
-    let root = audio_settings_root();
-    create_dir_all(&root).context("failed to create Omniphony audio settings directory")?;
-    let path = root.join(name);
-    std::fs::write(&path, format!("{value}\n"))
-        .with_context(|| format!("failed to write {}", path.display()))
-}
-
-fn eq_enabled() -> bool {
-    setting_is_enabled(EQ_PRESET_FILE_NAME, true)
-}
-
-fn enhancement_enabled() -> bool {
-    setting_is_enabled(ENHANCEMENT_FILE_NAME, true)
-}
-
-fn output_trim_enabled() -> bool {
-    setting_is_enabled(OUTPUT_TRIM_FILE_NAME, true)
-}
-
-fn toggle_audio_setting(name: &str, enabled: bool, on_value: &str) {
-    let value = if enabled { on_value } else { "off" };
-    if let Err(err) = write_audio_setting(name, value) {
-        append_log(&format!("could not change {name}: {err:#}"));
-    } else {
-        append_log(&format!("audio preference {name} -> {value}"));
-    }
+fn runtime_log_path() -> PathBuf {
+    let root = settings_root();
+    let _ = create_dir_all(&root);
+    root.join("omniphony.log")
 }
 
 fn append_log(message: &str) {
-    let Ok(root) = executable_root() else {
-        return;
-    };
-    let path = root.join("omniphony.log");
+    let path = runtime_log_path();
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(file, "[supervisor] {message}");
     }
@@ -207,13 +156,25 @@ fn autostart_preferred() -> bool {
     !autostart_marker().is_file()
 }
 
-fn set_run_entry(enabled: bool) -> anyhow::Result<()> {
+fn delete_run_value(name: &str) {
     let mut command = Command::new("reg.exe");
-    command.creation_flags(CREATE_NO_WINDOW);
+    command
+        .creation_flags(CREATE_NO_WINDOW)
+        .arg("DELETE")
+        .arg(AUTOSTART_KEY)
+        .arg("/v")
+        .arg(name)
+        .arg("/f");
+    let _ = command.status();
+}
+
+fn set_run_entry(enabled: bool) -> anyhow::Result<()> {
     if enabled {
-        let exe = std::env::current_exe().context("failed to resolve autostart executable")?;
+        let exe = std::env::current_exe().context("failed to resolve Omniphony autostart executable")?;
         let value = format!("\"{}\"", exe.display());
+        let mut command = Command::new("reg.exe");
         command
+            .creation_flags(CREATE_NO_WINDOW)
             .arg("ADD")
             .arg(AUTOSTART_KEY)
             .arg("/v")
@@ -223,17 +184,14 @@ fn set_run_entry(enabled: bool) -> anyhow::Result<()> {
             .arg("/d")
             .arg(value)
             .arg("/f");
+        let status = command.status().context("failed to launch reg.exe")?;
+        if !status.success() {
+            bail!("reg.exe could not register Omniphony autostart");
+        }
+        delete_run_value(LEGACY_AUTOSTART_VALUE);
     } else {
-        command
-            .arg("DELETE")
-            .arg(AUTOSTART_KEY)
-            .arg("/v")
-            .arg(AUTOSTART_VALUE)
-            .arg("/f");
-    }
-    let status = command.status().context("failed to launch reg.exe")?;
-    if enabled && !status.success() {
-        bail!("reg.exe could not register Omniphony autostart");
+        delete_run_value(AUTOSTART_VALUE);
+        delete_run_value(LEGACY_AUTOSTART_VALUE);
     }
     Ok(())
 }
@@ -259,55 +217,118 @@ fn ensure_autostart() {
         if let Err(err) = set_run_entry(true) {
             append_log(&format!("autostart registration failed: {err:#}"));
         }
+    } else {
+        let _ = set_run_entry(false);
     }
 }
 
-fn spawn_worker(enabled: bool) -> anyhow::Result<()> {
-    let root = executable_root()?;
-    let executable =
-        std::env::current_exe().context("failed to resolve Omniphony engine executable")?;
+fn transport_state_path() -> Option<PathBuf> {
+    std::env::var_os("PROGRAMDATA")
+        .map(PathBuf::from)
+        .map(|root| root.join("Omniphony").join("development-transport.txt"))
+}
 
-    let log_path = root.join("omniphony.log");
+fn repair_transport_default() {
+    let Some(state_path) = transport_state_path() else {
+        append_log("PROGRAMDATA unavailable; transport default was not reasserted");
+        return;
+    };
+    let Ok(transport) = std::fs::read_to_string(&state_path) else {
+        append_log("transport state unavailable; leaving Windows default endpoint unchanged");
+        return;
+    };
+    let needles: &[&str] = match transport.trim() {
+        "steam-streaming-speakers" => &["Steam Streaming Speakers"],
+        "omniphony-development-endpoint" => &["Omniphony", "Spatial"],
+        other => {
+            append_log(&format!("unknown transport state '{other}'; default endpoint unchanged"));
+            return;
+        }
+    };
+
+    let Ok(root) = executable_root() else {
+        append_log("could not resolve install root for transport repair");
+        return;
+    };
+    let helper = root.join("support").join("OmniphonyEndpointCtl.exe");
+    if !helper.is_file() {
+        append_log(&format!("transport helper missing: {}", helper.display()));
+        return;
+    }
+
+    let mut command = Command::new(&helper);
+    command
+        .creation_flags(CREATE_NO_WINDOW)
+        .arg("set-default-name");
+    for needle in needles {
+        command.arg(needle);
+    }
+    match command.output() {
+        Ok(output) if output.status.success() => {
+            append_log(&format!("reasserted Windows transport default: {}", needles.join(" / ")));
+        }
+        Ok(output) => {
+            append_log(&format!(
+                "transport default repair failed with exit code {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Err(err) => append_log(&format!("transport default repair could not launch: {err}")),
+    }
+}
+
+fn spawn_worker() -> anyhow::Result<()> {
+    {
+        let app = state().lock().expect("Omniphony supervisor state poisoned");
+        if !app.enabled || app.quitting || app.child.is_some() {
+            return Ok(());
+        }
+    }
+
+    // The installer chooses and records the hidden routing endpoint once. Every
+    // engine start reasserts that choice before capture begins so boot/device
+    // churn cannot silently bypass Omniphony and send a second dry stream to the
+    // physical FiiO endpoint.
+    repair_transport_default();
+
+    let root = executable_root()?;
+    let executable = std::env::current_exe().context("failed to resolve Omniphony engine executable")?;
+
+    let log_path = runtime_log_path();
     let log = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
         .with_context(|| format!("failed to open {}", log_path.display()))?;
-    let log_err = log
-        .try_clone()
-        .context("failed to clone Omniphony log handle")?;
+    let log_err = log.try_clone().context("failed to clone Omniphony log handle")?;
 
-    let mut command = Command::new(&executable);
-    command
+    let mut child = Command::new(&executable)
         .current_dir(&root)
         .env("OMNIPHONY_INTERNAL_ENGINE", "1")
-        // The measured-HRTF early-reflection path is the promoted Current model.
-        // Pin it here so old user-level profile variables/preferences cannot
-        // silently return normal playback to a retired listening control.
         .env("OMNIPHONY_PROFILE", "external")
         .stdin(Stdio::piped())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err))
-        .creation_flags(CREATE_NO_WINDOW);
-    if !enabled {
-        command.arg("--start-off");
-    }
-
-    let mut child = command.spawn().with_context(|| {
-        format!(
-            "failed to launch internal audio engine from {}",
-            executable.display()
-        )
-    })?;
-    let stdin = child
-        .stdin
-        .take()
-        .context("audio engine stdin was not piped")?;
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to launch internal audio engine from {}",
+                executable.display()
+            )
+        })?;
+    let stdin = child.stdin.take().context("audio engine stdin was not piped")?;
 
     let mut app = state().lock().expect("Omniphony supervisor state poisoned");
+    if !app.enabled || app.quitting {
+        drop(app);
+        let _ = child.kill();
+        let _ = child.wait();
+        return Ok(());
+    }
     app.child = Some(child);
     app.stdin = Some(stdin);
-    app.enabled = enabled;
     app.next_restart = None;
     append_log("audio engine started with Current model");
     Ok(())
@@ -316,6 +337,7 @@ fn spawn_worker(enabled: bool) -> anyhow::Result<()> {
 fn stop_worker() {
     let (mut child, mut stdin) = {
         let mut app = state().lock().expect("Omniphony supervisor state poisoned");
+        app.next_restart = None;
         (app.child.take(), app.stdin.take())
     };
 
@@ -340,20 +362,49 @@ fn stop_worker() {
 fn schedule_restart(detail: &str) {
     append_log(detail);
     let mut app = state().lock().expect("Omniphony supervisor state poisoned");
-    if !app.quitting {
+    if app.enabled && !app.quitting {
         app.next_restart = Some(Instant::now() + RESTART_DELAY);
         app.restart_count = app.restart_count.saturating_add(1);
+    } else {
+        app.next_restart = None;
     }
 }
 
-fn restart_worker(hwnd: HWND, enabled: bool) {
+fn set_enabled(hwnd: HWND, enabled: bool) {
     {
         let mut app = state().lock().expect("Omniphony supervisor state poisoned");
         app.enabled = enabled;
         app.next_restart = None;
     }
+
+    if enabled {
+        append_log("Omniphony ON requested");
+        if let Err(err) = spawn_worker() {
+            schedule_restart(&format!("audio engine start failed: {err:#}"));
+        }
+    } else {
+        append_log("Omniphony OFF requested; stopping audio engine");
+        stop_worker();
+    }
+    update_tray_tip(hwnd);
+}
+
+fn restart_worker(hwnd: HWND) {
+    let enabled = state()
+        .lock()
+        .expect("Omniphony supervisor state poisoned")
+        .enabled;
+    if !enabled {
+        update_tray_tip(hwnd);
+        return;
+    }
+
+    {
+        let mut app = state().lock().expect("Omniphony supervisor state poisoned");
+        app.next_restart = None;
+    }
     stop_worker();
-    if let Err(err) = spawn_worker(enabled) {
+    if let Err(err) = spawn_worker() {
         schedule_restart(&format!("audio engine restart failed: {err:#}"));
     }
     update_tray_tip(hwnd);
@@ -371,9 +422,11 @@ fn poll_worker(hwnd: HWND) {
                     exited = Some(format!("audio engine exited: {status}"));
                     app.child = None;
                     app.stdin = None;
-                    if !app.quitting {
+                    if app.enabled && !app.quitting {
                         app.next_restart = Some(now + RESTART_DELAY);
                         app.restart_count = app.restart_count.saturating_add(1);
+                    } else {
+                        app.next_restart = None;
                     }
                 }
                 Ok(None) => {}
@@ -381,13 +434,16 @@ fn poll_worker(hwnd: HWND) {
                     exited = Some(format!("audio engine status failed: {err}"));
                     app.child = None;
                     app.stdin = None;
-                    if !app.quitting {
+                    if app.enabled && !app.quitting {
                         app.next_restart = Some(now + RESTART_DELAY);
                         app.restart_count = app.restart_count.saturating_add(1);
+                    } else {
+                        app.next_restart = None;
                     }
                 }
             }
-        } else if !app.quitting
+        } else if app.enabled
+            && !app.quitting
             && app
                 .next_restart
                 .map(|deadline| now >= deadline)
@@ -402,11 +458,7 @@ fn poll_worker(hwnd: HWND) {
         append_log(&detail);
     }
     if retry {
-        let enabled = state()
-            .lock()
-            .expect("Omniphony supervisor state poisoned")
-            .enabled;
-        if let Err(err) = spawn_worker(enabled) {
+        if let Err(err) = spawn_worker() {
             schedule_restart(&format!("automatic audio recovery failed: {err:#}"));
         }
     }
@@ -415,14 +467,12 @@ fn poll_worker(hwnd: HWND) {
 
 fn tray_status() -> String {
     let app = state().lock().expect("Omniphony supervisor state poisoned");
-    if app.child.is_some() {
-        if app.enabled {
-            "Omniphony - ON - Current model".to_string()
-        } else {
-            "Omniphony - clean bypass".to_string()
-        }
-    } else if app.quitting {
+    if app.quitting {
         "Omniphony - stopping".to_string()
+    } else if !app.enabled {
+        "Omniphony - OFF".to_string()
+    } else if app.child.is_some() {
+        "Omniphony - ON - Current model".to_string()
     } else {
         format!("Omniphony - recovering audio ({})", app.restart_count)
     }
@@ -481,12 +531,10 @@ fn show_tray_menu(hwnd: HWND) {
         let app = state().lock().expect("Omniphony supervisor state poisoned");
         (app.child.is_some(), app.enabled, app.restart_count)
     };
-    let status = if running {
-        if enabled {
-            "Omniphony: ON | Current model".to_string()
-        } else {
-            "Omniphony: clean bypass".to_string()
-        }
+    let status = if !enabled {
+        "Omniphony: OFF".to_string()
+    } else if running {
+        "Omniphony: ON | Current model".to_string()
     } else {
         format!("Omniphony: recovering ({restarts})")
     };
@@ -494,35 +542,20 @@ fn show_tray_menu(hwnd: HWND) {
     append_menu_item(menu, MF_STRING | MF_GRAYED, ID_STATUS, &status);
     append_menu_item(
         menu,
-        MF_STRING | if enabled { MF_CHECKED } else { 0 },
+        MF_STRING,
         ID_TOGGLE,
-        "Omniphony enabled",
-    );
-    unsafe {
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-    }
-    append_menu_item(
-        menu,
-        MF_STRING | if eq_enabled() { MF_CHECKED } else { 0 },
-        ID_EQ,
-        "Headphone EQ: Noire X",
+        if enabled {
+            "Turn Omniphony off"
+        } else {
+            "Turn Omniphony on"
+        },
     );
     append_menu_item(
         menu,
-        MF_STRING | if enhancement_enabled() { MF_CHECKED } else { 0 },
-        ID_NOIRE_X_ENHANCEMENT,
-        "Noire X Enhancement",
+        MF_STRING | if enabled { 0 } else { MF_GRAYED },
+        ID_RESTART,
+        "Restart audio engine",
     );
-    append_menu_item(
-        menu,
-        MF_STRING | if output_trim_enabled() { MF_CHECKED } else { 0 },
-        ID_OUTPUT_TRIM,
-        "Output trim: +1.5 dB",
-    );
-    unsafe {
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-    }
-    append_menu_item(menu, MF_STRING, ID_RESTART, "Restart audio engine");
     append_menu_item(
         menu,
         MF_STRING | if autostart_preferred() { MF_CHECKED } else { 0 },
@@ -556,6 +589,7 @@ fn shutdown(hwnd: HWND) {
     {
         let mut app = state().lock().expect("Omniphony supervisor state poisoned");
         app.quitting = true;
+        app.enabled = false;
         app.next_restart = None;
     }
     remove_tray_icon(hwnd);
@@ -580,7 +614,7 @@ unsafe extern "system" fn window_proc(
             unsafe {
                 SetTimer(hwnd, TIMER_ID, 500, None);
             }
-            if let Err(err) = spawn_worker(true) {
+            if let Err(err) = spawn_worker() {
                 schedule_restart(&format!("initial audio engine start failed: {err:#}"));
                 update_tray_tip(hwnd);
             }
@@ -601,28 +635,9 @@ unsafe extern "system" fn window_proc(
                         .lock()
                         .expect("Omniphony supervisor state poisoned")
                         .enabled;
-                    restart_worker(hwnd, !enabled);
+                    set_enabled(hwnd, !enabled);
                 }
-                ID_EQ => {
-                    toggle_audio_setting(EQ_PRESET_FILE_NAME, !eq_enabled(), "on");
-                }
-                ID_NOIRE_X_ENHANCEMENT => {
-                    toggle_audio_setting(
-                        ENHANCEMENT_FILE_NAME,
-                        !enhancement_enabled(),
-                        "on",
-                    );
-                }
-                ID_OUTPUT_TRIM => {
-                    toggle_audio_setting(OUTPUT_TRIM_FILE_NAME, !output_trim_enabled(), "+1.5");
-                }
-                ID_RESTART => {
-                    let enabled = state()
-                        .lock()
-                        .expect("Omniphony supervisor state poisoned")
-                        .enabled;
-                    restart_worker(hwnd, enabled);
-                }
+                ID_RESTART => restart_worker(hwnd),
                 ID_AUTOSTART => {
                     let desired = !autostart_preferred();
                     if let Err(err) = set_autostart(desired) {
@@ -674,8 +689,8 @@ pub fn run() -> anyhow::Result<()> {
         bail!("GetModuleHandleW failed");
     }
 
-    let class_name = wide("OmniphonyForHeadphonesSupervisor");
-    let title = wide("Omniphony for Headphones");
+    let class_name = wide("OmniphonyAudioSupervisor");
+    let title = wide("Omniphony");
     let mut class: WNDCLASSW = unsafe { std::mem::zeroed() };
     class.lpfnWndProc = Some(window_proc);
     class.hInstance = instance;
@@ -686,8 +701,7 @@ pub fn run() -> anyhow::Result<()> {
         bail!("RegisterClassW failed");
     }
 
-    // Invisible top-level window: owns the tray callback and watchdog timer but
-    // is never shown, so normal Omniphony operation has no taskbar presence.
+    // Invisible top-level window: owns tray callbacks and watchdog timing only.
     let hwnd = unsafe {
         CreateWindowExW(
             0,

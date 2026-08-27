@@ -1,15 +1,11 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 #[cfg(target_os = "windows")]
-#[path = "../spatial_supervisor.rs"]
+#[path = "../supervisor.rs"]
 mod supervisor;
 
 #[cfg(target_os = "windows")]
-#[path = "../music_support.rs"]
-mod music_support;
-
-#[cfg(target_os = "windows")]
-#[path = "../music_worker_evidence.rs"]
+#[path = "../music_engine.rs"]
 mod music_engine;
 
 #[cfg(target_os = "windows")]

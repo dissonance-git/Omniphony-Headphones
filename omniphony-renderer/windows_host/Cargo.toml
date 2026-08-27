@@ -3,38 +3,30 @@ name = "windows_host"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Thin native Windows audio host for Omniphony; WASAPI-first and independent of the optional ASIO route"
+autobins = false
+description = "Windows reference host and tray lifecycle for the portable Omniphony renderer"
+
+[[bin]]
+name = "omniphony_app"
+path = "src/bin/omniphony_app.rs"
 
 [dependencies]
 anyhow = "1"
 
 [target.'cfg(windows)'.dependencies]
-# CPAL's normal Windows host is WASAPI. Deliberately do not enable the optional
-# `asio` feature here: the product-default Windows shell must compile and run
-# without the separately licensed Steinberg SDK or specialist drivers.
+# The current reference host uses ordinary WASAPI through CPAL. Historical
+# ASIO/E-APO/VST bootstrap routes are not part of this package.
 cpal = "0.15.3"
 
-# P0 uses the headless upstream decode->render engine directly for the protected
-# reference scene. The reference PCM bridge is linked as Rust code for the
-# single-executable Windows build; generic hosts can still load its cdylib ABI.
+# Current support DSP stays in the portable engine; the Windows host owns only
+# capture/playback and lifecycle.
 orender_engine = { path = "../orender_engine" }
 bridge_api = { path = "../bridge_api" }
-reference_bridge = { path = "../reference_bridge" }
-
-# Stereo music evidence/extraction belongs to the portable renderer, not to the
-# Windows host. The host merely captures PCM, calls this processor, and sends
-# the derived support lanes through the normal Omniphony engine.
 renderer = { path = "../renderer" }
 scene_contract = { path = "../scene_contract" }
 
-# The native host also exercises the narrow PCM seam intended for a future APO
-# or virtual endpoint. Its first implementation remains bit-exact identity so
-# host transport can be tested independently from renderer behaviour.
-realtime_ffi = { path = "../realtime_ffi" }
-
-# Direct WASAPI access is used for Windows process-loopback capture. This is
-# intentionally host plumbing only; the portable renderer remains unaware of
-# Windows audio-session APIs.
+# Direct WASAPI access is host plumbing only; portable renderer semantics remain
+# independent of Windows audio-session APIs.
 wasapi = "0.23.0"
 
 # Windows owns lifecycle only: one Omniphony executable provides the invisible
