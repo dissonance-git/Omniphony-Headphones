@@ -3,7 +3,7 @@
 //! The implementation is the same support/early-field code used by the Windows
 //! listening worker. Native hosts call this wrapper instead of cloning the DSP.
 
-use crate::{RenderedAudio, music_support::{MusicSupportRenderer, SpatialProfile}};
+use crate::{RenderedAudio, music_support::MusicSupportRenderer};
 
 pub struct CurrentMusicSupportRenderer {
     inner: MusicSupportRenderer,
@@ -12,7 +12,7 @@ pub struct CurrentMusicSupportRenderer {
 impl CurrentMusicSupportRenderer {
     pub fn new(sample_rate_hz: u32) -> anyhow::Result<Self> {
         Ok(Self {
-            inner: MusicSupportRenderer::new(SpatialProfile::Current, sample_rate_hz)?,
+            inner: MusicSupportRenderer::new(sample_rate_hz)?,
         })
     }
 

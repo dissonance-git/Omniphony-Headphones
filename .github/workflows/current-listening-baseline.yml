@@ -16,7 +16,7 @@ on:
       - "omniphony-renderer/realtime_ffi/src/noire_x_profile.rs"
       - "omniphony-renderer/realtime_ffi/src/listening_finish.rs"
       - "omniphony-renderer/realtime_ffi/src/lib.rs"
-      - "omniphony-renderer/assets/binaural-baselines/stereo-field-prototype.yaml"
+      - "omniphony-renderer/assets/binaural-baselines/current-stereo-field.yaml"
       - "layouts/system-h-derived-22.0-upper60-grid10.yaml"
       - ".github/workflows/current-listening-baseline.yml"
   pull_request:
@@ -34,7 +34,7 @@ on:
       - "omniphony-renderer/realtime_ffi/src/noire_x_profile.rs"
       - "omniphony-renderer/realtime_ffi/src/listening_finish.rs"
       - "omniphony-renderer/realtime_ffi/src/lib.rs"
-      - "omniphony-renderer/assets/binaural-baselines/stereo-field-prototype.yaml"
+      - "omniphony-renderer/assets/binaural-baselines/current-stereo-field.yaml"
       - "layouts/system-h-derived-22.0-upper60-grid10.yaml"
       - ".github/workflows/current-listening-baseline.yml"
   workflow_dispatch:

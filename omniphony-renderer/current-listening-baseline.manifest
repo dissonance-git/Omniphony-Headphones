@@ -7,8 +7,8 @@
 # should not need to touch it.
 
 
-26198e010310537715d83db0416605c9707871cd  omniphony-renderer/orender_engine/src/current_music_support.rs
-11da65bf4bfc649b391145f53f4e2a858e40577f  omniphony-renderer/orender_engine/src/music_support.rs
+cba3906be7ab6f39cf261230ed47210cc81b7eae  omniphony-renderer/orender_engine/src/current_music_support.rs
+b319431315f8e15c26682b3c36043a3e33e969ec  omniphony-renderer/orender_engine/src/music_support.rs
 031919b665de939c938e6bd59a0b9ad434df61cc  omniphony-renderer/orender_engine/src/music_early_reflections.rs
 f049b09f0dec340cf682b18087c3c213bc92aa81  omniphony-renderer/orender_engine/src/music_late_enclosure.rs
 dd047c7932c4b988f0c8055c0ac82991ccc9b9db  omniphony-renderer/renderer/src/music_field.rs
@@ -16,5 +16,5 @@ e2fe7fb7debbc27179c6fd3f13ae28008c6105a5  omniphony-renderer/renderer/src/music_
 dee65d8de3172cd1cd0414b4de5a304afa2ec49f  omniphony-renderer/realtime_ffi/src/height_preference.rs
 83eb98823baba1952cee2a417a50e69f5f2e249b  omniphony-renderer/realtime_ffi/src/noire_x_profile.rs
 14cf409483c0b595ff4107b75eafabf572dcc337  omniphony-renderer/realtime_ffi/src/listening_finish.rs
-bf06d0e3e182c40f8dc302aa7a9fef36a199d6e6  omniphony-renderer/assets/binaural-baselines/stereo-field-prototype.yaml
+bf06d0e3e182c40f8dc302aa7a9fef36a199d6e6  omniphony-renderer/assets/binaural-baselines/current-stereo-field.yaml
 959e1f394a53919205914871cba801c04bbcfc3a  layouts/system-h-derived-22.0-upper60-grid10.yaml

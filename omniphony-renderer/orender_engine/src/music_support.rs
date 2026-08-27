@@ -10,15 +10,6 @@ use renderer::music_field::MUSIC_FIELD_CHANNELS;
 use renderer::speaker_layout::SpeakerLayout;
 use std::path::PathBuf;
 
-/// The normal Windows host has one listening model.
-///
-/// Historical profile experiments are preserved in git history and
-/// `docs/listening-history.md`, but they are not runtime product modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SpatialProfile {
-    Current,
-}
-
 pub(crate) fn current_model_config(base: &str) -> String {
     let mut cfg = base.to_string();
     cfg = cfg.replace("      level: 0.32", "      level: 0.36");
@@ -50,9 +41,9 @@ pub(crate) struct MusicSupportRenderer {
 }
 
 impl MusicSupportRenderer {
-    pub(crate) fn new(_profile: SpatialProfile, sample_rate_hz: u32) -> anyhow::Result<Self> {
+    pub(crate) fn new(sample_rate_hz: u32) -> anyhow::Result<Self> {
         const FIELD_CONFIG: &str =
-            include_str!("../../assets/binaural-baselines/stereo-field-prototype.yaml");
+            include_str!("../../assets/binaural-baselines/current-stereo-field.yaml");
         const GRID_LAYOUT: &str =
             include_str!("../../../layouts/system-h-derived-22.0-upper60-grid10.yaml");
 
