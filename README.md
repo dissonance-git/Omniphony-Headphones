@@ -1,12 +1,12 @@
 # Omniphony
 
-Omniphony is an open-source spatial audio renderer for headphones.
+Omniphony is an open-source, platform-agnostic spatial audio compiler and renderer for headphones.
 
-Its goal is to occupy the same broad class of system-audio role as proprietary headphone spatial renderers while keeping the renderer, scene model, source-authority rules, DSP, validation, and host integration inspectable.
+Its goal is to occupy the same broad class of OS-wide audio role as proprietary headphone spatial systems while keeping source decoding/adaptation, the scene model, source-authority rules, DSP, validation, and host integration inspectable.
 
-> **One open spatial renderer that enhances stereo, preserves authored spatial truth, accepts richer scenes when available, and performs the final headphone render itself.**
+> **One open spatial system that enhances ordinary stereo, preserves authored spatial truth when richer input exists, compiles every trustworthy source form into one canonical scene, and performs the final headphone render itself.**
 
-Windows is the first product host. The renderer, source-scene contract, and DSP core remain portable.
+Windows is the first reference product host because it is where Omniphony is currently being physically perfected and hardened. Windows is not the architecture or the final platform boundary. The renderer, source-scene contract, source-authority rules, DSP core, and public scene API are intended to remain portable across future macOS, Linux, and Android hosts.
 
 ## Product law
 
@@ -123,9 +123,13 @@ Portable scene semantics sit below the renderer in a host-neutral contract layer
 
 See [`docs/scene-renderer-contract.md`](docs/scene-renderer-contract.md).
 
-## Windows product boundary
+## Platform model and Windows reference host
 
-The intended product experience is simple:
+Omniphony is designed as one portable spatial compiler/renderer with thin platform hosts. A platform host discovers system audio, preserves whatever source representation the OS exposes, lowers it into the canonical Omniphony scene, and returns exactly one final headphone render.
+
+Windows is the current reference and hardening host, so its integration is intentionally the most mature first. Future macOS, Linux, and Android hosts must reuse the same source-authority and scene semantics rather than growing separate renderer identities.
+
+The current Windows product experience is simple:
 
 ```text
 Windows audio
@@ -135,11 +139,11 @@ Omniphony
 headphones
 ```
 
-The Windows host owns capture/playback integration, source ingress, endpoint lifecycle, recovery, installation, update, uninstall, and optional preferences. The portable core owns source-scene semantics and rendering.
+The Windows host owns Windows-specific capture/playback integration, source ingress, endpoint lifecycle, recovery, installation, update, uninstall, and optional preferences. Equivalent host responsibilities belong to each future platform adapter. The portable core owns source-scene semantics, presentation logic, spatial compilation, and final binaural rendering.
 
 Normal rendering is headless. It does not require a virtual cable, loopback host, or foreground audio application to remain open.
 
-See [`docs/omniphony-for-windows.md`](docs/omniphony-for-windows.md). Current unresolved Windows work belongs only in [`ROADMAP.md`](ROADMAP.md).
+See [`docs/omniphony-for-windows.md`](docs/omniphony-for-windows.md) for the current reference-host contract. Current unresolved Windows work and later host-porting gates belong only in [`ROADMAP.md`](ROADMAP.md).
 
 ## Stereo fidelity law
 
@@ -155,7 +159,7 @@ See [`docs/music-presentation-contract.md`](docs/music-presentation-contract.md)
 
 ## Protected perceptual baseline
 
-The accepted default Windows music presentation is a protected baseline, not a temporary tuning waypoint.
+The accepted Windows-validated music presentation is a protected renderer baseline, not a temporary tuning waypoint. Windows is presently the physical reference environment; the accepted perceptual behavior belongs to the portable renderer and should travel with it unless a future host exposes a genuinely different source or output constraint.
 
 Future work may expand authored-scene semantics, radial distance, personalization, platform integration, diagnostics, or optional capabilities, but a sound-changing mechanism does not enter the default music path merely because it is more sophisticated or passes engineering tests. It must preserve the accepted baseline's bass/body, transient ownership, center solidity, clarity, dynamics, authored motion, externalization, and route reliability under clean physical listening.
 
