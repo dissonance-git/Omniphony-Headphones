@@ -28,3 +28,5 @@ realfft = "3.5"
 [features]
 # Personalised HRTF loading (SOFA files) in the binaural stage.
 sofa = ["renderer/sofa"]
+# Listening-only build; protected Current remains the default.
+front-directional-early-candidate = []

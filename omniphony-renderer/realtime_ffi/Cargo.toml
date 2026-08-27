@@ -16,3 +16,7 @@ scene_contract = { path = "../scene_contract" }
 
 [dev-dependencies]
 bridge_api = { path = "../bridge_api" }
+
+[features]
+# Pass-through only for the dedicated physical-listening installer.
+front-directional-early-candidate = ["orender_engine/front-directional-early-candidate"]

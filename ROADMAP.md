@@ -103,6 +103,8 @@ Measure localization, front/back, elevation, motion continuity, frontal external
 
 Level-match where needed, separate localization from tonal preference, separate source geometry from room/externalization effects, and preserve a winning baseline before each sound-changing experiment.
 
+Current bounded stereo listening candidate: preserve the true order-2 image direction of front/top-front early reflections through four dedicated measured-HRTF buses while conserving the accepted front early tap-power budget and sub-300 Hz coherent return. Keep it outside the protected default until physical A/B either promotes it or deletes it.
+
 **Gate:** remaining deficits can be attributed to the binaural renderer itself because source geometry and source authority are controlled.
 
 ---
