@@ -117,11 +117,15 @@ int ExercisePreferredFormatSupport() {
     auto sevenOneType = FloatMediaType(8, kMask71);
     if (!stereoType || !sevenOneType) return 17;
 
+    // Preferred input is surfaced to shared clients by IAudioClient::GetMixFormat.
+    // Keep ordinary stereo discovery stereo; explicit authored 7.1 is validated
+    // separately through IsInputFormatSupported and the process path below.
     ComPtr<IAudioMediaType> preferredInput;
     HRESULT hr = handles.preferredFormats->GetPreferredInputFormat(
         stereoType.Get(), preferredInput.ReleaseAndGetAddressOf());
-    if (hr != S_OK || !MatchesFloatFormat(preferredInput.Get(), 8, kMask71)) {
-        std::wcerr << L"STREAM_APO_PREFERRED_INPUT_FAILED\tHR=0x" << std::hex << hr << std::endl;
+    if (hr != S_OK || !MatchesFloatFormat(preferredInput.Get(), 2, kStereoMask)) {
+        std::wcerr << L"STREAM_APO_SHARED_PREFERRED_INPUT_FAILED\tHR=0x"
+                   << std::hex << hr << std::endl;
         return 18;
     }
 
@@ -134,9 +138,8 @@ int ExercisePreferredFormatSupport() {
     }
 
     std::wcout << L"STREAM_APO_PREFERRED_FORMAT_OK"
-               << L"\tSTEREO_ENDPOINT_INPUT=7.1"
-               << L"\tPREFERRED_INPUT_CHANNELS=8"
-               << L"\tPREFERRED_OUTPUT_CHANNELS=2"
+               << L"\tSHARED_INPUT_CHANNELS=2"
+               << L"\tEXPLICIT_7_1_OUTPUT_CHANNELS=2"
                << L"\tFORMAT=FLOAT32_48000" << std::endl;
     return 0;
 }
@@ -356,7 +359,7 @@ int wmain() {
 
     if (result == 0) {
         std::wcout << L"STREAM_APO_COM_OK\tCLSID={07D403D9-8A98-43EF-8C28-8651756D83BE}"
-                   << L"\tPREFERRED_7_1=1\tSTEREO_CURRENT=1\tNATIVE_7_1=1"
+                   << L"\tSHARED_PREFERRED_STEREO=1\tSTEREO_CURRENT=1\tNATIVE_7_1=1"
                    << L"\tNATIVE_7_1_4=1\tNEGOTIATION=1\tPCM16_REJECT=1"
                    << std::endl;
     }

@@ -22,10 +22,6 @@ constexpr GUID kOmniphonyStreamApoClsid = {
     0x07d403d9, 0x8a98, 0x43ef, {0x8c, 0x28, 0x86, 0x51, 0x75, 0x6d, 0x83, 0xbe}};
 
 constexpr DWORD kStereoMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
-constexpr DWORD kSevenOneMask =
-    SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER |
-    SPEAKER_LOW_FREQUENCY | SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT |
-    SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT;
 
 HINSTANCE g_module = nullptr;
 volatile LONG g_factoryLocks = 0;
@@ -399,11 +395,12 @@ public:
             return APOERR_FORMAT_NOT_SUPPORTED;
         }
 
-        // Windows 11 23H2+ explicitly supports this headphone-virtualization
-        // contract: a stereo-rendering endpoint can have an APO request 7.1
-        // upstream. Omniphony then preserves the authored speaker bed and owns
-        // the only binaural reduction before the physical stereo DAC.
-        return CreatePreferredMediaType(output, 8, kSevenOneMask, preferredFormat);
+        // Preferred input is also what shared clients can observe through
+        // IAudioClient::GetMixFormat. Do not up-advertise an ordinary stereo
+        // client to 7.1 merely because the SFX can render richer authored PCM.
+        // Richer clients remain supported when they explicitly request their
+        // authored format through IsInputFormatSupported.
+        return PassThroughMediaType(outputFormat, preferredFormat);
     }
 
     HRESULT STDMETHODCALLTYPE GetPreferredOutputFormat(
