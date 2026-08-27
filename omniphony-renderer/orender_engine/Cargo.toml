@@ -26,10 +26,5 @@ serde_yaml_ng = "0.10"
 realfft = "3.5"
 
 [features]
-default = ["front-directional-early-candidate"]
 # Personalised HRTF loading (SOFA files) in the binaural stage.
 sofa = ["renderer/sofa"]
-# Accepted Current frontal directional early field. The feature name remains
-# temporarily for source compatibility while the promoted implementation is
-# folded into the canonical module layout.
-front-directional-early-candidate = []
