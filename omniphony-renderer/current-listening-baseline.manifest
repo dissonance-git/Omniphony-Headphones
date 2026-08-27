@@ -6,6 +6,11 @@
 # same commit as the promoted sound change. Ordinary architecture/host changes
 # should not need to touch it.
 
+4045d58400b9f123375cf7df3fec048aea8db3aa  omniphony-renderer/orender_engine/Cargo.toml
+55da0e0a9d8fb600dade0c709acb935550e0914d  omniphony-renderer/orender_engine/src/current_music_support.rs
+78da86c50ec484f6d95abaddbb9609f03846a05a  omniphony-renderer/orender_engine/src/front_directional_early_candidate.rs
+c80b7c93b0da300500a6f2d9a203a0bd0d097394  omniphony-renderer/orender_engine/src/front_directional_early_music_support.rs
+
 11da65bf4bfc649b391145f53f4e2a858e40577f  omniphony-renderer/orender_engine/src/music_support.rs
 bcf1f42f59200737f3d2fed87df03001977e9ca8  omniphony-renderer/orender_engine/src/music_early_reflections.rs
 f049b09f0dec340cf682b18087c3c213bc92aa81  omniphony-renderer/orender_engine/src/music_late_enclosure.rs
