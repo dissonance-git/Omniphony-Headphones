@@ -11,7 +11,7 @@
 //! top-front lanes additionally redistribute a bounded share of that same early
 //! reflection power into physically derived second-order image timing. This is
 //! a depth/externalization cue, not an added wet layer: the front-lane tap-power
-//! budget is preserved before the shared measured-HRTF wall buses.
+//! budget is preserved while its true image directions feed dedicated measured-HRTF buses.
 //!
 //! The transient-aware excitation in this file is intentionally narrower than
 //! transient separation or transient reshaping. Each support lane compares a
@@ -44,7 +44,7 @@ const GENERIC_WALL_HF_AMPLITUDE: f32 = 0.84;
 const EXTRA_PATH_HF_DECAY_PER_M: f32 = 0.020;
 const ITD_MAX_S: f32 = 0.003;
 
-// Frontal externalization candidate. Pyroomacoustics' shoebox ISM enumerates
+// Protected frontal externalization baseline. Pyroomacoustics' shoebox ISM enumerates
 // the discrete L1 image lattice; in 3-D there are exactly 18 order-2 images.
 // Only images that stay inside the perceptually useful early window are kept.
 // Rather than adding their energy on top of the accepted room, 20% of each
@@ -54,7 +54,7 @@ const FRONT_SECOND_ORDER_POWER_FRACTION: f32 = 0.20;
 const SECOND_ORDER_MAX_DELAY_S: f32 = 0.100;
 const SECOND_ORDER_WALL_MARGIN_M: f32 = 0.05;
 
-// Listening-candidate transient law. Fast/slow energy comparison follows the
+// Current transient law. Fast/slow energy comparison follows the
 // established onset-detection idea that a transient is a positive change in
 // short-time energy, not simply a loud sample. Values are deliberately bounded
 // and local to each existing spatial-support lane so a drum event cannot turn
@@ -86,6 +86,8 @@ const HRTF_POWER_MATCH: f32 = 0.816_496_6;
 // wall averages without paying for two additional HRTF buses that remain
 // effectively redundant on this geometry.
 const EARLY_HRTF_BUSES: usize = 10;
+// Protected precision buses for actual front/top-front order-2 image directions.
+const FRONT_SECOND_ORDER_HRTF_BUSES: usize = 4;
 const EARLY_CLUSTER_ITERS: usize = 8;
 const FIBONACCI_TURN: f32 = 0.618_033_95;
 
@@ -130,7 +132,8 @@ struct PathTap {
 #[derive(Clone, Copy, Default)]
 struct SecondOrderPathTap {
     tap: PathTap,
-    wall: usize,
+    direction: [f32; 3],
+    route: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -228,6 +231,12 @@ struct SourceReflectionBank {
     transient: TransientReflectionExciter,
 }
 
+#[derive(Clone, Copy)]
+struct ReflectionFrame {
+    first_order: [f32; NUM_REFLECTIONS],
+    second_order: [f32; FRONT_SECOND_ORDER_HRTF_BUSES],
+}
+
 impl SourceReflectionBank {
     fn new(
         sample_rate_hz: u32,
@@ -285,7 +294,8 @@ impl SourceReflectionBank {
                         hf_gain,
                         tone_state: 0.0,
                     },
-                    wall: final_wall_for_image(image, CURRENT_ROOM_M),
+                    direction: normalized(image),
+                    route: 0,
                 });
             }
 
@@ -332,7 +342,7 @@ impl SourceReflectionBank {
     }
 
     #[inline]
-    fn process(&mut self, mut input: f32) -> [f32; NUM_REFLECTIONS] {
+    fn process(&mut self, mut input: f32) -> ReflectionFrame {
         // Only the signal entering the early-reflection delay bank receives the
         // transient-dependent gain. The direct master and primary spatial field
         // are outside this module and therefore cannot be reshaped by it.
@@ -345,19 +355,22 @@ impl SourceReflectionBank {
 
         let cap = self.ring.len();
         self.ring[self.write_pos] = input;
-        let mut out = [0.0f32; NUM_REFLECTIONS];
+        let mut out = ReflectionFrame {
+            first_order: [0.0f32; NUM_REFLECTIONS],
+            second_order: [0.0f32; FRONT_SECOND_ORDER_HRTF_BUSES],
+        };
         for (i, tap) in self.taps.iter_mut().enumerate() {
             let delayed = read_frac(&self.ring, cap, self.write_pos, tap.delay_samples);
             tap.tone_state += (delayed - tap.tone_state) * self.tone_alpha;
             let toned = tap.tone_state + tap.hf_gain * (delayed - tap.tone_state);
-            out[i] = tap.gain * toned;
+            out.first_order[i] = tap.gain * toned;
         }
         for path in &mut self.second_order_taps {
             let tap = &mut path.tap;
             let delayed = read_frac(&self.ring, cap, self.write_pos, tap.delay_samples);
             tap.tone_state += (delayed - tap.tone_state) * self.tone_alpha;
             let toned = tap.tone_state + tap.hf_gain * (delayed - tap.tone_state);
-            out[path.wall] += tap.gain * toned;
+            out.second_order[path.route] += tap.gain * toned;
         }
         self.write_pos += 1;
         if self.write_pos >= cap {
@@ -460,7 +473,10 @@ struct SourceWallGeometry {
 }
 
 #[inline]
-fn nearest_direction_cluster(direction: [f32; 3], centers: &[[f32; 3]; EARLY_HRTF_BUSES]) -> usize {
+fn nearest_direction_cluster<const N: usize>(
+    direction: [f32; 3],
+    centers: &[[f32; 3]; N],
+) -> usize {
     let mut best = 0usize;
     let mut best_dot = -f32::INFINITY;
     for (index, center) in centers.iter().enumerate() {
@@ -473,10 +489,10 @@ fn nearest_direction_cluster(direction: [f32; 3], centers: &[[f32; 3]; EARLY_HRT
     best
 }
 
-fn initial_direction_clusters() -> [[f32; 3]; EARLY_HRTF_BUSES] {
+fn initial_direction_clusters<const N: usize>() -> [[f32; 3]; N] {
     std::array::from_fn(|index| {
         let i = index as f32;
-        let z = 1.0 - 2.0 * (i + 0.5) / EARLY_HRTF_BUSES as f32;
+        let z = 1.0 - 2.0 * (i + 0.5) / N as f32;
         let radius = (1.0 - z * z).max(0.0).sqrt();
         let az = std::f32::consts::TAU * (i * FIBONACCI_TURN).fract();
         [radius * az.sin(), radius * az.cos(), z]
@@ -494,7 +510,7 @@ fn initial_direction_clusters() -> [[f32; 3]; EARLY_HRTF_BUSES] {
 fn cluster_early_directions(
     geometry: &[Option<SourceWallGeometry>],
 ) -> [[f32; 3]; EARLY_HRTF_BUSES] {
-    let mut centers = initial_direction_clusters();
+    let mut centers = initial_direction_clusters::<EARLY_HRTF_BUSES>();
 
     for _ in 0..EARLY_CLUSTER_ITERS {
         let mut sums = [[0.0f32; 3]; EARLY_HRTF_BUSES];
@@ -539,6 +555,40 @@ fn build_cluster_routes(
             })
         })
         .collect()
+}
+
+fn cluster_front_second_order_directions(
+    sources: &[Option<SourceReflectionBank>],
+) -> [[f32; 3]; FRONT_SECOND_ORDER_HRTF_BUSES] {
+    let mut centers = initial_direction_clusters::<FRONT_SECOND_ORDER_HRTF_BUSES>();
+    for _ in 0..EARLY_CLUSTER_ITERS {
+        let mut sums = [[0.0f32; 3]; FRONT_SECOND_ORDER_HRTF_BUSES];
+        let mut weights = [0.0f32; FRONT_SECOND_ORDER_HRTF_BUSES];
+        for source in sources.iter().flatten() {
+            for path in &source.second_order_taps {
+                let weight = path.tap.gain.max(0.0);
+                if weight <= 1.0e-12 { continue; }
+                let cluster = nearest_direction_cluster(path.direction, &centers);
+                for axis in 0..3 { sums[cluster][axis] += weight * path.direction[axis]; }
+                weights[cluster] += weight;
+            }
+        }
+        for cluster in 0..FRONT_SECOND_ORDER_HRTF_BUSES {
+            if weights[cluster] > 1.0e-9 { centers[cluster] = normalized(sums[cluster]); }
+        }
+    }
+    centers
+}
+
+fn assign_front_second_order_routes(
+    sources: &mut [Option<SourceReflectionBank>],
+    centers: &[[f32; 3]; FRONT_SECOND_ORDER_HRTF_BUSES],
+) {
+    for source in sources.iter_mut().flatten() {
+        for path in &mut source.second_order_taps {
+            path.route = nearest_direction_cluster(path.direction, centers);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -599,6 +649,8 @@ pub(crate) struct HrtfEarlyReflectionField {
     routes: Vec<Option<[usize; NUM_REFLECTIONS]>>,
     buses: [HrtfDirectionBus; EARLY_HRTF_BUSES],
     splits: [EarlyCoherenceSplit; EARLY_HRTF_BUSES],
+    front_second_order_buses: [HrtfDirectionBus; FRONT_SECOND_ORDER_HRTF_BUSES],
+    front_second_order_splits: [EarlyCoherenceSplit; FRONT_SECOND_ORDER_HRTF_BUSES],
 }
 
 impl HrtfEarlyReflectionField {
@@ -631,6 +683,8 @@ impl HrtfEarlyReflectionField {
 
         let directions = cluster_early_directions(&geometry);
         let routes = build_cluster_routes(&geometry, &directions);
+        let front_second_order_directions = cluster_front_second_order_directions(&sources);
+        assign_front_second_order_routes(&mut sources, &front_second_order_directions);
         let measured = MeasuredHrirData::saf_kemar().resampled_to(sample_rate_hz);
         let hrir = HrirSet::new(&measured, sample_rate_hz);
         let buses: [HrtfDirectionBus; EARLY_HRTF_BUSES] = std::array::from_fn(|cluster| {
@@ -638,12 +692,20 @@ impl HrtfEarlyReflectionField {
         });
         let splits: [EarlyCoherenceSplit; EARLY_HRTF_BUSES] =
             std::array::from_fn(|_| EarlyCoherenceSplit::new(sample_rate_hz));
+        let front_second_order_buses: [HrtfDirectionBus; FRONT_SECOND_ORDER_HRTF_BUSES] =
+            std::array::from_fn(|cluster| {
+                HrtfDirectionBus::new(sample_rate_hz, &hrir, front_second_order_directions[cluster])
+            });
+        let front_second_order_splits: [EarlyCoherenceSplit; FRONT_SECOND_ORDER_HRTF_BUSES] =
+            std::array::from_fn(|_| EarlyCoherenceSplit::new(sample_rate_hz));
 
         Self {
             sources,
             routes,
             buses,
             splits,
+            front_second_order_buses,
+            front_second_order_splits,
         }
     }
 
@@ -659,6 +721,7 @@ impl HrtfEarlyReflectionField {
         let mut out = vec![0.0f32; frames * 2];
         for frame in 0..frames {
             let mut direction_bus = [0.0f32; EARLY_HRTF_BUSES];
+            let mut front_second_order_bus = [0.0f32; FRONT_SECOND_ORDER_HRTF_BUSES];
             let base = frame * MUSIC_FIELD_CHANNELS;
             for channel in 0..MUSIC_FIELD_CHANNELS {
                 let Some(route) = self.routes[channel] else {
@@ -669,7 +732,10 @@ impl HrtfEarlyReflectionField {
                 };
                 let paths = source.process(field_input[base + channel]);
                 for wall in 0..NUM_REFLECTIONS {
-                    direction_bus[route[wall]] += paths[wall];
+                    direction_bus[route[wall]] += paths.first_order[wall];
+                }
+                for cluster in 0..FRONT_SECOND_ORDER_HRTF_BUSES {
+                    front_second_order_bus[cluster] += paths.second_order[cluster];
                 }
             }
             let o = frame * 2;
@@ -678,6 +744,13 @@ impl HrtfEarlyReflectionField {
                 let (low, high) = self.splits[cluster].process(direction_bus[cluster]);
                 coherent_low += low;
                 let (l, r) = self.buses[cluster].process(high);
+                out[o] += l;
+                out[o + 1] += r;
+            }
+            for cluster in 0..FRONT_SECOND_ORDER_HRTF_BUSES {
+                let (low, high) = self.front_second_order_splits[cluster].process(front_second_order_bus[cluster]);
+                coherent_low += low;
+                let (l, r) = self.front_second_order_buses[cluster].process(high);
                 out[o] += l;
                 out[o + 1] += r;
             }
@@ -746,28 +819,6 @@ fn second_order_images(src_m: [f32; 3], room_m: [f32; 3]) -> Vec<[f32; 3]> {
     }
     debug_assert_eq!(images.len(), SECOND_ORDER_IMAGE_COUNT);
     images
-}
-
-/// Trace from the listener at the room centre toward an image source. The first
-/// room boundary crossed is the physical wall of the final reflection before
-/// the ray reaches the listener. Wall ordering matches `first_order_images`:
-/// +X, -X, +Y, -Y, +Z, -Z.
-fn final_wall_for_image(image_m: [f32; 3], room_m: [f32; 3]) -> usize {
-    let mut best_wall = 0usize;
-    let mut best_fraction = f32::INFINITY;
-    for axis in 0..3 {
-        let half = 0.5 * room_m[axis].clamp(reflections::MIN_ROOM_M, reflections::MAX_ROOM_M);
-        let magnitude = image_m[axis].abs();
-        if magnitude <= 1.0e-9 {
-            continue;
-        }
-        let fraction = half / magnitude;
-        if fraction < best_fraction {
-            best_fraction = fraction;
-            best_wall = axis * 2 + usize::from(image_m[axis] < 0.0);
-        }
-    }
-    best_wall
 }
 
 #[inline]
@@ -839,21 +890,21 @@ mod tests {
     fn front_second_order_redistributes_instead_of_adding_tap_power() {
         let source = spherical_position(-30.0, 0.0, CURRENT_UNIT_SCALE_M);
         let (baseline, _, _) = SourceReflectionBank::new(48_000, source, false);
-        let (candidate, _, _) = SourceReflectionBank::new(48_000, source, true);
+        let (current, _, _) = SourceReflectionBank::new(48_000, source, true);
         let (baseline_first, baseline_second) = tap_power(&baseline);
-        let (candidate_first, candidate_second) = tap_power(&candidate);
+        let (current_first, current_second) = tap_power(&current);
         assert_eq!(baseline_second, 0.0);
-        assert!(!candidate.second_order_taps.is_empty());
+        assert!(!current.second_order_taps.is_empty());
 
         let baseline_total = baseline_first + baseline_second;
-        let candidate_total = candidate_first + candidate_second;
-        let relative_error = (candidate_total - baseline_total).abs() / baseline_total.max(1.0e-12);
+        let current_total = current_first + current_second;
+        let relative_error = (current_total - baseline_total).abs() / baseline_total.max(1.0e-12);
         assert!(
             relative_error < 1.0e-5,
             "early-field tap power changed by {relative_error}"
         );
 
-        let fraction = candidate_second / candidate_total.max(1.0e-12);
+        let fraction = current_second / current_total.max(1.0e-12);
         assert!(
             (fraction - FRONT_SECOND_ORDER_POWER_FRACTION).abs() < 1.0e-5,
             "second-order power fraction {fraction}"
@@ -863,21 +914,22 @@ mod tests {
     #[test]
     fn front_second_order_stays_inside_the_early_window() {
         let source = spherical_position(-30.0, 0.0, CURRENT_UNIT_SCALE_M);
-        let (candidate, _, _) = SourceReflectionBank::new(48_000, source, true);
-        assert!(!candidate.second_order_taps.is_empty());
-        assert!(candidate.second_order_taps.len() < SECOND_ORDER_IMAGE_COUNT);
+        let (current, _, _) = SourceReflectionBank::new(48_000, source, true);
+        assert!(!current.second_order_taps.is_empty());
+        assert!(current.second_order_taps.len() < SECOND_ORDER_IMAGE_COUNT);
         let max_delay = SECOND_ORDER_MAX_DELAY_S * 48_000.0 + 1.0;
-        assert!(candidate.second_order_taps.iter().all(|path| {
-            path.wall < NUM_REFLECTIONS
+        assert!(current.second_order_taps.iter().all(|path| {
+            path.route < FRONT_SECOND_ORDER_HRTF_BUSES
+                && (norm(path.direction) - 1.0).abs() < 1.0e-5
                 && path.tap.delay_samples > 0.0
                 && path.tap.delay_samples <= max_delay
         }));
-        let first_min = candidate
+        let first_min = current
             .taps
             .iter()
             .map(|tap| tap.delay_samples)
             .fold(f32::INFINITY, f32::min);
-        let second_min = candidate
+        let second_min = current
             .second_order_taps
             .iter()
             .map(|path| path.tap.delay_samples)
@@ -889,19 +941,48 @@ mod tests {
     }
 
     #[test]
-    fn nonfront_input_is_bit_exact_with_front_depth_candidate_disabled() {
+    fn second_order_paths_keep_non_axis_image_directions() {
+        let source = spherical_position(-30.0, 0.0, CURRENT_UNIT_SCALE_M);
+        let (current, _, _) = SourceReflectionBank::new(48_000, source, true);
+        let off_axis = current.second_order_taps.iter().filter(|path| {
+            path.direction.iter().filter(|component| component.abs() > 0.10).count() >= 2
+        }).count();
+        assert!(off_axis > 0, "front order-2 geometry collapsed to cardinal wall axes");
+    }
+
+    #[test]
+    fn front_second_order_precision_routes_use_multiple_buses() {
+        let mut sources = Vec::with_capacity(MUSIC_FIELD_CHANNELS);
+        for channel in 0..MUSIC_FIELD_CHANNELS {
+            if matches!(channel, 2 | 3) { sources.push(None); continue; }
+            let (az, el) = LANE_DIRECTIONS_DEG[channel];
+            let source_m = spherical_position(az, el, CURRENT_UNIT_SCALE_M);
+            let (bank, _, _) = SourceReflectionBank::new(48_000, source_m, is_front_externalization_lane(channel));
+            sources.push(Some(bank));
+        }
+        let centers = cluster_front_second_order_directions(&sources);
+        assign_front_second_order_routes(&mut sources, &centers);
+        let mut used = [false; FRONT_SECOND_ORDER_HRTF_BUSES];
+        for source in sources.iter().flatten() {
+            for path in &source.second_order_taps { used[path.route] = true; }
+        }
+        assert!(used.iter().filter(|&&value| value).count() >= 3, "precision routes collapsed: {used:?}");
+    }
+
+    #[test]
+    fn nonfront_input_is_bit_exact_with_front_depth_current_disabled() {
         let input = impulse_field(8_000, 4);
         let mut baseline = HrtfEarlyReflectionField::new_with_front_second_order(48_000, false);
-        let mut candidate = HrtfEarlyReflectionField::new_with_front_second_order(48_000, true);
+        let mut current = HrtfEarlyReflectionField::new_with_front_second_order(48_000, true);
         let expected = baseline.process(&input).unwrap();
-        let actual = candidate.process(&input).unwrap();
+        let actual = current.process(&input).unwrap();
         assert_eq!(expected.len(), actual.len());
         assert!(
             expected
                 .iter()
                 .zip(&actual)
                 .all(|(a, b)| a.to_bits() == b.to_bits()),
-            "front-only depth candidate changed a side-only reflection render"
+            "front second-order path changed a side-only reflection render"
         );
     }
 
