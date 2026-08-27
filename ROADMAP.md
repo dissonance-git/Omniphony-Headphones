@@ -198,7 +198,7 @@ Harden the existing host-neutral scene contract into a stable external host API 
 
 The published API must cover authored static roles, continuous objects, exact source-time semantics, metric geometry/radial distance, bounded source identity, Ambisonics/HOA where supplied, stereo-derived support, already-binaural provenance, listener pose/profile, and output/latency contracts.
 
-Windows concepts must remain in the Windows adapter, and renderer DSP internals must not become part of the public scene ABI merely because the current implementation consumes them.
+Windows concepts must remain in the Windows adapter, and renderer DSP internals must not become part of the public scene ABI merely because the current implementation consumes them. The API is the portability seam for later macOS, Linux, Android, and other hosts, so it must express source truth and renderer needs without assuming WASAPI, APO, COM, Windows Spatial Sound, or any single platform callback model.
 
 **Gate:** a non-Windows host can feed the same source-authority semantics into the same renderer without inheriting WASAPI, WDK, registry, tray, service, or renderer-internal scene machinery.
 
@@ -226,6 +226,28 @@ real Windows Spatial Sound provider selection
 
 Do not advertise capabilities whose final physical/application boundary has not been crossed.
 
+The first public product may be Windows-first. macOS, Linux, and Android ports are planned expansion work, not blockers for a trustworthy Windows release, provided the portable core and public scene API remain genuinely host-neutral.
+
+---
+
+## 14. Expand the reference renderer to macOS, Linux, and Android
+
+After the Windows reference host and portable scene API are stable, add platform hosts without forking Omniphony's renderer identity.
+
+Each port should implement only the platform-specific responsibilities it actually owns:
+
+- system-audio/session discovery and capture or insertion;
+- the strongest trustworthy authored spatial ingress the platform exposes;
+- cadence, endpoint, lifecycle, recovery, and physical egress;
+- installer/package/update/uninstall behavior appropriate to that platform;
+- platform-specific diagnostics and compatibility testing.
+
+All ports must reuse the canonical source scene, source-authority law, stereo presentation rules, protected perceptual baseline, and final binaural renderer. If a platform exposes less spatial source truth than Windows, degrade by source authority rather than inventing fake authorship. If it exposes more, preserve that richer truth without changing the portable contract just to match Windows.
+
+Target order is not a product-law requirement, but the planned host family includes macOS, Linux, and Android. Windows remains the physical reference/hardening environment until another host earns equivalent evidence.
+
+**Gate:** at least one non-Windows host can run the same portable renderer and source semantics end to end while keeping platform audio APIs and lifecycle state outside the core.
+
 ---
 
 ## Critical path
@@ -241,7 +263,8 @@ prove closed-gate physical spatial egress
 → authored radial-distance / near-field rendering
 → already-binaural policy + Windows hardening
 → stable portable scene API
-→ public release
+→ Windows-first public release
+→ macOS / Linux / Android host expansion
 → optional HRTF personalization
 → optional head-tracking integration when advertised
 ```
