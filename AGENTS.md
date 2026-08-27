@@ -2,68 +2,67 @@
 
 This file is the canonical operating law for `dissonance-git/Omniphony-Headphones`.
 
-> **Single-owner, evidence-stratified, derivation-first design: store authority, derive views, preserve evidence, and promote slowly.**
+> **More capability, fewer conceptual machines.**
+>
+> **One concept, one writable owner. Store authority. Derive views. Preserve evidence. Promote slowly.**
+>
+> **Living documents own current obligations. Git owns superseded repository narrative and chronology.**
 
-The important repository interpretation is:
+## 1. Enter through current authority
 
-> **Git owns history. Living documents own only current obligations.**
-
-## 1. Repository entrance
-
-Use this bounded sequence:
+For substantive work:
 
 ```text
 current main HEAD
 → README.md
 → AGENTS.md at the same HEAD
-→ ROADMAP.md when unresolved current work matters
-→ exact task-relevant living contract
+→ ROADMAP.md only when unresolved work matters
+→ smallest task-relevant living contract
 → exact code / tests / CI
-→ target file
+→ target
 ```
 
-1. Resolve current `main` before substantive work.
-2. Read `README.md` for durable product identity and architecture.
-3. Read this file for governing implementation, evidence, realtime, and listening law.
-4. Read `ROADMAP.md` only when unresolved current work, gates, or frontier matter.
-5. Read only the smallest task-relevant living contract.
-6. Inspect code/tests/CI for executable truth rather than relying on prose inventories.
-7. Before replacement writes, re-fetch the target from current `main`.
-8. After publication, inspect the exact changed paths and resulting content.
+Resolve current `main` before reasoning about mutable repository state. Search is for discovery; exact refs, commits, trees, blobs, files, code, tests, and CI establish the selected snapshot.
 
-Repository workflow is main-only unless the user explicitly changes that instruction. Never force-push. Keep sound-changing commits small enough that a rejected mechanism can be reverted cleanly.
+Repository publication is main-only unless the user explicitly changes that instruction. Never force-push. Preserve unrelated concurrent work.
 
-## 2. Single-owner and derivation law
+## 2. Canonical ownership
 
-Every durable fact, mutable state, obligation, and current decision gets one writable canonical owner.
+Every durable mutable fact gets one writable owner.
 
 ```text
 README.md
-  durable product identity / public architecture
+  product identity / public architecture / entry routes
 
 AGENTS.md
-  governing repository / evidence / listening / realtime law
+  repository / change / evidence / concurrency / publication law
 
 ROADMAP.md
-  unresolved current work / gates / frontier
+  unresolved gates / blockers / sequencing only
 
-docs/music-presentation-contract.md
-  stereo and music-presentation obligations
+CONTRIBUTING.md
+  contributor setup / testing / release procedure
 
 docs/scene-renderer-contract.md
-  source / scene / channel-object / renderer semantics
+  source / scene / fixed-channel / object semantics
+
+docs/music-presentation-contract.md
+  protected stereo and music-presentation obligations
+
+docs/binaural-renderer.md
+  portable binaural DSP invariants
 
 docs/realtime-control-contract.md
   sample-time / realtime / latency / failure semantics
 
 docs/omniphony-for-windows.md
-  Windows host / ingress / egress / lifecycle / installation
+  Windows ingress / egress / lifecycle / installation
 
 docs/headphone-calibration.md
-  listener and headphone calibration
+  listener / HRTF / headphone calibration boundary
 
 docs/osc-control-contract.md
-  OSC/control protocol semantics
+  OSC/control semantics
 
 docs/game-music-realtime-source-contract.md
   recovered-source / game-music realtime semantics
@@ -71,265 +70,340 @@ docs/game-music-realtime-source-contract.md
 omniphony-renderer/
   executable implementation
 
-tests + .github/
-  executable validation and CI behavior
+.github/workflows/
+  executable validation / packaging / release behavior
+
+.agents/
+  agent procedures and connector re-entry routes, never product truth
 
 Git history
   chronology and retired alternatives
 ```
 
-Before adding or maintaining a document, registry, status table, report, cache, abstraction, or subsystem, answer:
+Generated inventories, search results, connector maps, status summaries, and task capsules are projections. They may help orientation, but they are not second truth stores.
 
-1. What exact current obligation does it uniquely own?
-2. Does a canonical owner already exist?
-3. Can the information be derived from code/tests/CI instead?
-4. Is this durable law, unresolved current work, executable behavior, or merely chronology?
-5. If a mechanism is being promoted, what evidence earned a live invariant?
-6. What duplicate writable path can now be removed?
+## 3. Semantic collapse and repository cleanup
 
-If the answer is “this preserves an old experiment, old tuning, old implementation state, old listening comparison, old migration, or old research trail,” the working tree is the wrong owner. Git already preserves it.
+A representation change wins only if protected capability remains reachable while maintenance, context, routing, or verification cost falls.
 
-## 3. Evidence without museums
+Before keeping or adding a document, registry, cache, abstraction, directory, workflow, or subsystem, ask:
 
-“Preserve evidence” means preserve the **current consequence** of evidence, not a parallel historical corpus.
+1. What current obligation does it uniquely own?
+2. Can the fact be derived from code/tests/CI or another owner?
+3. Is the object still required evidence, or merely repository history?
+4. Which weaker or duplicate surface can be removed if this survives?
+5. What breaks if this object disappears while Git history remains?
 
-Use this promotion shape:
-
-```text
-observation / experiment / research
-→ decision
-→ fold stable consequence into living contract or executable regression
-→ keep unresolved consequence in ROADMAP.md
-→ delete superseded narrative
-→ Git retains chronology
-```
-
-Examples:
-
-- an audible mechanism that is retained becomes a current music/renderer invariant and, where possible, a regression test;
-- a rejected mechanism may create a durable prohibition or validation requirement, but its diary does not stay beside the product;
-- a fixed DSP defect belongs in code/tests, not a permanent validation report;
-- an unfinished capability belongs in the roadmap, not a status section inside architecture docs;
-- citations may remain in a living contract when they directly support a current obligation, but a research ledger does not exist merely to remember that papers were read.
-
-Negative and ambiguous evidence matter. Convert their decision-relevant content into a live boundary, test, or unresolved roadmap item. Do not keep them as standalone chronicles.
-
-## 4. Documentation law
-
-A working-tree document must be one of:
+Prefer:
 
 ```text
-durable product/governance law
-current unresolved frontier
-focused current technical contract
-public contribution/license/attribution material
+existing owner over parallel owner
+derive over duplicate
+fold over archive
+semantic name over lifecycle name
+one executable invariant over prose-only duplication
 ```
 
-Do not retain:
+Do not create `new`, `v2`, `final`, `replacement`, `old`, `archive`, `legacy`, `misc`, or `backup` as active canonical namespaces merely to avoid understanding current ownership.
 
-- listening histories;
-- research ledgers;
-- experiment reports;
-- dated frontier snapshots;
-- migration ledgers;
-- “current implementation” inventories that code can answer;
-- completed phase plans;
-- retired profile matrices;
-- machine-specific debugging transcripts;
-- obsolete transport descriptions;
-- frozen numerical tuning narratives whose authority now lives in code/config/tests.
-
-A focused contract describes what must remain true, not how the project arrived there.
-
-When two documents overlap, merge toward the narrower canonical owner and delete the weaker surface rather than adding cross-references between duplicates.
-
-## 5. Project boundaries
-
-Helix owns cross-project continuity. deepSTRF owns reusable auditory/machine-hearing research when that work genuinely lives there. Omniphony owns its renderer, host code, source semantics, tests, builds, releases, and product contracts.
-
-Import only the smallest validated distinction needed by Omniphony. Do not copy parent-project research machinery or provenance logs into this repository.
-
-## 6. Research gate for audible changes
-
-Every substantive sound-changing intervention begins with both:
-
-1. relevant peer-reviewed, standards, or primary technical work; and
-2. mature implementation precedent where available.
-
-Preferred loop:
+Cleanup is:
 
 ```text
-listening observation
-→ literature / implementation pass
-→ smallest relevant mechanism
-→ bounded Omniphony experiment
-→ objective validation / CI
-→ physical listening
-→ keep, revise, or revert
-→ fold the surviving rule into a living owner
+identify current obligations + required evidence
+→ choose one owner for each overlap
+→ fold surviving consequences into owners/tests
+→ derive recoverable views
+→ delete completed/duplicate/lifecycle-shaped surfaces
+→ verify inbound routes and protected behavior
+→ let Git retain the walk
 ```
 
-Pure mechanical build, packaging, CI, formatting, or compile repairs do not require new audio research when they cannot alter runtime sound.
+## 4. Naming and hierarchy
 
-Research is an input to a decision, not a permanent documentation category.
+Conventional root files keep their conventional names. New human-facing Markdown, scripts, folders, task keys, handoff keys, route labels, and other repository slugs use lowercase kebab-case when platform/tool/schema contracts permit it.
 
-## 7. Core independence and host portability
+Language-native code identifiers keep their language convention. Existing external ABI/schema IDs and compatibility filenames are preserved until a deliberate migration proves every consumer.
 
-The renderer, inference, source scene, spatial compilation, and DSP core remain portable and independent of any one operating system.
+Folders own stable semantic categories, not work sessions or arbitrary relationships. A standalone repository is already a project boundary; do not recreate Omniphony under another `projects/omniphony` tree.
 
-Windows is the current reference/hardening host because it is the actively used environment for physical listening, endpoint integration, installer behavior, and native spatial-ingress proof. That priority must not turn Windows behavior into portable renderer law. Future macOS, Linux, and Android hosts are expected to reuse the same canonical scene, source-authority semantics, presentation rules, and final binaural renderer through platform-specific adapters.
+## 5. Product boundaries
+
+Omniphony is platform-agnostic. Windows is the current reference/hardening host, not portable architecture.
 
 Portable core owns:
 
 ```text
-host-neutral scene contract
-source scene
-channel/object geometry
 source authority
-sample-time object semantics
-bounded stable source identity
+canonical scene
+channel/object geometry
+sample-time semantics
+stable source identity
 presentation state
-spatial rendering
-binaural output
+spatial compilation
+binaural rendering
 ```
-
-Keep the portable scene contract below the renderer. Host adapters and renderers may depend on the same canonical identity/geometry/time/slot semantics directly; do not make a platform adapter depend on renderer DSP merely to obtain scene types, and do not create parallel scene types inside Windows or another host.
-
-The scene contract owns source identity continuity, metric geometry, exact rational-to-sample timing semantics, and bounded stable source slots. The renderer owns presentation and DSP. Platform adapters own translation from native APIs into the scene contract.
-
-A host port is an adapter and lifecycle implementation, not permission to fork product semantics. Windows Spatial Audio, Core Audio, Linux audio stacks, Android audio APIs, or any later platform seam may differ in what source truth they expose, but they must lower the strongest trustworthy representation they actually provide into the same portable contract. Do not flatten richer source truth merely to make two host implementations look structurally identical.
 
 Platform hosts own:
 
 ```text
 device/session discovery
 platform audio APIs
-endpoint association
-format translation
-clock/recovery behavior
+source ingress
+endpoint/egress
+format/cadence adaptation
+lifecycle/recovery
 platform UI/service integration
 installation/update/uninstall
 ```
 
-Do not move endpoint identities, registry rules, WASAPI/WDK state, Core Audio state, Linux audio-server state, Android audio/session state, tray/service concepts, or installer/package lifecycle into portable renderer semantics to solve host problems.
+A future macOS, Linux, Android, or other port is an adapter/lifecycle implementation around the same core. Do not import WASAPI, WDK, APO, COM, registry, Core Audio, Linux audio-server, or Android session concepts into portable scene law.
 
-The portable acceptance test for architecture work is therefore stronger than “works on Windows”: the same canonical source scene and renderer behavior must remain usable by a future host without inheriting Windows-only concepts. Windows may be perfected first; it may not become the hidden ABI of Omniphony.
+## 6. Source authority and one-render law
 
-## 8. Source authority
-
-The finished master is authoritative for stereo music. Keep the protected direct master explicitly present and use inferred spatial content only as bounded support.
-
-More source truth means less inference:
+Preserve the strongest source truth available:
 
 ```text
-stereo → protected master + bounded DERIVED support
-multichannel → preserve authored channels and positions
-object audio → preserve supplied identity and geometry
-Ambisonics / HOA → preserve the supplied field
-already-binaural → avoid destructive double virtualization
+stereo
+→ protected master + bounded DERIVED support
+
+multichannel / height bed
+→ preserve AUTHORED channels and positions
+
+static spatial roles
+→ preserve AUTHORED roles
+
+dynamic objects
+→ preserve identity + PCM + continuous AUTHORED geometry
+
+Ambisonics / HOA
+→ preserve the supplied field
+
+already-binaural
+→ do not blindly virtualize again
 ```
 
-Keep source truth, signal evidence, presentation hypothesis, and placement choice distinct.
+`AUTHORED`, `DERIVED`, and `EMPTY` are provenance states.
 
-`AUTHORED`, `DERIVED`, and `EMPTY` are provenance states, not cosmetic labels.
+Every source is spatially rendered by Omniphony at most once. A native spatial source must reach Omniphony before another headphone renderer collapses it to binaural stereo, or Omniphony must treat that already-rendered result according to the already-binaural policy.
 
-## 9. Fidelity and listening law
+There is no global spatial mode. Stream-local source semantics may differ concurrently.
 
-- Dimension may not be purchased by damaging the music.
-- OFF may collapse the world; it may not bring the rhythm section back to life.
-- Energy may be anchored; authored motion may not be frozen.
-- Bass pressure, kick weight, transient ownership, center stability, dynamics, tonal identity, and stereo motion are protected invariants.
-- Do not recover spatial scale with indiscriminate late reverb, treble energy, or diffuse duplication.
-- Prefer geometry, HRTF/ITD, distance, directional early-field structure, source extent, and physically motivated room cues.
+## 7. Fidelity and audible-change law
 
-Physical listening is the promotion authority for perceptual claims. Measurements, papers, simulations, and model outputs guide candidates but do not redefine success after the fact.
+Dimension may not be purchased by damaging the source.
 
-When listening changes the durable rule, update `docs/music-presentation-contract.md`, `docs/scene-renderer-contract.md`, a narrower live contract, and/or an executable regression. Do not create a listening archive.
+Protected Current invariants include:
 
-## 10. Realtime law
+- direct finished-master identity;
+- bass/body and groove floor;
+- transient ownership;
+- center solidity;
+- clarity and tonal identity;
+- dynamics and headroom;
+- authored stereo motion;
+- accepted front/back, height, early-field, and late-field behavior.
 
-Realtime paths remain bounded and deterministic for equivalent continuous input/state.
+Prefer geometry, HRTF/ITD, distance, directional early structure, source extent, and physically motivated room cues over indiscriminate reverb, treble energy, or diffuse duplication.
 
-Do not perform these operations from realtime callbacks:
+Every substantive sound-changing intervention begins with relevant primary/peer-reviewed work plus mature implementation precedent where available, then:
 
-- filesystem or network I/O;
+```text
+bounded candidate
+→ objective validation
+→ clean-route physical listening
+→ keep / revise / revert
+→ promote surviving invariant
+→ delete experiment narrative
+```
+
+Physical listening is promotion authority for perceptual claims. Measurements and papers guide candidates but do not overwrite the listening result.
+
+## 8. Realtime law
+
+Realtime work remains bounded and deterministic for equivalent continuous input/state.
+
+Do not perform from realtime callbacks:
+
+- filesystem/network I/O;
 - device/session enumeration;
 - UI work;
-- SOFA parsing/import;
-- unbounded model inference;
-- large or unbounded allocation/deallocation;
+- SOFA parsing or large HRTF construction;
+- unbounded inference;
+- large/unbounded allocation or deallocation;
 - thread creation;
-- blocking logging;
-- unbounded waits;
-- research-time discovery.
+- blocking logging or waits.
 
-Prefer preallocation, bounded queues, explicit discontinuity/reset behavior, and worker-owned allocating DSP where needed. Playback continuity may never depend on an optional analyzer, model, cache, or UI process.
+Callback size is transport, not source or acoustic semantics. Preserve explicit discontinuity/reset behavior, bounded queues, and worker-owned allocating work where needed.
 
-`docs/realtime-control-contract.md` owns the detailed sample-time, publication, recovery, and latency semantics.
+## 9. GitHub connector workspace law
 
-## 11. Evidence and claims
+When GitHub is the transport, read [`.agents/skills/github-workspace/SKILL.md`](.agents/skills/github-workspace/SKILL.md). The connector is a repository workspace, not a bag of unrelated file calls.
 
-Keep these states separate:
+Use:
+
+```text
+observe
+→ orient
+→ act
+→ verify
+→ refresh-awareness
+→ continue
+```
+
+### Observe and orient
+
+Freeze one exact base head and tree. Batch independent exact reads against that ref. Prefer exact tree membership and blob/file reads before ranked search. Search locates; exact reads establish state.
+
+Track ephemeral task sets:
+
+```text
+accepted-head
+read-set
+write-set
+dependency-set
+protected-set
+staged-overlay
+validation-target/state
+capability-blocks
+```
+
+Do not persist these as a second workspace ledger.
+
+### Act
+
+One independent text file may use a contents compare-and-swap update when its current blob SHA is fresh.
+
+Coupled changes should be staged as Git objects:
+
+```text
+fresh head/tree
+→ create all blobs
+→ create one candidate tree
+→ create one commit with parent = accepted head
+→ refresh main
+→ fast-forward only if compatible
+```
+
+Serialize dependent writes to the same path.
+
+### Refresh awareness
+
+A moved `main` is always an awareness event before it is a conflict decision.
+
+Compare the last accepted head directly with the newest observed head. Distinguish:
+
+```text
+remote-context-available
+refresh-context
+write-overlap-review
+protected-owner-changed
+history-diverged
+```
+
+Path-disjoint remote work may still be useful positive interference. Inspect compact intervening-commit summaries and absorb newly landed owners/tests/implementation when they materially improve the active task.
+
+If a changed remote path shaped the reasoning, re-read that premise. If it touches an intended write, inspect exact diff/hunks. If it touches a governing/protected owner, re-enter its contract.
+
+A Git parent may need rebuilding without invalidating the staged semantic edit. Preserve exact staged blobs where possible. Do not restart a whole task merely because `main` advanced.
+
+Never force-push. Bound immediate publication retries on a hot `main`; preserve the staged overlay instead of entering an infinite refresh loop.
+
+### Verify
+
+Validation belongs to an exact target SHA. Never transfer a pass from one SHA to another.
+
+Distinguish repository control from fresh runtime execution. A connector may read/write Git and inspect/rerun Actions without having a shell. Finish all repository-native work first and hand off only the genuinely unavailable execution step.
+
+Treat partial results precisely. No search match, truncation, pagination, permission failure, missing job, backend startup failure, workflow runtime failure, and executed test failure are different states.
+
+After publication, re-fetch `main`, verify the intended commit/path content, inspect CI that actually executed, and report unexecuted validation separately.
+
+### Coordination trailers
+
+For substantial direct-main agent commits, add retrospective routing trailers after the actual diff/validation state is known:
+
+```text
+omniphony-task: <lowercase-kebab-case-key>
+omniphony-change-kind: <actual-landed-kind>
+omniphony-validation: <actual-validation-state>
+omniphony-handoff: <optional issue numbers>
+```
+
+These are coordination hints, not evidence. Git diff and validation state outrank them.
+
+## 10. Codex capability-debt handoff
+
+When a concrete actionable step is blocked specifically by the current chatspace/GitHub-connector/runtime surface, use [`.agents/skills/codex-handoff/SKILL.md`](.agents/skills/codex-handoff/SKILL.md).
+
+The authoritative queue is open GitHub issues with:
+
+```text
+title prefix: CODEX:
+body marker: <!-- omniphony-codex-handoff:v1 -->
+```
+
+Use a handoff for missing local execution, OS/hardware probes, dependency installation, inaccessible CI diagnostics, binary inspection, or other concrete capabilities a later local/Codex environment can exercise.
+
+Do not create handoffs for ordinary research uncertainty, user decisions, vague ideas, work the connector can still perform, or publication contention alone.
+
+Search for an existing matching open issue before creating another. GitHub issue state is the queue; do not create a parallel JSON/Markdown queue.
+
+## 11. Evidence and validation
+
+Keep evidence states separate:
 
 ```text
 source exists
 ≠ code builds
 ≠ unit/regression tests pass
-≠ host API negotiation succeeds
+≠ host API negotiates
 ≠ endpoint association succeeds
-≠ application supplies the expected representation
-≠ physical endpoint receives the intended render
-≠ listening confirms the intended percept
+≠ intended representation reaches the renderer
+≠ samples are transformed exactly once
+≠ physical endpoint receives output
+≠ physical listening confirms the percept
 ```
 
-Do not promote a capability or perceptual claim beyond the strongest evidence obtained.
-
-For sound-changing work, record the needed evidence in the change/PR/commit process while evaluating it. After the decision, keep only the live consequence in canonical owners.
-
-## 12. Validation
-
-Validation must match the intervention.
+Validation must match the intervention:
 
 ```text
-documentation / ownership change
-→ route/link checks + semantic continuity
+documentation/ownership
+→ route/link/semantic continuity
 
-portable renderer change
-→ focused unit/regression tests + affected renderer suite
+portable renderer
+→ focused tests + affected renderer suite
 
-realtime / ABI change
-→ lifecycle, boundedness, non-finite, discontinuity, and ABI tests
+realtime/ABI
+→ boundedness + lifecycle + non-finite + discontinuity + ABI tests
 
-Windows host / installer change
-→ applicable APO, COM/lifecycle, endpoint, manifest, packaging, rollback, and CI checks
+Windows host/installer
+→ APO + COM/lifecycle + endpoint + manifest + rollback + packaging/CI
 
-audible DSP change
+audible DSP
 → engineering validation + controlled physical listening
 ```
 
-CI failure is evidence. Do not make a gate green by weakening a valid requirement.
+CI failure is evidence. Never weaken a valid gate merely to make it green.
 
-A compile pass is not a listening pass. A synthetic smoke is not physical endpoint proof. A repository search is not completeness proof.
-
-Do not retain completed validation reports when the surviving result can be encoded in tests, code, or a living contract.
-
-## 13. Completion law
+## 12. Completion
 
 Before publication:
 
-1. re-fetch current `main` and target blobs;
-2. preserve unrelated concurrent work;
-3. confirm the canonical owner of every changed state;
-4. verify no duplicate writable truth was introduced;
-5. run proportionate validation;
-6. inspect the exact diff;
-7. remove any superseded document or mechanism made redundant by the change.
+1. refresh current `main`;
+2. inspect intended writes plus changed supporting/protected premises;
+3. preserve unrelated work;
+4. confirm canonical ownership;
+5. inspect the candidate diff;
+6. run or route proportionate validation;
+7. remove superseded surfaces created redundant by the change.
 
 After publication:
 
-1. fetch the resulting commit;
-2. verify intended changed paths and content;
+1. fetch the resulting commit/ref;
+2. verify exact changed paths/content;
 3. confirm the commit remains in current `main` history;
-4. report build/tests, CI, measurements, and listening as separate evidence states;
-5. leave unresolved work in `ROADMAP.md`;
-6. do not create a history document to memorialize the work.
+4. inspect target-SHA CI/status that actually executed;
+5. leave unresolved work only in `ROADMAP.md` or a concrete Codex issue;
+6. do not create a history document to memorialize completed work.
+
+The repository should be easier to resume after every change.

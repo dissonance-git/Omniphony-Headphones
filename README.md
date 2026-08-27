@@ -1,206 +1,145 @@
 # Omniphony
 
-Omniphony is an open-source, platform-agnostic spatial audio compiler and renderer for headphones.
+Omniphony is an open-source, platform-agnostic spatial audio compiler and headphone renderer.
 
-Its goal is to occupy the same broad class of OS-wide audio role as proprietary headphone spatial systems while keeping source decoding/adaptation, the scene model, source-authority rules, DSP, validation, and host integration inspectable.
+It is designed to sit at the operating-system audio boundary, preserve the strongest spatial truth each stream actually supplies, lower that truth into one canonical scene, and perform exactly one final binaural render.
 
-> **One open spatial system that enhances ordinary stereo, preserves authored spatial truth when richer input exists, compiles every trustworthy source form into one canonical scene, and performs the final headphone render itself.**
+> **More source truth means less inference. One scene. One renderer. One headphone output.**
 
-Windows is the first reference product host because it is where Omniphony is currently being physically perfected and hardened. Windows is not the architecture or the final platform boundary. The renderer, source-scene contract, source-authority rules, DSP core, and public scene API are intended to remain portable across future macOS, Linux, and Android hosts.
+Windows is the reference and hardening host because it is the environment currently used for physical listening, endpoint integration, installer work, and native spatial-ingress proof. Windows is not the architecture. The portable core is intended to be reused by future macOS, Linux, Android, and other hosts.
 
-## Product law
-
-Omniphony is one renderer whose behavior becomes more source-authoritative as richer input becomes available.
+## Product model
 
 ```text
-stereo
+ordinary stereo
 → preserve the finished master
-→ infer only missing spatial structure
+→ derive only bounded missing spatial support
 
 authored channel bed
 → preserve supplied channels and positions
-→ infer less
 
-static spatial scene
+static spatial roles
 → preserve supplied roles
 
 dynamic objects
-→ preserve identity, PCM, and continuous geometry
+→ preserve identity + PCM + continuous geometry
+
+Ambisonics / HOA
+→ preserve the supplied field
+
+already-binaural material
+→ avoid a second spatial render
 
 all trustworthy source forms
-→ one Omniphony scene
+→ canonical Omniphony scene
+→ one portable spatial renderer
 → one final binaural render
-→ stereo headphones
+→ headphones
 ```
 
-> **The richer the source truth, the less Omniphony invents.**
+Source semantics are stream-local. There is no global "spatial mode" that rewrites unrelated streams. A stereo music player and a native-spatial game may coexist while each keeps the strongest representation its own host path exposes.
 
-## Repository design philosophy
+The canonical source/scene law lives in [`docs/scene-renderer-contract.md`](docs/scene-renderer-contract.md).
 
-> **Single-owner, evidence-stratified, derivation-first design.**
->
-> **Store authority. Derive views. Preserve evidence. Promote slowly.**
+## Windows reference host
 
-In this repository, **preserve evidence does not mean preserve historical documents**.
-
-Decision-relevant evidence must be absorbed into the living owner that uses it:
+The current Windows product target is deliberately simple:
 
 ```text
-stable product consequence
-→ README.md or a focused living contract
-
-current unresolved consequence
-→ ROADMAP.md
-
-executable invariant
-→ code / tests / CI
-
-current contributor/governance rule
-→ AGENTS.md
-
-retired experiment, superseded tuning, chronology
-→ Git history only
+Windows applications
+      ↓
+platform ingress
+      ↓
+canonical Omniphony scene
+      ↓
+portable renderer
+      ↓
+physical headphones
 ```
 
-A document exists only when it owns a current obligation that cannot be derived more exactly from code, tests, CI, or another canonical owner. Research notes, experiment diaries, status ledgers, implementation inventories, migration chronicles, listening histories, and frozen frontier snapshots do not remain in the working tree after their useful conclusions have been folded into living owners.
+Ordinary shared PCM and Windows Spatial Audio are different ingress seams into the same renderer. A conventional stereo or multichannel APO path does not prove native object interception; native spatial claims remain gated until a real application supplies authored objects to Omniphony and the physical one-render path is proven end to end.
 
-The canonical writable surfaces are:
+Windows-specific endpoint, APO, COM, registry, provider, lifecycle, installer, and recovery state belongs to the Windows host. It must not leak into portable scene or renderer semantics.
 
-| Surface | Responsibility |
-| --- | --- |
-| `README.md` | durable product identity and public architecture |
-| `AGENTS.md` | governing repository, evidence, realtime, and listening law |
-| `ROADMAP.md` | unresolved current work, gates, and frontier |
-| `docs/music-presentation-contract.md` | stereo/music presentation obligations |
-| `docs/scene-renderer-contract.md` | source, scene, channel/object, and renderer semantics |
-| `docs/realtime-control-contract.md` | sample-time, bounded realtime, continuity, latency, and failure law |
-| `docs/omniphony-for-windows.md` | durable Windows product, ingress, egress, lifecycle, and installation contract |
-| `docs/headphone-calibration.md` | listener/HRTF/headphone calibration boundary |
-| `docs/osc-control-contract.md` | OSC/control protocol semantics |
-| `docs/game-music-realtime-source-contract.md` | realtime recovered-source/game-music semantics |
-| `omniphony-renderer/` | executable implementation |
-| tests and `.github/` | executable validation and CI behavior |
-| Git history | chronology and retired alternatives |
+See [`docs/omniphony-for-windows.md`](docs/omniphony-for-windows.md).
 
-When two surfaces describe the same mutable fact, keep the canonical owner and delete or derive the other surface.
+## Protected stereo presentation
 
-## Source authority
+Stereo is a first-class source type, not a compatibility fallback.
 
-> **Preserve the richest source representation available and invent only what is missing.**
-
-Keep source truth, signal evidence, presentation hypothesis, and placement choice distinct.
-
-Static scene lanes use explicit authority states:
-
-```text
-AUTHORED  source or host supplied this signal / position
-DERIVED   Omniphony inferred bounded support
-EMPTY     no trustworthy signal is assigned
-```
-
-For stereo, the finished master remains the musical authority and inferred spatial support stays bounded. For authored multichannel, height, and object audio, supplied geometry outranks inference. Already-binaural material must not be blindly virtualized a second time.
-
-## Canonical source scene
-
-The fixed spatial vocabulary is a 17-position **8.1.4.4** semantic frame:
-
-```text
-horizontal
-FL FR C LFE SL SR BL BR BC
-
-upper
-TFL TFR TBL TBR
-
-lower
-BFL BFR BBL BBR
-```
-
-This is a coordinate vocabulary, not a claim that every source contains seventeen authored channels. Dynamic XYZ objects remain continuous objects beside the static frame rather than being snapped into fixed anchors.
-
-The semantic source scene and internal rendering geometry are different concepts. Internal support directions are renderer geometry, not authored input channels.
-
-Portable scene semantics sit below the renderer in a host-neutral contract layer. That layer owns stable source/object identity continuity, metric XYZ and radial distance, exact lowering from rational source time to half-open sample spans, and bounded stable source slots. Platform adapters lower their native metadata into that contract; the renderer consumes the same contract. Callback size, Windows ABI shape, and renderer internals therefore cannot silently become scene semantics.
-
-See [`docs/scene-renderer-contract.md`](docs/scene-renderer-contract.md).
-
-## Platform model and Windows reference host
-
-Omniphony is designed as one portable spatial compiler/renderer with thin platform hosts. A platform host discovers system audio, preserves whatever source representation the OS exposes, lowers it into the canonical Omniphony scene, and returns exactly one final headphone render.
-
-Windows is the current reference and hardening host, so its integration is intentionally the most mature first. Future macOS, Linux, and Android hosts must reuse the same source-authority and scene semantics rather than growing separate renderer identities.
-
-The current Windows product experience is simple:
-
-```text
-Windows audio
-     ↓
-Omniphony
-     ↓
-headphones
-```
-
-The Windows host owns Windows-specific capture/playback integration, source ingress, endpoint lifecycle, recovery, installation, update, uninstall, and optional preferences. Equivalent host responsibilities belong to each future platform adapter. The portable core owns source-scene semantics, presentation logic, spatial compilation, and final binaural rendering.
-
-Normal rendering is headless. It does not require a virtual cable, loopback host, or foreground audio application to remain open.
-
-See [`docs/omniphony-for-windows.md`](docs/omniphony-for-windows.md) for the current reference-host contract. Current unresolved Windows work and later host-porting gates belong only in [`ROADMAP.md`](ROADMAP.md).
-
-## Stereo fidelity law
-
-Stereo is a first-class source type rather than a compatibility afterthought.
-
-The finished master stays explicitly present. Omniphony may infer bounded width, depth, height, ambience, source extent, and externalization support, but spatial dimension may not be purchased by damaging clarity, impact, center stability, timbre, dynamics, rhythmic precision, authored motion, or bass integrity.
+The finished master remains present while Omniphony adds bounded derived support. Spatial scale may not be purchased by damaging clarity, bass/body, transient ownership, center stability, dynamics, timbre, rhythmic precision, or authored motion.
 
 > **OFF may collapse the world. It may not bring the rhythm section back to life.**
 
-Physical listening decides perceptual promotion. Once a result changes the durable product rule, that rule is folded into the living music contract or an executable regression. The discarded comparison narrative remains only in Git history.
+The Windows-validated Current presentation is a protected renderer baseline. Audible changes begin outside the accepted path and enter Current only after engineering validation plus clean-route physical listening. Once promoted, the surviving invariant belongs in the living contract and executable regression surface; Git keeps the discarded experiment history.
 
-See [`docs/music-presentation-contract.md`](docs/music-presentation-contract.md).
+See [`docs/music-presentation-contract.md`](docs/music-presentation-contract.md) and [`docs/binaural-renderer.md`](docs/binaural-renderer.md).
 
-## Protected perceptual baseline
+## Repository landmarks
 
-The accepted Windows-validated music presentation is a protected renderer baseline, not a temporary tuning waypoint. Windows is presently the physical reference environment; the accepted perceptual behavior belongs to the portable renderer and should travel with it unless a future host exposes a genuinely different source or output constraint.
+The repository uses the same surface law as Helix: **one concept, one writable owner; derive what can be derived; Git owns superseded repository narrative.**
 
-Future work may expand authored-scene semantics, radial distance, personalization, platform integration, diagnostics, or optional capabilities, but a sound-changing mechanism does not enter the default music path merely because it is more sophisticated or passes engineering tests. It must preserve the accepted baseline's bass/body, transient ownership, center solidity, clarity, dynamics, authored motion, externalization, and route reliability under clean physical listening.
+| Surface | Canonical responsibility |
+| --- | --- |
+| `README.md` | product identity, architecture, entry routes |
+| `AGENTS.md` | repository/change/evidence/concurrency law |
+| `ROADMAP.md` | unresolved gates and sequencing only |
+| `CONTRIBUTING.md` | contributor setup and validation procedure |
+| `docs/scene-renderer-contract.md` | source, scene, channel/object semantics |
+| `docs/music-presentation-contract.md` | stereo/music presentation invariants |
+| `docs/binaural-renderer.md` | portable binaural rendering invariants |
+| `docs/realtime-control-contract.md` | sample-time, realtime, latency, failure law |
+| `docs/omniphony-for-windows.md` | Windows ingress/egress/lifecycle/install contract |
+| `docs/headphone-calibration.md` | listener/headphone calibration boundary |
+| `docs/osc-control-contract.md` | OSC/control semantics |
+| `docs/game-music-realtime-source-contract.md` | recovered-source/game-music semantics |
+| `omniphony-renderer/` | executable implementation |
+| `.github/workflows/` | executable CI and release validation |
+| `.agents/` | agent procedure and connector re-entry routes |
+| Git history | chronology and retired alternatives |
 
-New audible mechanisms therefore begin as bounded candidates outside the protected default. If a candidate wins controlled listening, its durable consequence replaces the weaker rule. If it does not, the accepted baseline remains the product.
+A working-tree document must own a current obligation. Historical listening notes, completed research stages, old host instructions, migration diaries, duplicate status surfaces, and inert workflow copies do not stay active merely because they once mattered.
 
-The accepted Current sound is also guarded executably: sound-owning modules/configuration and selected output-safety constants are pinned by CI. Ordinary host, scene, and architecture work must not require that guard to move. An intentional listening promotion changes the sound and its baseline guard together.
+## Portable core
 
-The accepted Current early-field geometry includes true-direction second-order front/top-front image paths routed through four dedicated measured-HRTF precision buses. That mechanism conserves the existing front early tap-power budget and keeps the sub-300 Hz early return coherent, so the stronger frontal boundary is geometry rather than extra wet energy. It is now part of the protected reference sound.
+Portable code owns:
 
-Listener-specific or custom HRTF selection remains a future optional capability. It is not a prerequisite for the Current reference path and should not be mixed into sound-preserving cleanup of the accepted baseline.
+```text
+source authority
+canonical scene
+fixed channels + dynamic objects
+metric geometry + source time
+presentation state
+spatial compilation
+HRTF / ITD / room rendering
+final binaural output
+```
 
-Optional features such as head tracking are enhancements for listeners who want them. They are not required for normal Omniphony playback, calibration, or the reference listening path.
+Platform hosts own only platform-specific discovery, ingress, egress, cadence, device/session lifecycle, packaging, update/uninstall, and UI/service integration.
 
-## Realtime law
+Future macOS, Linux, and Android ports should be host adapters around the same core, not separate Omniphony products.
 
-Realtime paths remain bounded and deterministic for equivalent continuous input and state. Audible changes live on the sample timeline, not on callback boundaries.
+## Realtime and evidence law
 
-Realtime callbacks must not perform filesystem or network I/O, device/session enumeration, unbounded allocation, UI work, blocking logging, research-time analysis, or other unbounded operations. Playback must remain functional when optional analysis, models, caches, or control surfaces are unavailable.
+Realtime behavior is defined on the logical sample timeline, not on callback accidents. Audio callbacks stay bounded and deterministic; blocking I/O, device discovery, large/unbounded allocation, UI work, and research-time analysis stay off the realtime path.
 
-See [`docs/realtime-control-contract.md`](docs/realtime-control-contract.md).
-
-## Evidence states
-
-Do not collapse these into one status:
+Evidence states remain separate:
 
 ```text
 source exists
 ≠ code builds
 ≠ tests pass
-≠ host API negotiation succeeds
-≠ endpoint association succeeds
-≠ a real application supplies the expected source representation
-≠ physical playback reaches the intended endpoint
-≠ physical listening confirms the intended percept
+≠ host API negotiates
+≠ intended representation enters Omniphony
+≠ physical endpoint receives one-render output
+≠ listening confirms the intended percept
 ```
 
-Claims stop at the strongest evidence actually obtained. Unresolved evidence belongs in `ROADMAP.md`; resolved engineering evidence belongs in tests/code/CI or the current contract consequence it justifies.
+Claims stop at the strongest evidence actually obtained.
 
-## Build and tests
+## Build and contribution entry
 
-From `omniphony-renderer/`:
+From `omniphony-renderer/`, the common portable checks include:
 
 ```sh
 cargo test -p scene_contract
@@ -210,12 +149,10 @@ cargo test -p source_ffi --lib --tests
 cargo test -p realtime_ffi
 ```
 
-Windows-host changes should also pass the task-relevant APO, COM/lifecycle, realtime ABI, installer, endpoint, and packaging checks in CI.
+Windows host/APO changes also require the task-relevant Windows CI gates.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution workflow and [`AGENTS.md`](AGENTS.md) for the governing repository contract.
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md). Current unresolved work lives only in [`ROADMAP.md`](ROADMAP.md).
 
-## Definition of success
+## Success condition
 
-> **A finished source keeps its identity, weight, dynamics, clarity, and authored spatial truth while gaining a stable external world with convincing width, depth, height, distance, motion, source extent, and envelopment.**
-
-For stereo, Omniphony should create a richer spatial presentation without pretending inferred geometry was authored. For richer source formats, it should become progressively less inferential because the source has already supplied more of the world.
+> **A finished source keeps its identity, weight, dynamics, clarity, and authored spatial truth while the headphones present a stable external 3-D world with convincing front/back, height, depth, motion, extent, and envelopment.**

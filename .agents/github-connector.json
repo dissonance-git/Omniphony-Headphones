@@ -1,0 +1,39 @@
+{
+  "schema_version": "omniphony-github-connector-001.0",
+  "canonical_truth": false,
+  "writable_state": false,
+  "purpose": "Low-cost re-entry map for GitHub-connected agents. Resolve current main from GitHub; never trust an embedded commit SHA.",
+  "fetch_order": [
+    ".agents/github-connector.json",
+    "AGENTS.md",
+    "README.md",
+    "ROADMAP.md"
+  ],
+  "canonical_owners": {
+    "product_identity": "README.md",
+    "operating_law": "AGENTS.md",
+    "unresolved_frontier": "ROADMAP.md",
+    "contribution_procedure": "CONTRIBUTING.md",
+    "scene_contract": "docs/scene-renderer-contract.md",
+    "music_contract": "docs/music-presentation-contract.md",
+    "binaural_contract": "docs/binaural-renderer.md",
+    "realtime_contract": "docs/realtime-control-contract.md",
+    "windows_contract": "docs/omniphony-for-windows.md",
+    "calibration_contract": "docs/headphone-calibration.md",
+    "renderer_workspace": "omniphony-renderer",
+    "workflows": ".github/workflows"
+  },
+  "connector_rules": [
+    "Freeze exact main HEAD and tree before substantive reads or staging.",
+    "Use search for discovery only; exact refs/blobs/files establish snapshot truth.",
+    "Batch independent reads against one pinned ref and serialize dependent writes.",
+    "Track read/write/dependency/protected sets only as ephemeral task state.",
+    "For coupled changes create one Git-object candidate commit from a fresh base tree.",
+    "Treat a moved main as awareness before conflict; compare accepted head directly with newest head.",
+    "Absorb useful concurrent work when it changes the active owner, test, implementation, or premise.",
+    "Never force-push; bounded publication churn preserves the staged overlay instead of restarting the task.",
+    "Validation is target-SHA-bound and only executed jobs/tests may be reported as passes.",
+    "Use open CODEX issues only for concrete capability debt that this connector/runtime cannot execute."
+  ],
+  "reentry_note": "This file is a route index only. If it disagrees with a canonical owner, the canonical owner wins and this index must be repaired."
+}

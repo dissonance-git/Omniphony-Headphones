@@ -12,6 +12,8 @@ Use canonical owners rather than duplicated summaries:
 4. the smallest relevant living contract under [`docs/`](docs/);
 5. the exact implementation and tests you intend to change.
 
+Connector-only agents should also read [`.agents/github-connector.json`](.agents/github-connector.json) and [`.agents/skills/github-workspace/SKILL.md`](.agents/skills/github-workspace/SKILL.md). Search is discovery; exact refs/blobs establish repository truth.
+
 > **Store authority. Derive views. Preserve evidence. Promote slowly.**
 
 In this repository, retired experiments and chronology belong to Git history. Do not create research ledgers, listening histories, status reports, migration diaries, or frozen frontier snapshots. Fold the surviving decision into a living contract, test, code path, or current roadmap item.

@@ -1,4 +1,4 @@
-# Binaural renderer
+# Binaural renderer contract
 
 Omniphony's headphone path is an independent render path, not a speaker downmix.
 
@@ -17,7 +17,7 @@ scene position
 
 The target is not merely correct left/right panning. It is a stable externalized auditory world that can support front, rear, lateral, height, depth, broad-source and field impressions without sacrificing the recording's fidelity.
 
-This document describes the **current fork behavior and invariants**. It intentionally omits deleted Studio/mpv product instructions from upstream.
+This document owns the current portable binaural-renderer behavior and invariants. Product identity stays in `../README.md`; source/scene semantics stay in `scene-renderer-contract.md`; listener calibration stays in `headphone-calibration.md`.
 
 ---
 
@@ -322,7 +322,7 @@ low-frequency integration
 safety headroom
 ```
 
-See [`../docs/HEADPHONE_CALIBRATION.md`](../docs/HEADPHONE_CALIBRATION.md).
+See [`headphone-calibration.md`](headphone-calibration.md).
 
 A better headphone should expose more of the scene and recording, not more DSP artifacts.
 

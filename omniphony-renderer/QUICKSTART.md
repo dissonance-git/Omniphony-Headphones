@@ -105,7 +105,7 @@ Add a config that enables the binaural stage (the demo ships one,
   --output-backend pipewire
 ```
 
-See [BINAURAL.md](BINAURAL.md) for HRTF/SOFA, externalization and live head tracking.
+See [the binaural renderer contract](../docs/binaural-renderer.md) for HRTF/SOFA, externalization and live head tracking.
 
 ## 6. Precompute a VBAP table
 
@@ -184,7 +184,7 @@ Save the current effective configuration:
 - [README.md](README.md)
 - [BUILD.md](BUILD.md)
 - [BUILDING_WINDOWS.md](BUILDING_WINDOWS.md)
-- [BINAURAL.md](BINAURAL.md)
+- [Binaural renderer contract](../docs/binaural-renderer.md)
 - [OSC_PROTOCOL.md](OSC_PROTOCOL.md)
 - [BRIDGE_API.md](BRIDGE_API.md)
 - [../layouts/README.md](../layouts/README.md)
