@@ -181,9 +181,9 @@ Omniphony already supports several conceptual HRTF families:
 - parametric pinna/PRTF models;
 - SOFA data.
 
-The calibration layer should eventually add a short perceptual selection task.
+Listener/HRTF selection is a future optional feature, not part of Current baseline cleanup. The accepted reference path keeps its existing embedded measured HRTF while sound-preserving cleanup proceeds; no HRTF trial or custom measurement is required for normal playback.
 
-The task should prioritize dimensions generic HRTFs often get wrong:
+When that optional feature is deliberately reopened, a short perceptual selection task should prioritize dimensions generic HRTFs often get wrong:
 
 ```text
 front vs back
@@ -500,7 +500,7 @@ Equivalent continuous audio partitioned into different callback sizes must produ
 - automatic safety preamp;
 - bypassable independent A/B.
 
-### Phase C2 — listener/HRTF selection
+### Phase C2 — listener/HRTF selection (future optional)
 
 - small perceptual HRTF candidate test;
 - SOFA import;
