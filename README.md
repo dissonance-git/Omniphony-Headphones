@@ -163,6 +163,10 @@ New audible mechanisms therefore begin as bounded candidates outside the protect
 
 The accepted Current sound is also guarded executably: sound-owning modules/configuration and selected output-safety constants are pinned by CI. Ordinary host, scene, and architecture work must not require that guard to move. An intentional listening promotion changes the sound and its baseline guard together.
 
+The accepted Current early-field geometry includes true-direction second-order front/top-front image paths routed through four dedicated measured-HRTF precision buses. That mechanism conserves the existing front early tap-power budget and keeps the sub-300 Hz early return coherent, so the stronger frontal boundary is geometry rather than extra wet energy. It is now part of the protected reference sound.
+
+Listener-specific or custom HRTF selection remains a future optional capability. It is not a prerequisite for the Current reference path and should not be mixed into sound-preserving cleanup of the accepted baseline.
+
 Optional features such as head tracking are enhancements for listeners who want them. They are not required for normal Omniphony playback, calibration, or the reference listening path.
 
 ## Realtime law
