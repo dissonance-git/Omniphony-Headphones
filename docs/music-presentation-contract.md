@@ -118,6 +118,8 @@ The current default Windows music presentation is the protected perceptual basel
 
 That protection is executable as well as documentary. Sound-owning Current modules/configuration and selected output-safety constants are pinned by the baseline validation lane. Ordinary scene, host, portability, packaging, and refactoring work must not update the baseline guard merely to make CI pass. An intentional perceptual promotion updates the accepted sound and the guard in the same change after physical listening earns that promotion.
 
+The protected frontal boundary now includes second-order front/top-front image paths that retain their actual image directions through four dedicated measured-HRTF precision buses. This mechanism redistributes, rather than adds, early energy: the accepted front early tap-power budget is conserved, the sub-300 Hz return stays coherent, and the rear/first-order/late/master/foundation paths keep their existing ownership. Sound-preserving cleanup must not collapse these order-2 paths back onto final-wall directions or trade the frontal gain for more wetness.
+
 The late field earns retention by improving closure and envelopment without requiring more wet energy. Once late closure is smooth and unobtrusive, further externalization should be sought first through early-field geometry and directional resolution rather than by increasing late level, decay, or diffuse duplication.
 
 ## 5. Direct, broad, diffuse, and room roles stay distinct
