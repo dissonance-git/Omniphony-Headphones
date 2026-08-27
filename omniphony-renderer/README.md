@@ -62,9 +62,9 @@ Windows APO, installer, packaging, dependency, and provider validation is owned 
 ## Build/demo references
 
 - [quickstart](QUICKSTART.md)
-- [build](BUILD.md)
-- [Windows build](BUILDING_WINDOWS.md)
 - [bridge API](BRIDGE_API.md)
 - [OSC protocol](OSC_PROTOCOL.md)
+- [contributor workflow](../CONTRIBUTING.md)
+- [Windows host contract](../docs/omniphony-for-windows.md)
 
-These are implementation/contributor references. Product law stays in the repository root and `docs/`; historical host instructions and completed experiment narratives belong to Git history.
+Cargo manifests and repository-level workflows are the executable build truth. Do not maintain a second prose inventory of platform feature state.

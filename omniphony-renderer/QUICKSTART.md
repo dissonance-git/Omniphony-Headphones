@@ -1,190 +1,74 @@
 # Quickstart
 
-The shortest path to *hearing* `omniphony-renderer` work — then to running it on
-your own input.
+This is the shortest implementation-level path through `omniphony-renderer`. Product installation and Windows system-audio behavior are documented at the repository root, not here.
 
-## 1. Hear the demo (one command)
+## Hear the bundled renderer demo
 
-From a fresh checkout, with no audio file to find and no decoder to install:
+From a fresh checkout:
 
-```bash
+```sh
 cd omniphony-renderer
-./scripts/demo.sh            # builds the engine + reference bridge, then plays the demo
+./scripts/demo.sh
 ```
 
-This binaurally renders `assets/demo/spatial-demo.wav` — a source sweeping around
-you with an overhead tone — straight to your headphones, with no media player and
-no proprietary decoder. Other modes:
+The demo uses the bundled reference bridge and fixture. It is a renderer demonstration, not the normal OS-wide product route.
 
-```bash
-./scripts/demo.sh speakers   # 7.1.4 speaker render instead of binaural
-./scripts/demo.sh file       # no audio device? pipe raw float to ffplay
+Other demo outputs, when available on the host:
+
+```sh
+./scripts/demo.sh speakers
+./scripts/demo.sh file
 ```
 
-Everything below explains what that script does and how to run the engine on your
-own input. The commands assume you are in `omniphony-renderer/`.
+## Build
 
-## 2. Build
-
-Minimal build:
-
-```bash
+```sh
 cargo build --release
 ```
 
-Linux with PipeWire:
+The Cargo manifests are the feature/dependency authority. Do not rely on old prose feature inventories when they disagree with `Cargo.toml`.
 
-```bash
-cargo build --release --features pipewire
+## Focused tests
+
+```sh
+cargo test -p scene_contract
+cargo test -p renderer
+cargo test -p orender_engine --lib --tests
+cargo test -p realtime_ffi
+cargo test -p source_ffi --lib --tests
 ```
 
-Linux or Windows with runtime VBAP generation:
+For the protected Current scene shape:
 
-```bash
-export SAF_ROOT="/path/to/Spatial_Audio_Framework"
-cargo build --release --features saf_vbap
+```sh
+cargo test -p orender_engine --test current_scene_geometry
 ```
 
-`saf_vbap` enables runtime VBAP generation via
-[`Spatial_Audio_Framework` (SAF)](https://github.com/leomccormack/Spatial_Audio_Framework),
-not the separate [`SPARTA`](https://leomccormack.github.io/sparta-site/) plug-in suite.
+Windows APO, installer, provider, dependency, and packaging checks are owned by repository-level `../.github/workflows/`.
 
-Windows with ASIO:
+## Reference bridge
 
-```bash
-cargo build --release --features asio
-```
+The bundled `reference_bridge/` reads known PCM/WAV material and is the smallest decoder/bridge example. The bridge contract is in [`BRIDGE_API.md`](BRIDGE_API.md).
 
-## 3. The bridge model
+A bridge supplies source PCM and metadata. It must not invent a renderer-specific output layout merely to enter Omniphony.
 
-`orender` does not decode formats in the binary itself: it loads a **bridge
-plugin** at runtime that turns your input into PCM + object metadata. Bridge
-lookup order:
+## Binaural rendering
 
-1. `--bridge-path <FILE>`
-2. `render.bridge_path` in the config file
-3. the first `lib*_bridge.{so,dll,dylib}` next to the executable
+The portable renderer contract is [`../docs/binaural-renderer.md`](../docs/binaural-renderer.md).
 
-The repo ships a **reference bridge** (`reference_bridge/`) that reads a plain
-multichannel WAV — it is what the demo uses, and the smallest example for writing
-your own (see [BRIDGE_API.md](BRIDGE_API.md)). The release build produces
-`target/release/libreference_bridge.so`. For other formats, point `--bridge-path`
-at the matching bridge instead (e.g. a separately-packaged decoder bridge).
+Source/scene semantics are [`../docs/scene-renderer-contract.md`](../docs/scene-renderer-contract.md). The Windows system-wide host is [`../docs/omniphony-for-windows.md`](../docs/omniphony-for-windows.md).
 
-## 4. Decode a file
+## OSC/control
 
-Render the demo clip explicitly (this is what `demo.sh speakers` runs):
+The detailed implementation reference is [`OSC_PROTOCOL.md`](OSC_PROTOCOL.md). The durable control semantics are owned by [`../docs/osc-control-contract.md`](../docs/osc-control-contract.md).
 
-```bash
-./target/release/orender assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap \
-  --speaker-layout ../layouts/7.1.4.yaml
-```
+## Contribution entry
 
-Read from stdin instead of a file:
+Use:
 
-```bash
-cat assets/demo/spatial-demo.wav | ./target/release/orender - \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap --speaker-layout ../layouts/7.1.4.yaml
-```
+1. [`../README.md`](../README.md) for product identity;
+2. [`../AGENTS.md`](../AGENTS.md) for repository/change law;
+3. [`../ROADMAP.md`](../ROADMAP.md) only for unresolved gates;
+4. [`../CONTRIBUTING.md`](../CONTRIBUTING.md) for validation and contribution procedure.
 
-Swap in your own WAV (or your own input + bridge) the same way.
-
-## 5. Binaural headphones
-
-Add a config that enables the binaural stage (the demo ships one,
-`assets/demo/demo.yaml`):
-
-```bash
-./target/release/orender assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap --speaker-layout ../layouts/7.1.4.yaml \
-  --config assets/demo/demo.yaml \
-  --output-backend pipewire
-```
-
-See [the binaural renderer contract](../docs/binaural-renderer.md) for HRTF/SOFA, externalization and live head tracking.
-
-## 6. Precompute a VBAP table
-
-```bash
-./target/release/orender generate-vbap \
-  --speaker-layout ../layouts/7.1.4.yaml \
-  --output 7.1.4.vbap \
-  --az-res 2 --el-res 2 --spread-res 0.25
-```
-
-Then reuse it instead of generating at startup:
-
-```bash
-./target/release/orender assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap --vbap-table ./7.1.4.vbap
-```
-
-## 7. OSC (metadata + Studio)
-
-```bash
-./target/release/orender assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --osc --osc-host 127.0.0.1 --osc-port 9000
-```
-
-See [OSC_PROTOCOL.md](OSC_PROTOCOL.md) for the full message surface.
-
-## 8. Realtime (and file) output
-
-Linux / PipeWire:
-
-```bash
-./target/release/orender assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap --speaker-layout ../layouts/7.1.4.yaml \
-  --output-backend pipewire --output-device omniphony_router
-```
-
-Write to a file or pipe instead of a device (non-realtime):
-
-```bash
-./target/release/orender assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap --speaker-layout ../layouts/7.1.4.yaml \
-  --output-backend file --output-file out.f32 --output-file-format raw-f32
-```
-
-Windows / ASIO:
-
-```powershell
-.\target\release\orender.exe list-asio-devices
-.\target\release\orender.exe assets\demo\spatial-demo.wav `
-  --bridge-path target\release\reference_bridge.dll `
-  --output-backend asio --output-device "Your ASIO Device"
-```
-
-## 9. Configuration file
-
-Default config path:
-
-- Linux: `~/.config/omniphony/config.yaml`
-- Windows: `%ProgramData%\omniphony\config.yaml` (machine-wide; shared by user-mode and the service)
-
-Save the current effective configuration:
-
-```bash
-./target/release/orender --config ./config.yaml --save-config \
-  assets/demo/spatial-demo.wav \
-  --bridge-path target/release/libreference_bridge.so \
-  --enable-vbap --speaker-layout ../layouts/7.1.4.yaml --osc
-```
-
-## Next references
-
-- [README.md](README.md)
-- [BUILD.md](BUILD.md)
-- [BUILDING_WINDOWS.md](BUILDING_WINDOWS.md)
-- [Binaural renderer contract](../docs/binaural-renderer.md)
-- [OSC_PROTOCOL.md](OSC_PROTOCOL.md)
-- [BRIDGE_API.md](BRIDGE_API.md)
-- [../layouts/README.md](../layouts/README.md)
+Historical host/build instructions belong to Git history once Cargo/workflows own the executable truth.

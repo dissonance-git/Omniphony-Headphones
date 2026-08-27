@@ -57,7 +57,13 @@ In particular:
 
 The renderer workspace currently requires Rust 1.88.0 or newer.
 
-From `omniphony-renderer/`, useful focused commands include:
+From `omniphony-renderer/`, build the portable workspace with:
+
+```sh
+cargo build --release
+```
+
+Useful focused commands include:
 
 ```sh
 cargo test -p renderer
