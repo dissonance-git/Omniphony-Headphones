@@ -9,7 +9,7 @@
 //! physical subwoofer route, so LFE is removed from the positional bed and
 //! folded equally into the final headphone pair at -6 dB per ear.
 
-use crate::music_support::{MusicSupportRenderer, SpatialProfile};
+use crate::music_support::MusicSupportRenderer;
 use anyhow::{bail, ensure};
 use renderer::music_field::MUSIC_FIELD_CHANNELS;
 
@@ -34,7 +34,7 @@ impl CurrentAuthoredBedRenderer {
         );
         Ok(Self {
             input_channels,
-            support: MusicSupportRenderer::new(SpatialProfile::Current, sample_rate_hz)?,
+            support: MusicSupportRenderer::new(sample_rate_hz)?,
             canonical: Vec::new(),
             lfe: Vec::new(),
         })
