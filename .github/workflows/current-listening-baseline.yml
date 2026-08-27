@@ -6,6 +6,7 @@ on:
     paths:
       - "omniphony-renderer/current-listening-baseline.manifest"
       - "omniphony-renderer/scripts/check-current-listening-baseline.sh"
+      - "omniphony-renderer/orender_engine/src/current_music_support.rs"
       - "omniphony-renderer/orender_engine/src/music_support.rs"
       - "omniphony-renderer/orender_engine/src/music_early_reflections.rs"
       - "omniphony-renderer/orender_engine/src/music_late_enclosure.rs"
@@ -23,6 +24,7 @@ on:
     paths:
       - "omniphony-renderer/current-listening-baseline.manifest"
       - "omniphony-renderer/scripts/check-current-listening-baseline.sh"
+      - "omniphony-renderer/orender_engine/src/current_music_support.rs"
       - "omniphony-renderer/orender_engine/src/music_support.rs"
       - "omniphony-renderer/orender_engine/src/music_early_reflections.rs"
       - "omniphony-renderer/orender_engine/src/music_late_enclosure.rs"
