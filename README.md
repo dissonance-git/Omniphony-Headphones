@@ -151,7 +151,7 @@ cargo test -p realtime_ffi
 
 Windows host/APO changes also require the task-relevant Windows CI gates.
 
-Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md). Current unresolved work lives only in [`ROADMAP.md`](ROADMAP.md).
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md). Reasoning agents entering through GitHub derive their first-connection packet from [`.agents/github-agent-bootstrap.py`](.agents/github-agent-bootstrap.py) plus the live [`.agents/skills/`](.agents/skills/) inventory; no committed connector-state file owns current repository truth. Current unresolved work lives only in [`ROADMAP.md`](ROADMAP.md).
 
 ## Success condition
 

@@ -6,9 +6,36 @@ This file is the canonical operating law for `dissonance-git/Omniphony-Headphone
 >
 > **One concept, one writable owner. Store authority. Derive views. Preserve evidence. Promote slowly.**
 >
-> **Living documents own current obligations. Git owns superseded repository narrative and chronology.**
+> **Living owners keep current obligations. Git keeps the walk.**
 
-## 1. Enter through current authority
+Direct user correction or instruction outranks repository prose.
+
+## 1. First-connection skill preflight
+
+Every substantive reasoning-agent entry inherits [`.agents/skills/skill-preflight/SKILL.md`](.agents/skills/skill-preflight/SKILL.md).
+
+Before repository, DSP, host, installer, research, review, or publication action:
+
+```text
+identify Omniphony
+→ read current AGENTS.md authority
+→ read the smallest relevant README.md identity/routing surface
+→ enumerate .agents/skills/*/SKILL.md
+→ compare skill names/descriptions with the exact obligation
+→ select process/control skills first
+→ read selected current skill bodies
+→ build the smallest sufficient context
+→ act
+→ verify
+```
+
+Do not front-load every skill body. Current repository bytes outrank remembered procedure.
+
+For GitHub-native work, the preferred first-connection packet is derived from current state rather than stored as a mutable connector map. When local execution exists, `python .agents/github-agent-bootstrap.py --json` emits the exact HEAD/tree, authority path, skill-preflight owner, and live skill fingerprint. Connector-only agents should emulate that packet from exact GitHub evidence.
+
+Refresh skill awareness when `AGENTS.md`, `README.md`, `.agents/skills/`, or the exact obligation changes materially.
+
+## 2. Enter through current authority
 
 For substantive work:
 
@@ -16,7 +43,8 @@ For substantive work:
 current main HEAD
 → README.md
 → AGENTS.md at the same HEAD
-→ ROADMAP.md only when unresolved work matters
+→ selected current skills
+→ ROADMAP.md only when unresolved priority matters
 → smallest task-relevant living contract
 → exact code / tests / CI
 → target
@@ -26,9 +54,9 @@ Resolve current `main` before reasoning about mutable repository state. Search i
 
 Repository publication is main-only unless the user explicitly changes that instruction. Never force-push. Preserve unrelated concurrent work.
 
-## 2. Canonical ownership
+## 3. One owner per concept
 
-Every durable mutable fact gets one writable owner.
+Canonical roles are:
 
 ```text
 README.md
@@ -74,91 +102,59 @@ omniphony-renderer/
   executable validation / packaging / release behavior
 
 .agents/
-  agent procedures and connector re-entry routes, never product truth
+  agent procedure / derived first-connection tooling only
 
 Git history
   chronology and retired alternatives
 ```
 
-Generated inventories, search results, connector maps, status summaries, and task capsules are projections. They may help orientation, but they are not second truth stores.
+Generated inventories, search results, connector packets, status summaries, caches, and task capsules are projections. They are not peer truth stores.
 
-## 3. Semantic collapse and repository cleanup
+## 4. Semantic collapse and cleanup
 
-A representation change wins only if protected capability remains reachable while maintenance, context, routing, or verification cost falls.
+A representation change wins only if protected capability remains reachable while maintenance, context, routing, latency, or verification cost falls.
 
-Before keeping or adding a document, registry, cache, abstraction, directory, workflow, or subsystem, ask:
-
-1. What current obligation does it uniquely own?
-2. Can the fact be derived from code/tests/CI or another owner?
-3. Is the object still required evidence, or merely repository history?
-4. Which weaker or duplicate surface can be removed if this survives?
-5. What breaks if this object disappears while Git history remains?
-
-Prefer:
-
-```text
-existing owner over parallel owner
-derive over duplicate
-fold over archive
-semantic name over lifecycle name
-one executable invariant over prose-only duplication
-```
-
-Do not create `new`, `v2`, `final`, `replacement`, `old`, `archive`, `legacy`, `misc`, or `backup` as active canonical namespaces merely to avoid understanding current ownership.
-
-Cleanup is:
+Repository cleanup is:
 
 ```text
 identify current obligations + required evidence
-→ choose one owner for each overlap
+→ choose one owner for every overlap
 → fold surviving consequences into owners/tests
 → derive recoverable views
-→ delete completed/duplicate/lifecycle-shaped surfaces
+→ remove duplicate/completed/lifecycle-shaped surfaces
 → verify inbound routes and protected behavior
 → let Git retain the walk
 ```
 
-## 4. Naming and hierarchy
+Before keeping or adding a document, registry, cache, abstraction, wrapper, directory, workflow, compatibility route, or subsystem, ask:
 
-Conventional root files keep their conventional names. New human-facing Markdown, scripts, folders, task keys, handoff keys, route labels, and other repository slugs use lowercase kebab-case when platform/tool/schema contracts permit it.
+1. What current obligation does it uniquely own?
+2. Can the fact or relation be derived from another owner?
+3. Is the exact object still required evidence, provenance, or compatibility?
+4. Which weaker surface can disappear if this survives?
+5. What required consequence becomes unrecoverable if it is removed?
 
-Language-native code identifiers keep their language convention. Existing external ABI/schema IDs and compatibility filenames are preserved until a deliberate migration proves every consumer.
+Prefer existing owner over parallel owner, derive over duplicate, fold over archive, semantic names over lifecycle names, and executable invariants over prose duplication.
 
-Folders own stable semantic categories, not work sessions or arbitrary relationships. A standalone repository is already a project boundary; do not recreate Omniphony under another `projects/omniphony` tree.
+Do not create active `new`, `v2`, `final`, `replacement`, `old`, `archive`, `legacy`, `misc`, or `backup` namespaces merely to avoid understanding current ownership.
 
-## 5. Product boundaries
+## 5. Naming and hierarchy
+
+Conventional root files keep conventional names.
+
+New human-facing Markdown, scripts, folders, task/handoff keys, route labels, and repository slugs use lowercase kebab-case when platform/tool/schema contracts permit it. Python scripts and identifiers use lowercase snake_case. Language-native code identifiers keep their language convention.
+
+Existing ABI/schema IDs, platform registration names, compatibility filenames, and external contracts stay exact until a deliberate migration proves every consumer.
+
+Folders own stable semantic categories, not chronology or work sessions.
+
+## 6. Product and source boundaries
 
 Omniphony is platform-agnostic. Windows is the current reference/hardening host, not portable architecture.
 
-Portable core owns:
+Portable core owns source authority, canonical scene, geometry, source/sample time, stable source identity, presentation state, spatial compilation, and binaural rendering.
 
-```text
-source authority
-canonical scene
-channel/object geometry
-sample-time semantics
-stable source identity
-presentation state
-spatial compilation
-binaural rendering
-```
-
-Platform hosts own:
-
-```text
-device/session discovery
-platform audio APIs
-source ingress
-endpoint/egress
-format/cadence adaptation
-lifecycle/recovery
-platform UI/service integration
-installation/update/uninstall
-```
-
-A future macOS, Linux, Android, or other port is an adapter/lifecycle implementation around the same core. Do not import WASAPI, WDK, APO, COM, registry, Core Audio, Linux audio-server, or Android session concepts into portable scene law.
-
-## 6. Source authority and one-render law
+Platform hosts own device/session discovery, native audio APIs, ingress/egress, cadence/format adaptation, lifecycle/recovery, platform UI/service integration, and installation/update/uninstall.
 
 Preserve the strongest source truth available:
 
@@ -176,34 +172,21 @@ dynamic objects
 → preserve identity + PCM + continuous AUTHORED geometry
 
 Ambisonics / HOA
-→ preserve the supplied field
+→ preserve supplied field
 
 already-binaural
-→ do not blindly virtualize again
+→ do not blindly spatialize again
 ```
 
-`AUTHORED`, `DERIVED`, and `EMPTY` are provenance states.
+`AUTHORED`, `DERIVED`, and `EMPTY` are provenance states. There is no global spatial mode. Stream-local source semantics may differ concurrently.
 
-Every source is spatially rendered by Omniphony at most once. A native spatial source must reach Omniphony before another headphone renderer collapses it to binaural stereo, or Omniphony must treat that already-rendered result according to the already-binaural policy.
+Every source is spatially rendered by Omniphony at most once.
 
-There is no global spatial mode. Stream-local source semantics may differ concurrently.
-
-## 7. Fidelity and audible-change law
+## 7. Fidelity, audible change, and realtime law
 
 Dimension may not be purchased by damaging the source.
 
-Protected Current invariants include:
-
-- direct finished-master identity;
-- bass/body and groove floor;
-- transient ownership;
-- center solidity;
-- clarity and tonal identity;
-- dynamics and headroom;
-- authored stereo motion;
-- accepted front/back, height, early-field, and late-field behavior.
-
-Prefer geometry, HRTF/ITD, distance, directional early structure, source extent, and physically motivated room cues over indiscriminate reverb, treble energy, or diffuse duplication.
+Protected Current invariants include direct finished-master identity, bass/body and groove, transient ownership, center solidity, clarity and tonal identity, dynamics/headroom, authored stereo motion, and the accepted front/back, height, early-field, and late-field behavior.
 
 Every substantive sound-changing intervention begins with relevant primary/peer-reviewed work plus mature implementation precedent where available, then:
 
@@ -218,109 +201,32 @@ bounded candidate
 
 Physical listening is promotion authority for perceptual claims. Measurements and papers guide candidates but do not overwrite the listening result.
 
-## 8. Realtime law
+Realtime work remains bounded and deterministic for equivalent continuous input/state. Do not perform filesystem/network I/O, device enumeration, UI work, SOFA parsing, large HRTF construction, unbounded inference, large/unbounded allocation, thread creation, blocking logging, or waits from the audio callback.
 
-Realtime work remains bounded and deterministic for equivalent continuous input/state.
+Callback size is transport, not source or acoustic semantics.
 
-Do not perform from realtime callbacks:
+## 8. Repository mutation and concurrency
 
-- filesystem/network I/O;
-- device/session enumeration;
-- UI work;
-- SOFA parsing or large HRTF construction;
-- unbounded inference;
-- large/unbounded allocation or deallocation;
-- thread creation;
-- blocking logging or waits.
+Repository changes use [`.agents/skills/repo-change/SKILL.md`](.agents/skills/repo-change/SKILL.md).
 
-Callback size is transport, not source or acoustic semantics. Preserve explicit discontinuity/reset behavior, bounded queues, and worker-owned allocating work where needed.
+GitHub-backed work additionally uses [`.agents/skills/github-workspace/SKILL.md`](.agents/skills/github-workspace/SKILL.md). Long or hot-`main` connector work also uses [`.agents/skills/github-workspace-liveness/SKILL.md`](.agents/skills/github-workspace-liveness/SKILL.md).
 
-## 9. GitHub connector workspace law
-
-When GitHub is the transport, read [`.agents/skills/github-workspace/SKILL.md`](.agents/skills/github-workspace/SKILL.md). The connector is a repository workspace, not a bag of unrelated file calls.
-
-Use:
+The operating loop is:
 
 ```text
-observe
-→ orient
-→ act
-→ verify
-→ refresh-awareness
-→ continue
+observe exact state
+→ orient narrowly
+→ stage an overlay
+→ verify what can actually execute
+→ refresh awareness of current main
+→ continue from the newest accepted head
 ```
 
-### Observe and orient
+Remote movement is awareness before conflict. Path-disjoint concurrent work may still introduce useful evidence, tests, helpers, or owners. Absorb relevant positive interference without discarding unaffected progress.
 
-Freeze one exact base head and tree. Batch independent exact reads against that ref. Prefer exact tree membership and blob/file reads before ranked search. Search locates; exact reads establish state.
+Validation belongs to an exact target SHA. A pass from one commit does not transfer to another.
 
-Track ephemeral task sets:
-
-```text
-accepted-head
-read-set
-write-set
-dependency-set
-protected-set
-staged-overlay
-validation-target/state
-capability-blocks
-```
-
-Do not persist these as a second workspace ledger.
-
-### Act
-
-One independent text file may use a contents compare-and-swap update when its current blob SHA is fresh.
-
-Coupled changes should be staged as Git objects:
-
-```text
-fresh head/tree
-→ create all blobs
-→ create one candidate tree
-→ create one commit with parent = accepted head
-→ refresh main
-→ fast-forward only if compatible
-```
-
-Serialize dependent writes to the same path.
-
-### Refresh awareness
-
-A moved `main` is always an awareness event before it is a conflict decision.
-
-Compare the last accepted head directly with the newest observed head. Distinguish:
-
-```text
-remote-context-available
-refresh-context
-write-overlap-review
-protected-owner-changed
-history-diverged
-```
-
-Path-disjoint remote work may still be useful positive interference. Inspect compact intervening-commit summaries and absorb newly landed owners/tests/implementation when they materially improve the active task.
-
-If a changed remote path shaped the reasoning, re-read that premise. If it touches an intended write, inspect exact diff/hunks. If it touches a governing/protected owner, re-enter its contract.
-
-A Git parent may need rebuilding without invalidating the staged semantic edit. Preserve exact staged blobs where possible. Do not restart a whole task merely because `main` advanced.
-
-Never force-push. Bound immediate publication retries on a hot `main`; preserve the staged overlay instead of entering an infinite refresh loop.
-
-### Verify
-
-Validation belongs to an exact target SHA. Never transfer a pass from one SHA to another.
-
-Distinguish repository control from fresh runtime execution. A connector may read/write Git and inspect/rerun Actions without having a shell. Finish all repository-native work first and hand off only the genuinely unavailable execution step.
-
-Treat partial results precisely. No search match, truncation, pagination, permission failure, missing job, backend startup failure, workflow runtime failure, and executed test failure are different states.
-
-After publication, re-fetch `main`, verify the intended commit/path content, inspect CI that actually executed, and report unexecuted validation separately.
-
-### Coordination trailers
-
-For substantial direct-main agent commits, add retrospective routing trailers after the actual diff/validation state is known:
+For substantial direct-main agent commits, use retrospective routing trailers:
 
 ```text
 omniphony-task: <lowercase-kebab-case-key>
@@ -329,26 +235,9 @@ omniphony-validation: <actual-validation-state>
 omniphony-handoff: <optional issue numbers>
 ```
 
-These are coordination hints, not evidence. Git diff and validation state outrank them.
+These are coordination hints, not evidence.
 
-## 10. Codex capability-debt handoff
-
-When a concrete actionable step is blocked specifically by the current chatspace/GitHub-connector/runtime surface, use [`.agents/skills/codex-handoff/SKILL.md`](.agents/skills/codex-handoff/SKILL.md).
-
-The authoritative queue is open GitHub issues with:
-
-```text
-title prefix: CODEX:
-body marker: <!-- omniphony-codex-handoff:v1 -->
-```
-
-Use a handoff for missing local execution, OS/hardware probes, dependency installation, inaccessible CI diagnostics, binary inspection, or other concrete capabilities a later local/Codex environment can exercise.
-
-Do not create handoffs for ordinary research uncertainty, user decisions, vague ideas, work the connector can still perform, or publication contention alone.
-
-Search for an existing matching open issue before creating another. GitHub issue state is the queue; do not create a parallel JSON/Markdown queue.
-
-## 11. Evidence and validation
+## 9. Evidence, validation, and capability debt
 
 Keep evidence states separate:
 
@@ -385,25 +274,21 @@ audible DSP
 
 CI failure is evidence. Never weaken a valid gate merely to make it green.
 
-## 12. Completion
+Repository control and fresh runtime execution are separate capabilities. If a concrete actionable remainder is blocked specifically by the current interface/runtime, use [`.agents/skills/codex-handoff/SKILL.md`](.agents/skills/codex-handoff/SKILL.md). The authoritative capability-debt queue is open GitHub issues with title prefix `CODEX:` and body marker `<!-- omniphony-codex-handoff:v1 -->`.
 
-Before publication:
+Do not create a parallel JSON/Markdown queue.
 
-1. refresh current `main`;
-2. inspect intended writes plus changed supporting/protected premises;
-3. preserve unrelated work;
-4. confirm canonical ownership;
-5. inspect the candidate diff;
-6. run or route proportionate validation;
-7. remove superseded surfaces created redundant by the change.
+## 10. Completion
+
+Before publication, refresh `main`, inspect intended writes plus changed supporting/protected premises, preserve unrelated work, inspect the exact candidate diff, run or route proportionate validation, and remove superseded surfaces made redundant by the change.
 
 After publication:
 
-1. fetch the resulting commit/ref;
-2. verify exact changed paths/content;
+1. re-fetch `main`;
+2. verify the intended commit and exact changed paths/content;
 3. confirm the commit remains in current `main` history;
-4. inspect target-SHA CI/status that actually executed;
+4. inspect target-SHA validation that actually executed;
 5. leave unresolved work only in `ROADMAP.md` or a concrete Codex issue;
-6. do not create a history document to memorialize completed work.
+6. do not create a history document for completed cleanup.
 
-The repository should be easier to resume after every change.
+The repository should be cheaper to understand and safer to resume after every change.

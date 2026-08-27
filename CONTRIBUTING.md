@@ -12,7 +12,7 @@ Use canonical owners rather than duplicated summaries:
 4. the smallest relevant living contract under [`docs/`](docs/);
 5. the exact implementation and tests you intend to change.
 
-Connector-only agents should also read [`.agents/github-connector.json`](.agents/github-connector.json) and [`.agents/skills/github-workspace/SKILL.md`](.agents/skills/github-workspace/SKILL.md). Search is discovery; exact refs/blobs establish repository truth.
+Reasoning agents entering through GitHub should derive the current bootstrap with [`.agents/github-agent-bootstrap.py`](.agents/github-agent-bootstrap.py), enumerate the live [`.agents/skills/`](.agents/skills/) inventory, and then follow [`github-workspace`](.agents/skills/github-workspace/SKILL.md). Search is discovery; exact refs, trees, blobs, code, tests, and CI establish repository truth.
 
 > **Store authority. Derive views. Preserve evidence. Promote slowly.**
 
