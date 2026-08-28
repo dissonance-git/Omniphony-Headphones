@@ -93,6 +93,7 @@ The repository uses the same surface law as Helix: **one concept, one writable o
 | `docs/headphone-calibration.md` | listener/headphone calibration boundary |
 | `docs/osc-control-contract.md` | OSC/control semantics |
 | `docs/game-music-realtime-source-contract.md` | recovered-source/game-music semantics |
+| `docs/upstream-references.md` | curated external implementation/research re-entry map |
 | `omniphony-renderer/` | executable implementation |
 | `.github/workflows/` | executable CI and release validation |
 | `.agents/` | agent procedure and connector re-entry routes |
