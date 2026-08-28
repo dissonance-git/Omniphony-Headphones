@@ -312,6 +312,9 @@ pub struct BinauralFrameParams {
     pub reverb: BinauralReverb,
     pub air_absorption: bool,
     pub near_field_parallax: bool,
+    /// Enable finite-point-source ITD for authored metric near-field objects.
+    /// Kept separate from parallax/ILD so listening can A/B this timing cue alone.
+    pub finite_source_itd: bool,
 }
 
 /// Owns the per-channel binaural DSP state and the HRIR set; renders all input
@@ -633,6 +636,7 @@ impl BinauralRenderer {
             ref reverb,
             air_absorption,
             near_field_parallax,
+            finite_source_itd,
         } = *params;
         debug_assert_eq!(out.len(), sample_length * 2);
         if input_channel_count == 0 || sample_length == 0 {
@@ -736,19 +740,33 @@ impl BinauralRenderer {
                 + source_m[2] * source_m[2])
                 .sqrt()) as f32;
 
-            // ITD remains continuous and cheap. HRIR interpolation is much more
-            // expensive, so cache the exact per-ear directions that produced the
-            // loaded kernels. Default playback uses one listener-centre direction
-            // for both ears. Authored metric objects may instead use the source ray
-            // from each physical ear, following the near-field geometry used by
-            // mature binaural renderers while leaving centre-based playback intact.
-            let (itd_l, itd_r) = itd::ear_delays_seconds(az_rad, el_rad, head_radius_m);
-            let center_key =
-                self.hrir
-                    .quantize_direction(az_rad.to_degrees(), el_rad.to_degrees(), None);
+            // ITD remains continuous and cheap. Ordinary/inferred playback keeps
+            // the direction-only plane-wave Woodworth model. Authored metric
+            // near-field objects can use the stronger finite-point-source ray
+            // geometry because their actual XYZ and radius are source truth.
+            // The finite model returns only the interaural path difference, so it
+            // does not smuggle absolute propagation latency into the direct path.
             let use_near_field_geometry = near_field_parallax
                 && (metric_positions.is_none() || position_is_metric)
                 && dist_m > head_radius_m.max(0.0);
+            let use_metric_finite_itd = finite_source_itd
+                && position_is_metric
+                && dist_m > head_radius_m.max(0.0);
+            let (itd_l, itd_r) = if use_metric_finite_itd {
+                itd::ear_delays_seconds_finite_source(source_m, head_radius_m)
+                    .unwrap_or_else(|| itd::ear_delays_seconds(az_rad, el_rad, head_radius_m))
+            } else {
+                itd::ear_delays_seconds(az_rad, el_rad, head_radius_m)
+            };
+
+            // HRIR interpolation is much more expensive, so cache the exact
+            // per-ear directions that produced the loaded kernels. Default
+            // playback uses one listener-centre direction for both ears.
+            // Authored metric objects may instead use the source ray from each
+            // physical ear.
+            let center_key =
+                self.hrir
+                    .quantize_direction(az_rad.to_degrees(), el_rad.to_degrees(), None);
             let (left_key, right_key) = if use_near_field_geometry {
                 let (left_ray, right_ray) =
                     ear_relative_directions(source_m, head_radius_m.max(0.0) as f64);
@@ -996,6 +1014,7 @@ mod tests {
             },
             air_absorption: false,
             near_field_parallax: false,
+            finite_source_itd: false,
         }
     }
 

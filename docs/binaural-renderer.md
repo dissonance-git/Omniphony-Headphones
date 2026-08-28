@@ -8,7 +8,7 @@ For a spatialized source, the current conceptual chain is:
 scene position
 → listener/head-relative direction
 → interpolated HRTF/HRIR
-→ analytic per-ear ITD
+→ direction- or metric-source-appropriate per-ear ITD
 → stateful convolution
 → optional directional early reflections
 → optional late room field
@@ -36,7 +36,7 @@ The direct path then uses:
 ```text
 interpolated per-ear HRIR
 +
-analytic per-ear ITD
+direction-only or finite-point-source per-ear ITD
 +
 continuous convolution state
 ```
@@ -54,9 +54,9 @@ Current distance-related cues include:
 - air absorption;
 - room/reflection geometry;
 - late-field send relationship;
-- for lanes whose source contract declares listener-relative metric XYZ, ear-specific acoustic parallax plus a bounded distance-dependent interaural level relationship.
+- for lanes whose source contract declares listener-relative metric XYZ, ear-specific acoustic parallax, finite-point-source interaural arrival timing, plus a bounded distance-dependent interaural level relationship.
 
-Authored metric XYZ is already in metres and therefore bypasses the renderer's generic scene `unit_scale_m`. Inferred/presentation coordinates keep using that scene scale. Near-field ear level is derived only from the left/right propagation-distance ratio and is equal-power normalized, so it can strengthen the near-ear cue without introducing a hidden overall `1/d` source attenuation. The extra ratio is bounded and converges smoothly to unity with distance. Omniphony does not invent a near-field spectral equalizer when the selected HRTF set does not contain range-indexed measurements.
+Authored metric XYZ is already in metres and therefore bypasses the renderer's generic scene `unit_scale_m`. Inferred/presentation coordinates keep using that scene scale. For authored metric near-field objects, interaural arrival timing uses finite-point-source rigid-sphere ray geometry: a visible ear receives the straight source-to-ear path, while an occluded ear receives the tangent path plus the shortest surface arc. Only the left/right path difference is rendered, so absolute source distance does not add transport latency; at long range this converges to the ordinary plane-wave Woodworth result. Near-field ear level is derived only from the left/right propagation-distance ratio and is equal-power normalized, so it can strengthen the near-ear cue without introducing a hidden overall `1/d` source attenuation. The extra ratio is bounded and converges smoothly to unity with distance. Omniphony does not invent a near-field spectral equalizer when the selected HRTF set does not contain range-indexed measurements.
 
 This invariant has regression coverage: with room, reverb and air absorption disabled, symmetric front sources at different distances retain the same direct broadband level, and authored metric coordinates remain unchanged when the generic scene scale changes.
 
@@ -114,9 +114,13 @@ The active validation test checks direct-arrival alignment rather than flattenin
 
 ---
 
-## 4. Analytic ITD
+## 4. Direction-only and finite-source ITD
 
-The direct path uses an analytic head model to derive left/right delay from source direction and effective head radius.
+The direct path keeps two geometrically compatible ITD projections under one timing owner.
+
+Ordinary and inferred positions use the direction-only plane-wave Woodworth model from source direction and effective head radius. Authored metric near-field positions may instead use the finite-point-source extension of the same rigid-sphere ray model, because their listener-relative XYZ supplies the source distance needed to decide whether each ear is directly visible or reached by a tangent-plus-surface path.
+
+The finite-source route is not a second HRTF or a near-field spectral model. It changes only bulk interaural arrival timing, returns no common propagation delay, and converges to the direction-only Woodworth result as source distance grows. It remains independently switchable from near-field HRTF parallax and ILD, and is off by default until engineering validation plus clean-route physical listening earn promotion.
 
 The model is validated end-to-end using a symmetric synthetic HRTF provider so measured HRTF asymmetry cannot masquerade as an engine ITD bug.
 
@@ -125,7 +129,10 @@ Current tests cover:
 - centre source ≈ zero ITD;
 - antisymmetry around the median plane;
 - growing absolute ITD toward the interaural axis;
-- approximate agreement with the analytic model.
+- approximate agreement with the direction-only analytic model;
+- finite-point-source convergence to the plane-wave model at long range;
+- stronger lateral ITD for a source within reach;
+- 3-D median-plane symmetry and invalid inside-head geometry.
 
 ITD validation should remain independent from HRTF-choice validation.
 

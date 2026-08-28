@@ -801,6 +801,7 @@ impl SpatialRenderer {
                         reverb: g.binaural.reverb.clone(),
                         air_absorption: g.binaural.air_absorption,
                         near_field_parallax: g.binaural.near_field_parallax,
+                        finite_source_itd: g.binaural.finite_source_itd,
                     },
                     g.binaural.ears,
                     self.cascade_spectral_compensation

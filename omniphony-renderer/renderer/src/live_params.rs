@@ -454,6 +454,10 @@ pub struct BinauralLiveParams {
     /// intended for source geometry supplied in real metres; default playback
     /// keeps the established listener-centre HRTF lookup.
     pub near_field_parallax: bool,
+    /// Candidate finite-point-source ITD for authored metric near-field objects.
+    /// Independent from parallax/ILD so physical listening can isolate the timing
+    /// change before it is considered for default promotion.
+    pub finite_source_itd: bool,
 }
 
 impl Default for BinauralLiveParams {
@@ -471,6 +475,7 @@ impl Default for BinauralLiveParams {
             reverb: BinauralReverb::default(),
             air_absorption: true,
             near_field_parallax: false,
+            finite_source_itd: false,
         }
     }
 }
