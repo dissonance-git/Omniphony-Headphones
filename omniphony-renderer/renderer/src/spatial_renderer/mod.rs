@@ -66,7 +66,8 @@
 
 use crate::live_params::{RampMode, RendererControl};
 use crate::ramp_strategy::{
-    PositionRampStrategy, RampContext, RampProgress, RampRenderParams, RampStrategy, RampTarget,
+    ChannelRampState, PositionRampStrategy, RampContext, RampProgress, RampRenderParams,
+    RampStrategy, RampTarget, interpolate_position,
 };
 
 use crate::spatial_vbap::DistanceModel;
@@ -80,6 +81,28 @@ mod speaker_stage;
 use components::{ChannelState, evaluation_build_config};
 pub use components::{RenderedFrame, SpatialChannelEvent};
 use speaker_stage::SpeakerRenderStage;
+
+/// Position reached at the source-time boundary after `step_units` more
+/// ramp samples. This is a read-only projection of the existing channel ramp:
+/// it does not advance state or create a second motion owner.
+fn ramp_position_after(state: &ChannelRampState, step_units: u64) -> [f64; 3] {
+    let Some(progress) = state.current_progress() else {
+        return state.current_position;
+    };
+    let completed = progress
+        .completed_units
+        .saturating_add(step_units)
+        .min(progress.total_units);
+    interpolate_position(
+        state.start_position,
+        state.target_position,
+        RampProgress {
+            completed_units: completed,
+            total_units: progress.total_units,
+        }
+        .fraction(),
+    )
+}
 
 /// Snapshot of `LiveParams` taken at the start of each render frame.
 ///
@@ -289,6 +312,12 @@ pub struct SpatialRenderer {
     /// beds mapped to a `spatialize: false` speaker (the LFE) feed both ears
     /// equally instead of being HRTF-spatialized.
     binaural_direct_buf: Vec<bool>,
+
+    /// Authored metric source-motion duration consumed by this callback.
+    /// `None` means there was no source-position update in this pass;
+    /// `Some(0)` is an explicit jump; `Some(n)` is a continuous n-sample
+    /// interpolation. This is derived from ChannelRampState, not stored truth.
+    binaural_motion_buf: Vec<Option<u32>>,
 }
 
 impl SpatialRenderer {
@@ -834,6 +863,8 @@ impl SpatialRenderer {
                 self.binaural_gain_buf.resize(input_channel_count, 0.0);
                 self.binaural_direct_buf.clear();
                 self.binaural_direct_buf.resize(input_channel_count, false);
+                self.binaural_motion_buf.clear();
+                self.binaural_motion_buf.resize(input_channel_count, None);
                 let num_routed = channel_routing.len();
                 {
                     let states = &mut self.channel_states;
@@ -887,25 +918,42 @@ impl SpatialRenderer {
                                 }
                             }
                         } else if let Some(st) = states.get_mut(c) {
-                            // Advance the position ramp for this block (Frame-mode
-                            // granularity: the binaural stage updates HRIR/ITD once
-                            // per block anyway). Nothing else advances ramps in
-                            // binaural mode — the VBAP mix loop that normally does
-                            // is bypassed — so without this every object stays at
-                            // the ramp default [0,0,0]: dead centre, and rotation-
-                            // invariant (the zero vector ignores the head pose).
+                            // The speaker path can evaluate motion sample-by-sample,
+                            // but direct binaural owns its own transfer-function
+                            // interpolation. Evaluate the canonical ramp at the
+                            // block start for renderer state, and for authored
+                            // metric lanes also hand binaural the source-time
+                            // endpoint plus the number of ramp samples consumed in
+                            // this pass. That removes the old one-callback motion
+                            // lag without giving callback size acoustic authority.
                             let progress = st.ramp.current_progress().unwrap_or(RampProgress {
                                 completed_units: 0,
                                 total_units: 0,
                             });
                             ramp_strategy.evaluate(&mut st.ramp, progress, &ramp_context);
-                            self.binaural_pos_buf[c] = st.ramp.output_position;
+                            let block_start_position = st.ramp.output_position;
+                            let position_is_metric = metric_positions
+                                .and_then(|metric| metric.get(c))
+                                .copied()
+                                .unwrap_or(false);
+                            let source_motion = st.ramp.remaining_ramp_units.map(|remaining| {
+                                remaining
+                                    .min(sample_length as u64)
+                                    .min(u32::MAX as u64) as u32
+                            });
+                            if position_is_metric && source_motion.is_some() {
+                                self.binaural_pos_buf[c] =
+                                    ramp_position_after(&st.ramp, sample_length as u64);
+                                self.binaural_motion_buf[c] = source_motion;
+                            } else {
+                                self.binaural_pos_buf[c] = block_start_position;
+                            }
                             st.ramp.commit_output_position();
                             st.ramp.advance_ramp(sample_length as u64);
                         }
                     }
                 }
-                self.binaural.render_frame_with_metric_positions(
+                self.binaural.render_frame_with_metric_motion(
                     input_pcm,
                     input_channel_count,
                     sample_length,
@@ -914,6 +962,7 @@ impl SpatialRenderer {
                     &self.binaural_gain_buf,
                     &self.binaural_direct_buf,
                     metric_positions,
+                    Some(&self.binaural_motion_buf),
                     &mut output,
                 );
             }

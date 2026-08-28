@@ -288,13 +288,20 @@ one authoritative ChannelState gain trajectory
 
 Do not create a second independent binaural gain state machine.
 
-### Sample-accurate position trajectory
+### Source-time position trajectory
 
-The same issue exists for object motion: the current binaural path receives a block-level position state and then smooths HRTF changes.
+Authored metric objects reuse the canonical `ChannelRampState`; the binaural path does not own a second motion state machine.
 
-Filter crossfading prevents discontinuities, but it does not substitute for the authored/source trajectory itself.
+For a timed position update, the spatial renderer projects the same ramp to the source-time boundary reached by the current processing pass and forwards both that metric endpoint and the number of authored interpolation samples consumed. The binaural stage then uses that duration for its distance/direction transition:
 
-The next hot-path refactor should carry the actual position ramp into binaural processing.
+- near-field interaural level cues follow the half-open authored span and preserve equal power;
+- ITD delay targets use the authored motion duration rather than callback duration;
+- air-absorption and late-send targets follow the same radial span;
+- HRIR changes crossfade toward the same-pass endpoint, with the existing bounded HRIR-length cap preserving realtime cost;
+- a zero-length authored interpolation remains an explicit jump;
+- no source-position update leaves ordinary head-motion smoothing behavior unchanged.
+
+This removes the former one-callback lag in the direct authored-object path while keeping callback partitioning a transport concern. The exact high-resolution HRTF interpolation strategy may evolve, but it must continue consuming this same source-time trajectory rather than inventing another motion clock.
 
 ### Broad-source extent
 

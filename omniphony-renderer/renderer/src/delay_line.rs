@@ -30,6 +30,11 @@ pub struct DelayLine {
     /// Target delay in samples, pre-computed from `delay_ms × sample_rate / 1000`.
     /// Updated by `set_target_ms`; never changes between calls.
     target: f32,
+
+    /// Maximum delay change applied per output sample. Generic callers use the
+    /// historical one-sample rate; authored source motion may choose the rate
+    /// that reaches the next source-time boundary over a known sample span.
+    ramp_rate: f32,
 }
 
 impl DelayLine {
@@ -41,6 +46,7 @@ impl DelayLine {
             write_pos: 0,
             current: 0.0,
             target: 0.0,
+            ramp_rate: RAMP_RATE,
         }
     }
 
@@ -51,6 +57,28 @@ impl DelayLine {
     pub fn set_target_ms(&mut self, delay_ms: f32, sample_rate: u32) {
         let max = (self.buf.len() - 2) as f32;
         self.target = (delay_ms * sample_rate as f32 / 1000.0).clamp(0.0, max);
+        self.ramp_rate = RAMP_RATE;
+    }
+
+    /// Set a delay target whose transition belongs to an authored source-time
+    /// span. Zero samples is an explicit metadata jump and snaps at the block
+    /// boundary; a positive span chooses the per-sample rate required to reach
+    /// the target during that span. This is separate from generic smoothing so
+    /// transport callback size never becomes the motion clock.
+    pub fn set_target_ms_over_samples(
+        &mut self,
+        delay_ms: f32,
+        sample_rate: u32,
+        ramp_samples: u32,
+    ) {
+        let max = (self.buf.len() - 2) as f32;
+        self.target = (delay_ms * sample_rate as f32 / 1000.0).clamp(0.0, max);
+        if ramp_samples == 0 {
+            self.current = self.target;
+            self.ramp_rate = RAMP_RATE;
+        } else {
+            self.ramp_rate = (self.target - self.current).abs() / ramp_samples as f32;
+        }
     }
 
     /// Returns `true` if this delay line is a no-op (target and current are 0).
@@ -82,6 +110,7 @@ impl DelayLine {
         self.write_pos = 0;
         self.current = 0.0;
         self.target = 0.0;
+        self.ramp_rate = RAMP_RATE;
     }
 
     /// Process one sample through the delay line.
@@ -96,12 +125,13 @@ impl DelayLine {
         // Write.
         self.buf[self.write_pos] = input;
 
-        // Ramp current toward target (capped at RAMP_RATE per sample).
+        // Ramp current toward target. Generic delay changes use RAMP_RATE;
+        // authored source motion may provide a source-time-derived rate.
         let delta = self.target - self.current;
-        if delta.abs() <= RAMP_RATE {
+        if delta.abs() <= self.ramp_rate {
             self.current = self.target;
-        } else {
-            self.current += RAMP_RATE * delta.signum();
+        } else if self.ramp_rate > 0.0 {
+            self.current += self.ramp_rate * delta.signum();
         }
 
         // Fractional read (linear interpolation).
@@ -148,6 +178,23 @@ mod tests {
             let x = ((i * 11 % 19) as f32 - 9.0) / 9.0;
             assert_eq!(fast.process(x).to_bits(), reference.process(x).to_bits());
         }
+    }
+
+    #[test]
+    fn authored_timed_target_uses_requested_motion_span_and_jump_semantics() {
+        let mut dl = DelayLine::new(64);
+        dl.set_target_ms_over_samples(12.0 / 48.0, 48_000, 6);
+        assert!((dl.ramp_rate - 2.0).abs() < 1.0e-6);
+        for _ in 0..5 {
+            dl.process(0.0);
+        }
+        assert!(dl.current < 12.0);
+        dl.process(0.0);
+        assert!((dl.current - 12.0).abs() < 1.0e-6);
+
+        dl.set_target_ms_over_samples(3.0 / 48.0, 48_000, 0);
+        assert!((dl.current - 3.0).abs() < 1.0e-6);
+        assert!((dl.target - 3.0).abs() < 1.0e-6);
     }
 
     #[test]

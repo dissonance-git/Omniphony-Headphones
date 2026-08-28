@@ -511,6 +511,7 @@ impl SpatialRenderer {
             binaural_pos_buf: Vec::new(),
             binaural_gain_buf: Vec::new(),
             binaural_direct_buf: Vec::new(),
+            binaural_motion_buf: Vec::new(),
         })
     }
 }

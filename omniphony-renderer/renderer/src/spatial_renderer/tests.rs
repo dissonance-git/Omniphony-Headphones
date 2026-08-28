@@ -745,6 +745,42 @@ fn spatialized_lfe_alone_in_low_band_routes_object_bass() {
     }
 }
 
+#[test]
+fn authored_metric_binaural_endpoint_uses_source_ramp_progress() {
+    let mut state = ChannelRampState::default();
+    state.start_position = [0.0, 1.0, 0.0];
+    state.current_position = state.start_position;
+    state.target_position = [2.0, 5.0, -1.0];
+    state.ramp_length = 8;
+    state.remaining_ramp_units = Some(8);
+
+    assert_eq!(
+        ramp_position_after(&state, 4),
+        [1.0, 3.0, -0.5],
+        "half a source-time span must expose the half-way binaural target"
+    );
+    assert_eq!(
+        ramp_position_after(&state, 8),
+        state.target_position,
+        "one full source-time span must expose the authored target"
+    );
+
+    state.remaining_ramp_units = Some(4);
+    assert_eq!(
+        ramp_position_after(&state, 4),
+        state.target_position,
+        "continued callbacks must compose on the same canonical ramp"
+    );
+
+    state.ramp_length = 0;
+    state.remaining_ramp_units = Some(0);
+    assert_eq!(
+        ramp_position_after(&state, 0),
+        state.target_position,
+        "zero-length authored interpolation is an explicit jump"
+    );
+}
+
 /// Guard rail: the four ramp modes must stay wired and each keep its own
 /// behaviour. `Off` snaps to the target, `Frame` holds the block-start
 /// position, `Sample` interpolates the position per sample, and `Interp`

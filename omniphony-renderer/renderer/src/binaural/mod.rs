@@ -192,6 +192,14 @@ const ITD_MAX_S: f32 = 0.003;
 /// far-field HRTF cannot contain. Four-to-one amplitude is a 12 dB ceiling.
 const MAX_NEAR_FIELD_EAR_RATIO: f64 = 4.0;
 
+fn motion_boundary_value(start: f32, target: f32, sample: usize, ramp_frames: u32) -> f32 {
+    if ramp_frames == 0 {
+        return target;
+    }
+    let progressed = sample.min(ramp_frames as usize) as f32 / ramp_frames as f32;
+    start + (target - start) * progressed
+}
+
 fn normalized_near_field_ear_gains(
     source_m: [f64; 3],
     head_radius_m: f64,
@@ -230,9 +238,11 @@ struct ChannelDsp {
     refl: Option<ReflectionBank>,
     /// Air-absorption one-pole low-pass state (direct path).
     air_state: f32,
-    /// Air-absorption smoothing coefficient for the current block
-    /// (0 = bypass, →1 = heavy low-pass). Updated per block from distance.
+    /// Air-absorption coefficient at the previous source-time boundary
+    /// (0 = bypass, →1 = heavy low-pass).
     air_coeff: f32,
+    /// Reverb-send gain at the previous source-time boundary.
+    reverb_send: f32,
     /// Near-field ear gains at the previous sample boundary. Targets are
     /// linearly ramped across each callback so authored radial motion cannot
     /// become callback-rate level stepping.
@@ -254,6 +264,7 @@ impl ChannelDsp {
             refl: None,
             air_state: 0.0,
             air_coeff: 0.0,
+            reverb_send: 0.0,
             near_gain_l: 1.0,
             near_gain_r: 1.0,
             last_dir: None,
@@ -272,6 +283,7 @@ impl ChannelDsp {
         }
         self.air_state = 0.0;
         self.air_coeff = 0.0;
+        self.reverb_send = 0.0;
         self.near_gain_l = 1.0;
         self.near_gain_r = 1.0;
         self.last_dir = None;
@@ -575,7 +587,44 @@ impl BinauralRenderer {
         metric_positions: Option<&[bool]>,
         out: &mut [f32],
     ) {
+        self.render_frame_with_metric_motion(
+            input_pcm,
+            input_channel_count,
+            sample_length,
+            params,
+            chan_pos,
+            chan_gain,
+            chan_direct,
+            metric_positions,
+            None,
+            out,
+        );
+    }
+
+    /// Direct authored-object render with source-time motion semantics.
+    ///
+    /// Each motion entry is derived from the canonical object ramp. None means
+    /// no source-position update in this processing pass, Some(0) is an
+    /// explicit jump, and Some(n) reaches the target after n samples.
+    /// Non-metric lanes ignore this sidecar.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_frame_with_metric_motion(
+        &mut self,
+        input_pcm: &[f32],
+        input_channel_count: usize,
+        sample_length: usize,
+        params: &BinauralFrameParams,
+        chan_pos: &[[f64; 3]],
+        chan_gain: &[f32],
+        chan_direct: &[bool],
+        metric_positions: Option<&[bool]>,
+        metric_motion_frames: Option<&[Option<u32>]>,
+        out: &mut [f32],
+    ) {
         debug_assert!(metric_positions.map_or(true, |metric| metric.len() == input_channel_count));
+        debug_assert!(
+            metric_motion_frames.map_or(true, |motion| motion.len() == input_channel_count)
+        );
         let BinauralFrameParams {
             head_pose,
             unit_scale_m,
@@ -665,6 +714,14 @@ impl BinauralRenderer {
                 .and_then(|metric| metric.get(c))
                 .copied()
                 .unwrap_or(false);
+            let authored_motion_frames = if position_is_metric {
+                metric_motion_frames
+                    .and_then(|motion| motion.get(c))
+                    .copied()
+                    .flatten()
+            } else {
+                None
+            };
             let source_m = if position_is_metric {
                 hp
             } else {
@@ -724,10 +781,18 @@ impl BinauralRenderer {
 
             let rate = self.sample_rate;
             let dsp = self.channels[c].get_or_insert_with(|| ChannelDsp::new(rate));
-            let near_gain_start_l = dsp.near_gain_l;
-            let near_gain_start_r = dsp.near_gain_r;
-            let near_gain_step_l = (near_gain_l - near_gain_start_l) / sample_length as f32;
-            let near_gain_step_r = (near_gain_r - near_gain_start_r) / sample_length as f32;
+            let near_ramp_frames = authored_motion_frames
+                .unwrap_or_else(|| sample_length.min(u32::MAX as usize) as u32);
+            let near_gain_start_l = if near_ramp_frames == 0 {
+                near_gain_l
+            } else {
+                dsp.near_gain_l
+            };
+            let near_gain_start_r = if near_ramp_frames == 0 {
+                near_gain_r
+            } else {
+                dsp.near_gain_r
+            };
             dsp.near_gain_l = near_gain_l;
             dsp.near_gain_r = near_gain_r;
             if dsp.last_dir != Some(dir) {
@@ -735,37 +800,63 @@ impl BinauralRenderer {
                 let left_hrir = self.hrir_scratch.left;
                 self.hrir.at_key(right_key, &mut self.hrir_scratch);
                 let right_hrir = self.hrir_scratch.right;
-                // Kernel changes (moving object / head) crossfade over the block
-                // — capped at HRIR_LEN samples for large offline blocks — so the
-                // transfer function never jumps at a block boundary (issue #155).
-                let fade = sample_length.min(HRIR_LEN);
+                // Generic direction changes retain the bounded legacy HRTF
+                // crossfade. Authored source motion uses the supplied source-time
+                // span when shorter; an explicit jump stays a jump.
+                let fade = match authored_motion_frames {
+                    Some(frames) => (frames as usize).min(HRIR_LEN),
+                    None => sample_length.min(HRIR_LEN),
+                };
                 dsp.conv_l.set_coeffs_smooth(&left_hrir, fade);
                 dsp.conv_r.set_coeffs_smooth(&right_hrir, fade);
                 dsp.last_dir = Some(dir);
             }
-            dsp.delay_l.set_target_ms(itd_l * 1000.0, self.sample_rate);
-            dsp.delay_r.set_target_ms(itd_r * 1000.0, self.sample_rate);
+            if let Some(frames) = authored_motion_frames {
+                dsp.delay_l.set_target_ms_over_samples(
+                    itd_l * 1000.0,
+                    self.sample_rate,
+                    frames,
+                );
+                dsp.delay_r.set_target_ms_over_samples(
+                    itd_r * 1000.0,
+                    self.sample_rate,
+                    frames,
+                );
+            } else {
+                dsp.delay_l.set_target_ms(itd_l * 1000.0, self.sample_rate);
+                dsp.delay_r.set_target_ms(itd_r * 1000.0, self.sample_rate);
+            }
 
             // Air absorption: a one-pole low-pass whose cutoff falls with
             // distance (HF dies in air — true outdoors as much as indoors).
             // Bypass within 3 m; ~14 kHz at 10 m, ~5 kHz at 30 m, floor 2 kHz.
-            dsp.air_coeff = if air_absorption && dist_m > 3.0 {
+            let air_target = if air_absorption && dist_m > 3.0 {
                 let fc = (20_000.0 * (-0.05 * (dist_m - 3.0)).exp()).max(2_000.0);
                 (-std::f32::consts::TAU * fc / self.sample_rate as f32).exp()
             } else {
                 0.0
             };
+            let air_start = match authored_motion_frames {
+                Some(0) | None => air_target,
+                Some(_) => dsp.air_coeff,
+            };
+            dsp.air_coeff = air_target;
 
             // Reverb send: distance-independent (a real room's reverberant
             // field barely depends on source distance — the 1/d on the direct
             // is what moves the direct/reverb ratio), with a near-field
             // roll-in so sources at the listener stay dry.
-            let reverb_send = if reverb_active {
+            let reverb_target = if reverb_active {
                 // Multiplier on the (already gain-scaled) channel signal.
                 dist_m / (dist_m + 0.5)
             } else {
                 0.0
             };
+            let reverb_start = match authored_motion_frames {
+                Some(0) | None => reverb_target,
+                Some(_) => dsp.reverb_send,
+            };
+            dsp.reverb_send = reverb_target;
 
             // ── Early reflections: per-block image-source update ─────────────
             if reflections.enabled {
@@ -822,7 +913,7 @@ impl BinauralRenderer {
                 dsp.refl = None;
             }
 
-            let air = dsp.air_coeff;
+            let cue_ramp_frames = authored_motion_frames.unwrap_or(0);
             for s in 0..sample_length {
                 // Reconstruct the exact linear gain segment between the previous
                 // and current sample-boundary values supplied by SpatialRenderer.
@@ -834,14 +925,21 @@ impl BinauralRenderer {
                 // low-pass applies to the propagated wave, so it feeds the
                 // direct, the reflections and the reverb send alike.
                 let mut raw = input_pcm[s * input_channel_count + c] * gain;
+                let air = if authored_motion_frames.is_some() {
+                    motion_boundary_value(air_start, air_target, s, cue_ramp_frames)
+                } else {
+                    air_target
+                };
                 if air > 0.0 {
                     dsp.air_state += (raw - dsp.air_state) * (1.0 - air);
                     raw = dsp.air_state;
                 }
                 // Authored object/bed level is respected: no 1/d attenuation.
                 let x = raw;
-                let ear_gain_l = near_gain_start_l + near_gain_step_l * s as f32;
-                let ear_gain_r = near_gain_start_r + near_gain_step_r * s as f32;
+                let ear_gain_l =
+                    motion_boundary_value(near_gain_start_l, near_gain_l, s, near_ramp_frames);
+                let ear_gain_r =
+                    motion_boundary_value(near_gain_start_r, near_gain_r, s, near_ramp_frames);
                 let mut yl = dsp.conv_l.process(dsp.delay_l.process(x)) * ear_gain_l;
                 let mut yr = dsp.conv_r.process(dsp.delay_r.process(x)) * ear_gain_r;
                 if let Some(bank) = dsp.refl.as_mut() {
@@ -850,6 +948,16 @@ impl BinauralRenderer {
                     yr += rr;
                 }
                 if reverb_active {
+                    let reverb_send = if authored_motion_frames.is_some() {
+                        motion_boundary_value(
+                            reverb_start,
+                            reverb_target,
+                            s,
+                            cue_ramp_frames,
+                        )
+                    } else {
+                        reverb_target
+                    };
                     self.reverb_bus[s] += raw * reverb_send;
                 }
                 let o = s * 2;
@@ -1155,6 +1263,16 @@ mod tests {
             (far - near).abs() <= near * 1e-6,
             "direct object level changed with distance: near={near} far={far}"
         );
+    }
+
+    #[test]
+    fn authored_motion_scalar_uses_half_open_source_time_span() {
+        assert_eq!(motion_boundary_value(0.0, 1.0, 0, 4), 0.0);
+        assert_eq!(motion_boundary_value(0.0, 1.0, 1, 4), 0.25);
+        assert_eq!(motion_boundary_value(0.0, 1.0, 3, 4), 0.75);
+        assert_eq!(motion_boundary_value(0.0, 1.0, 4, 4), 1.0);
+        assert_eq!(motion_boundary_value(0.0, 1.0, 99, 4), 1.0);
+        assert_eq!(motion_boundary_value(0.0, 1.0, 0, 0), 1.0);
     }
 
     #[test]
