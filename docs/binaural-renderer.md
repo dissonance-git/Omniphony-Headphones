@@ -53,9 +53,12 @@ Current distance-related cues include:
 
 - air absorption;
 - room/reflection geometry;
-- late-field send relationship.
+- late-field send relationship;
+- for lanes whose source contract declares listener-relative metric XYZ, ear-specific acoustic parallax plus a bounded distance-dependent interaural level relationship.
 
-This invariant has a regression test: with room, reverb and air absorption disabled, the same front source at different distances must retain the same direct broadband level.
+Authored metric XYZ is already in metres and therefore bypasses the renderer's generic scene `unit_scale_m`. Inferred/presentation coordinates keep using that scene scale. Near-field ear level is derived only from the left/right propagation-distance ratio and is equal-power normalized, so it can strengthen the near-ear cue without introducing a hidden overall `1/d` source attenuation. The extra ratio is bounded and converges smoothly to unity with distance. Omniphony does not invent a near-field spectral equalizer when the selected HRTF set does not contain range-indexed measurements.
+
+This invariant has regression coverage: with room, reverb and air absorption disabled, symmetric front sources at different distances retain the same direct broadband level, and authored metric coordinates remain unchanged when the generic scene scale changes.
 
 ---
 

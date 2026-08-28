@@ -21,6 +21,10 @@ pub struct SourceFrameRenderer {
     routes: Vec<ChannelRoute>,
     events: Vec<SpatialChannelEvent>,
     scaled_input: Vec<f32>,
+    /// Per-lane geometry provenance for the direct binaural path. An authored
+    /// position is already listener-relative metres; inferred presentation
+    /// coordinates remain scene units and continue to use the renderer scale.
+    metric_position_flags: Vec<bool>,
     presentation_identities: Vec<Option<SourcePresentationIdentity>>,
     presentation_identity_initialized: Vec<bool>,
 }
@@ -65,6 +69,7 @@ impl SourceFrameRenderer {
             routes: Vec::new(),
             events: Vec::new(),
             scaled_input: Vec::new(),
+            metric_position_flags: Vec::new(),
             presentation_identities: Vec::new(),
             presentation_identity_initialized: Vec::new(),
         }
@@ -312,6 +317,8 @@ impl SourceFrameRenderer {
 
         self.events.clear();
         self.events.reserve(channels);
+        self.metric_position_flags.clear();
+        self.metric_position_flags.resize(channels, false);
         for (channel_idx, source) in sources.iter().copied().enumerate() {
             let active = active_lanes
                 .and_then(|lanes| lanes.get(channel_idx))
@@ -323,6 +330,11 @@ impl SourceFrameRenderer {
                 }
                 continue;
             }
+
+            // authored_position is canonical listener-relative metric XYZ.
+            // Keep that provenance beside the event instead of encoding it into
+            // the numeric position itself or adding a second distance owner.
+            self.metric_position_flags[channel_idx] = source.authored_position.is_some();
 
             let identity = source_presentation_identity(&source);
             let identity_changed = self.presentation_identity_initialized[channel_idx]
@@ -390,10 +402,11 @@ impl SourceFrameRenderer {
             input_pcm
         };
 
-        let rendered = self.renderer.render_frame(
+        let rendered = self.renderer.render_frame_with_metric_positions(
             render_input,
             channels,
             &self.events,
+            Some(&self.metric_position_flags),
             samples_buf,
             measure_breakdown,
         )?;

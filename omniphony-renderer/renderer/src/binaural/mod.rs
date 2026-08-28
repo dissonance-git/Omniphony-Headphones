@@ -36,7 +36,7 @@ mod validation;
 pub use head_pose::HeadPose;
 pub use tracking::{HeadTracking, HeadTrackingFormat};
 
-use crate::authored_scene::ear_relative_directions;
+use crate::authored_scene::{ear_distances_m, ear_relative_directions};
 use crate::delay_line::DelayLine;
 use crate::live_params::{BinauralReflections, BinauralReverb};
 use convolver::EarConvolver;
@@ -187,6 +187,37 @@ const MIN_DISTANCE_M: f32 = 0.25;
 const MAX_DISTANCE_GAIN: f32 = 4.0;
 /// Delay-line capacity for the ITD (s) — comfortably above the ~0.7 ms max.
 const ITD_MAX_S: f32 = 0.003;
+/// Bound the additional near-field geometric ear-level ratio. The far-field
+/// HRTF still owns head shadow; this adds only the range dependence that a
+/// far-field HRTF cannot contain. Four-to-one amplitude is a 12 dB ceiling.
+const MAX_NEAR_FIELD_EAR_RATIO: f64 = 4.0;
+
+fn normalized_near_field_ear_gains(
+    source_m: [f64; 3],
+    head_radius_m: f64,
+) -> (f32, f32) {
+    let (left_distance, right_distance) = ear_distances_m(source_m, head_radius_m);
+    if !left_distance.is_finite()
+        || !right_distance.is_finite()
+        || left_distance <= 0.0
+        || right_distance <= 0.0
+    {
+        return (1.0, 1.0);
+    }
+
+    // Use only the ear-to-ear propagation-distance ratio, never absolute 1/d
+    // source gain. Equal-power normalization preserves the authored direct
+    // level while the bounded ratio supplies the missing near-field ILD cue.
+    let ratio = (right_distance / left_distance)
+        .clamp(1.0 / MAX_NEAR_FIELD_EAR_RATIO, MAX_NEAR_FIELD_EAR_RATIO);
+    let (raw_l, raw_r) = if ratio >= 1.0 {
+        (ratio, 1.0)
+    } else {
+        (1.0, 1.0 / ratio)
+    };
+    let power_norm = ((raw_l * raw_l + raw_r * raw_r) * 0.5).sqrt();
+    ((raw_l / power_norm) as f32, (raw_r / power_norm) as f32)
+}
 
 /// Per-input-channel binaural DSP state, lazily created on first use.
 struct ChannelDsp {
@@ -202,6 +233,11 @@ struct ChannelDsp {
     /// Air-absorption smoothing coefficient for the current block
     /// (0 = bypass, →1 = heavy low-pass). Updated per block from distance.
     air_coeff: f32,
+    /// Near-field ear gains at the previous sample boundary. Targets are
+    /// linearly ramped across each callback so authored radial motion cannot
+    /// become callback-rate level stepping.
+    near_gain_l: f32,
+    near_gain_r: f32,
     /// Exact direction whose HRIR kernels are currently loaded, tagged
     /// with the active grid generation so source swaps cannot reuse stale kernels.
     last_dir: Option<(u32, DirectionKey, DirectionKey)>,
@@ -218,6 +254,8 @@ impl ChannelDsp {
             refl: None,
             air_state: 0.0,
             air_coeff: 0.0,
+            near_gain_l: 1.0,
+            near_gain_r: 1.0,
             last_dir: None,
         }
     }
@@ -234,6 +272,8 @@ impl ChannelDsp {
         }
         self.air_state = 0.0;
         self.air_coeff = 0.0;
+        self.near_gain_l = 1.0;
+        self.near_gain_r = 1.0;
         self.last_dir = None;
     }
 }
@@ -506,6 +546,36 @@ impl BinauralRenderer {
         chan_direct: &[bool],
         out: &mut [f32],
     ) {
+        self.render_frame_with_metric_positions(
+            input_pcm,
+            input_channel_count,
+            sample_length,
+            params,
+            chan_pos,
+            chan_gain,
+            chan_direct,
+            None,
+            out,
+        );
+    }
+
+    /// Render with an optional per-lane declaration that position coordinates
+    /// are already listener-relative metres. Existing callers without this
+    /// sidecar retain the historical scene-unit behavior.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_frame_with_metric_positions(
+        &mut self,
+        input_pcm: &[f32],
+        input_channel_count: usize,
+        sample_length: usize,
+        params: &BinauralFrameParams,
+        chan_pos: &[[f64; 3]],
+        chan_gain: &[f32],
+        chan_direct: &[bool],
+        metric_positions: Option<&[bool]>,
+        out: &mut [f32],
+    ) {
+        debug_assert!(metric_positions.map_or(true, |metric| metric.len() == input_channel_count));
         let BinauralFrameParams {
             head_pose,
             unit_scale_m,
@@ -587,13 +657,27 @@ impl BinauralRenderer {
             let horiz = (hx * hx + hy * hy).sqrt();
             let el_rad = hz.atan2(horiz);
 
-            // Isotropic distance scale → metric distance (m). Direction is
-            // scale-invariant. Object/bed levels are authored upstream (Atmos
-            // object gain), so the direct path applies NO inverse-distance gain;
-            // dist_m only drives the distance *cues* (air absorption, reverb
-            // send, early reflections), never the direct object level.
-            let dist_norm = ((pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt()) as f32;
-            let dist_m = (dist_norm * unit_scale_m).max(0.0);
+            // Authored metric XYZ bypasses scene scaling. Ordinary presentation
+            // coordinates retain the historical isotropic metres-per-unit scale.
+            // Direct object level remains authored upstream: range drives cues,
+            // never a blanket source-level 1/d law.
+            let position_is_metric = metric_positions
+                .and_then(|metric| metric.get(c))
+                .copied()
+                .unwrap_or(false);
+            let source_m = if position_is_metric {
+                hp
+            } else {
+                [
+                    hp[0] * unit_scale_m as f64,
+                    hp[1] * unit_scale_m as f64,
+                    hp[2] * unit_scale_m as f64,
+                ]
+            };
+            let dist_m = ((source_m[0] * source_m[0]
+                + source_m[1] * source_m[1]
+                + source_m[2] * source_m[2])
+                .sqrt()) as f32;
 
             // ITD remains continuous and cheap. HRIR interpolation is much more
             // expensive, so cache the exact per-ear directions that produced the
@@ -605,14 +689,10 @@ impl BinauralRenderer {
             let center_key =
                 self.hrir
                     .quantize_direction(az_rad.to_degrees(), el_rad.to_degrees(), None);
-            let (left_key, right_key) = if near_field_parallax
-                && dist_m > head_radius_m.max(0.0)
-            {
-                let source_m = [
-                    hp[0] * unit_scale_m as f64,
-                    hp[1] * unit_scale_m as f64,
-                    hp[2] * unit_scale_m as f64,
-                ];
+            let use_near_field_geometry = near_field_parallax
+                && (metric_positions.is_none() || position_is_metric)
+                && dist_m > head_radius_m.max(0.0);
+            let (left_key, right_key) = if use_near_field_geometry {
                 let (left_ray, right_ray) =
                     ear_relative_directions(source_m, head_radius_m.max(0.0) as f64);
                 let angles = |ray: [f64; 3]| {
@@ -635,9 +715,21 @@ impl BinauralRenderer {
                 (center_key, center_key)
             };
             let dir = (self.hrir_generation, left_key, right_key);
+            let (near_gain_l, near_gain_r) =
+                if use_near_field_geometry && position_is_metric {
+                    normalized_near_field_ear_gains(source_m, head_radius_m.max(0.0) as f64)
+                } else {
+                    (1.0, 1.0)
+                };
 
             let rate = self.sample_rate;
             let dsp = self.channels[c].get_or_insert_with(|| ChannelDsp::new(rate));
+            let near_gain_start_l = dsp.near_gain_l;
+            let near_gain_start_r = dsp.near_gain_r;
+            let near_gain_step_l = (near_gain_l - near_gain_start_l) / sample_length as f32;
+            let near_gain_step_r = (near_gain_r - near_gain_start_r) / sample_length as f32;
+            dsp.near_gain_l = near_gain_l;
+            dsp.near_gain_r = near_gain_r;
             if dsp.last_dir != Some(dir) {
                 self.hrir.at_key(left_key, &mut self.hrir_scratch);
                 let left_hrir = self.hrir_scratch.left;
@@ -680,11 +772,15 @@ impl BinauralRenderer {
                 let bank = dsp
                     .refl
                     .get_or_insert_with(|| ReflectionBank::new(self.sample_rate));
-                let phys = [
-                    pos[0] as f32 * unit_scale_m,
-                    pos[1] as f32 * unit_scale_m,
-                    pos[2] as f32 * unit_scale_m,
-                ];
+                let phys = if position_is_metric {
+                    [pos[0] as f32, pos[1] as f32, pos[2] as f32]
+                } else {
+                    [
+                        pos[0] as f32 * unit_scale_m,
+                        pos[1] as f32 * unit_scale_m,
+                        pos[2] as f32 * unit_scale_m,
+                    ]
+                };
                 let images = reflections::first_order_images(phys, reflections.room_size_m);
                 let c_sound = reflections::speed_of_sound();
                 for (i, img) in images.iter().enumerate() {
@@ -744,8 +840,10 @@ impl BinauralRenderer {
                 }
                 // Authored object/bed level is respected: no 1/d attenuation.
                 let x = raw;
-                let mut yl = dsp.conv_l.process(dsp.delay_l.process(x));
-                let mut yr = dsp.conv_r.process(dsp.delay_r.process(x));
+                let ear_gain_l = near_gain_start_l + near_gain_step_l * s as f32;
+                let ear_gain_r = near_gain_start_r + near_gain_step_r * s as f32;
+                let mut yl = dsp.conv_l.process(dsp.delay_l.process(x)) * ear_gain_l;
+                let mut yr = dsp.conv_r.process(dsp.delay_r.process(x)) * ear_gain_r;
                 if let Some(bank) = dsp.refl.as_mut() {
                     let (rl, rr) = bank.process(raw);
                     yl += rl;
@@ -1056,6 +1154,49 @@ mod tests {
         assert!(
             (far - near).abs() <= near * 1e-6,
             "direct object level changed with distance: near={near} far={far}"
+        );
+    }
+
+    #[test]
+    fn near_field_ear_gain_is_equal_power_and_converges_with_distance() {
+        let near = normalized_near_field_ear_gains([0.15, 0.0, 0.0], 0.0875);
+        assert!(near.1 > near.0, "right-near source should favor right ear: {near:?}");
+        let near_power = (near.0 * near.0 + near.1 * near.1) * 0.5;
+        assert!((near_power - 1.0).abs() < 1.0e-6, "near-field power drifted: {near_power}");
+
+        let far = normalized_near_field_ear_gains([1.0, 100.0, 0.0], 0.0875);
+        assert!((far.0 - 1.0).abs() < 0.002, "far left gain did not converge: {far:?}");
+        assert!((far.1 - 1.0).abs() < 0.002, "far right gain did not converge: {far:?}");
+    }
+
+    #[test]
+    fn authored_metric_position_ignores_scene_unit_scale() {
+        let n = 1_024;
+        let input = vec![0.2f32; n];
+        let silence = vec![0.0f32; n];
+        let pos = [[0.35, 0.45, 0.0]];
+        let metric = [true];
+        let render = |unit_scale_m: f32| {
+            let params = BinauralFrameParams {
+                unit_scale_m,
+                near_field_parallax: true,
+                ..dry_params()
+            };
+            let mut renderer = BinauralRenderer::new(48_000);
+            let mut prime = vec![0.0f32; n * 2];
+            renderer.render_frame_with_metric_positions(
+                &silence, 1, n, &params, &pos, &[1.0], &[], Some(&metric), &mut prime,
+            );
+            let mut out = vec![0.0f32; n * 2];
+            renderer.render_frame_with_metric_positions(
+                &input, 1, n, &params, &pos, &[1.0], &[], Some(&metric), &mut out,
+            );
+            out
+        };
+        assert_eq!(
+            render(0.5),
+            render(4.0),
+            "authored metres must not be rescaled by scene unit_scale_m"
         );
     }
 

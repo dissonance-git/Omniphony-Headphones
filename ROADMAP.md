@@ -119,8 +119,8 @@ Build the next spatial gains first where the source has supplied more truth:
 - preserve continuous metric XYZ and authored radial distance through adapter, scene, render-policy, and binaural boundaries without normalizing objects onto a unit shell;
 - extend the portable authored-scene conformance lane with ADM/BW64-facing adapters and reference fixtures for object, direct-speaker, and HOA semantics so source interpretation can be tested independently of Windows provider availability;
 - compare ADM-style timing and scene behavior against established reference renderers where practical, including fractional block boundaries and interpolation/jump semantics;
-- evaluate physically motivated near-field cues such as acoustic parallax, ear-specific geometry, distance-dependent ILD, and bounded near/far spectral behavior, with smooth convergence toward far-field behavior rather than an audible mode boundary;
-- keep radial-distance and near-field candidates independently switchable and out of the protected stereo-master path unless a separate stereo candidate later earns promotion;
+- physically validate the authored-metric direct path now that metric XYZ bypasses scene scaling and drives ear-specific acoustic parallax plus bounded equal-power distance-dependent ILD; compare it against range-dependent HRTF/BRIR references before adding any near-field spectral model;
+- keep authored radial-distance behavior out of the protected stereo-master path unless a separate stereo candidate later earns promotion;
 - compare source-equivalent scenes against standards/reference renderers before attributing a deficit to binaural rendering.
 
 Any sound-changing distance/HRTF candidate must remain independently switchable and revertible until engineering validation and physical listening both pass.

@@ -519,6 +519,40 @@ impl SpatialRenderer {
         samples_buf: Vec<f32>,
         measure_breakdown: bool,
     ) -> Result<RenderedFrame> {
+        self.render_frame_with_metric_positions(
+            input_pcm,
+            input_channel_count,
+            pending_events,
+            None,
+            samples_buf,
+            measure_breakdown,
+        )
+    }
+
+    /// Render one frame with an optional per-lane geometry-provenance sidecar.
+    ///
+    /// metric_positions[channel] == true means the object's position is
+    /// already listener-relative metres. Source truth remains the authored XYZ
+    /// itself; ordinary ADM/presentation coordinates keep using scene scale.
+    pub fn render_frame_with_metric_positions(
+        &mut self,
+        input_pcm: &[f32],
+        input_channel_count: usize,
+        pending_events: &[SpatialChannelEvent],
+        metric_positions: Option<&[bool]>,
+        samples_buf: Vec<f32>,
+        measure_breakdown: bool,
+    ) -> Result<RenderedFrame> {
+        if let Some(metric) = metric_positions {
+            if metric.len() != input_channel_count {
+                anyhow::bail!(
+                    "metric-position width {} does not match {} input channels",
+                    metric.len(),
+                    input_channel_count
+                );
+            }
+        }
+
         // The render thread belongs to the host (mpv's decode thread, the CLI
         // engine, …), so the FP environment is claimed here, at the DSP entry
         // point, rather than at thread creation.
@@ -871,7 +905,7 @@ impl SpatialRenderer {
                         }
                     }
                 }
-                self.binaural.render_frame(
+                self.binaural.render_frame_with_metric_positions(
                     input_pcm,
                     input_channel_count,
                     sample_length,
@@ -879,6 +913,7 @@ impl SpatialRenderer {
                     &self.binaural_pos_buf,
                     &self.binaural_gain_buf,
                     &self.binaural_direct_buf,
+                    metric_positions,
                     &mut output,
                 );
             }
