@@ -63,6 +63,7 @@ fn windows_spatial_quantum_reaches_the_shared_source_renderer_as_authored_object
         SourceRendererOptions {
             mode: SourceSpatialMode::FullSphere,
             externalization: false,
+            authored_metric_objects: true,
             ..SourceRendererOptions::default()
         },
     )

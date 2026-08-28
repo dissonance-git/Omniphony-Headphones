@@ -1319,6 +1319,119 @@ mod tests {
     }
 
     #[test]
+    fn authored_metric_motion_crosses_ear_dominance_inside_same_block() {
+        const N: usize = 512;
+        let left_pos = [[-0.18, 0.10, 0.0]];
+        let right_pos = [[0.18, 0.10, 0.0]];
+        let metric = [true];
+        let jump = [Some(0)];
+        let moving = [Some(N as u32)];
+        let params = BinauralFrameParams {
+            near_field_parallax: true,
+            ..dry_params()
+        };
+
+        let mut renderer = BinauralRenderer::new(48_000);
+        let silence = vec![0.0f32; N];
+        let mut scratch = vec![0.0f32; N * 2];
+        renderer.render_frame_with_metric_motion(
+            &silence,
+            1,
+            N,
+            &params,
+            &left_pos,
+            &[1.0],
+            &[],
+            Some(&metric),
+            Some(&jump),
+            &mut scratch,
+        );
+
+        let mut seed = 0x51A7_10C5u32;
+        let mut noise = || {
+            (0..N)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Establish the left-near boundary with audible broadband material.
+        let settled_input = noise();
+        let mut settled = vec![0.0f32; N * 2];
+        renderer.render_frame_with_metric_motion(
+            &settled_input,
+            1,
+            N,
+            &params,
+            &left_pos,
+            &[1.0],
+            &[],
+            Some(&metric),
+            Some(&[None]),
+            &mut settled,
+        );
+
+        // The next Windows-style source update supplies the right-near endpoint
+        // for the same PCM pass. The authored span is the full block.
+        let moving_input = noise();
+        let mut out = vec![0.0f32; N * 2];
+        renderer.render_frame_with_metric_motion(
+            &moving_input,
+            1,
+            N,
+            &params,
+            &right_pos,
+            &[1.0],
+            &[],
+            Some(&metric),
+            Some(&moving),
+            &mut out,
+        );
+
+        let ear_energy = |start: usize, end: usize| {
+            let mut left = 0.0f32;
+            let mut right = 0.0f32;
+            for frame in start..end {
+                left += out[frame * 2] * out[frame * 2];
+                right += out[frame * 2 + 1] * out[frame * 2 + 1];
+            }
+            (left, right)
+        };
+        let early = ear_energy(0, 64);
+        let late = ear_energy(N - 64, N);
+        assert!(
+            early.0 > early.1 * 1.10,
+            "moving block did not begin from the left-near boundary: {early:?}"
+        );
+        assert!(
+            late.1 > late.0 * 1.10,
+            "moving block did not reach right-ear dominance in the same pass: {late:?}"
+        );
+    }
+
+    #[test]
+    fn near_field_radial_ladder_converges_monotonically() {
+        let mut previous_disparity = f32::INFINITY;
+        for distance in [0.15, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0] {
+            let gains = normalized_near_field_ear_gains([0.10, distance, 0.0], 0.0875);
+            let power = (gains.0 * gains.0 + gains.1 * gains.1) * 0.5;
+            assert!((power - 1.0).abs() < 1.0e-6);
+            let disparity = (gains.0 / gains.1).ln().abs();
+            assert!(
+                disparity <= previous_disparity + 1.0e-6,
+                "ear disparity increased with radial distance at {distance} m"
+            );
+            previous_disparity = disparity;
+        }
+        assert!(
+            previous_disparity < 0.01,
+            "20 m source did not converge toward far-field ear balance"
+        );
+    }
+
+    #[test]
     fn muted_channel_is_silent() {
         let mut r = BinauralRenderer::new(48_000);
         let n = 64;

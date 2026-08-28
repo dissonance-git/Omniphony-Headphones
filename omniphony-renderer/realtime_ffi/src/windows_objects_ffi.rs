@@ -817,7 +817,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn spatial_object_reset_restarts_worker_state_without_changing_stream_shape() {
         let descriptors = [OmniphonySpatialObjectStaticDescriptor {
             role: 0,
@@ -847,6 +846,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn dynamic_safety_pan_tracks_continuous_x_position() {
         let left = dynamic_position_pan(WindowsSpatialPosition::new(-1.0, 0.0, 0.0));
         let right = dynamic_position_pan(WindowsSpatialPosition::new(1.0, 0.0, 0.0));
