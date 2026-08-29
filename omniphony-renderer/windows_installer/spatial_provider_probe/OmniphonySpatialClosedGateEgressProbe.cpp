@@ -43,6 +43,82 @@ private:
     HRESULT hr_ = E_FAIL;
 };
 
+class ProducerQuantumClock final {
+public:
+    ProducerQuantumClock() = default;
+    ~ProducerQuantumClock() {
+        if (timer_) {
+            CancelWaitableTimer(timer_);
+            CloseHandle(timer_);
+        }
+    }
+
+    ProducerQuantumClock(const ProducerQuantumClock&) = delete;
+    ProducerQuantumClock& operator=(const ProducerQuantumClock&) = delete;
+
+    HRESULT Open(DWORD periodMs) noexcept {
+        timer_ = CreateWaitableTimerExW(
+            nullptr,
+            nullptr,
+            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+            TIMER_MODIFY_STATE | SYNCHRONIZE);
+        if (timer_) {
+            highResolution_ = true;
+        } else {
+            // The reference host is Windows 11, but keep the diagnostic usable
+            // on older hosts/SDK combinations without globally changing the
+            // system timer resolution.
+            timer_ = CreateWaitableTimerExW(
+                nullptr,
+                nullptr,
+                0,
+                TIMER_MODIFY_STATE | SYNCHRONIZE);
+            highResolution_ = false;
+        }
+        if (!timer_) {
+            return HRESULT_FROM_WIN32(GetLastError());
+        }
+
+        LARGE_INTEGER due{};
+        due.QuadPart = -static_cast<LONGLONG>(periodMs) * 10'000LL;
+        if (!SetWaitableTimerEx(
+                timer_,
+                &due,
+                static_cast<LONG>(periodMs),
+                nullptr,
+                nullptr,
+                nullptr,
+                0)) {
+            const HRESULT result = HRESULT_FROM_WIN32(GetLastError());
+            CloseHandle(timer_);
+            timer_ = nullptr;
+            return result;
+        }
+        return S_OK;
+    }
+
+    HRESULT Wait() noexcept {
+        if (!timer_) {
+            return E_HANDLE;
+        }
+        const DWORD waitResult = WaitForSingleObject(timer_, 1'000);
+        if (waitResult == WAIT_OBJECT_0) {
+            return S_OK;
+        }
+        const DWORD error = waitResult == WAIT_FAILED
+            ? GetLastError()
+            : ERROR_TIMEOUT;
+        return HRESULT_FROM_WIN32(
+            error == ERROR_SUCCESS ? ERROR_GEN_FAILURE : error);
+    }
+
+    bool HighResolution() const noexcept { return highResolution_; }
+
+private:
+    HANDLE timer_ = nullptr;
+    bool highResolution_ = false;
+};
+
 int Fail(const wchar_t* stage, HRESULT hr) {
     std::wcerr << L"SPATIAL_CLOSED_GATE_EGRESS_FAIL stage=" << stage
                << L" hr=0x" << std::hex << std::uppercase
@@ -222,6 +298,8 @@ int wmain(int argc, wchar_t** argv) {
                << pump.PeriodFrames() << L"\n";
     std::wcout << L"SPATIAL_CLOSED_GATE_EGRESS_QUEUE_CAPACITY_FRAMES "
                << queue->CapacityFrames() << L"\n";
+    std::wcout << L"SPATIAL_CLOSED_GATE_EGRESS_PRODUCER_TIMER_HIGH_RESOLUTION "
+               << (producerClock.HighResolution() ? 1 : 0) << L"\n";
 
     result = pump.Start();
     if (FAILED(result)) {
@@ -231,6 +309,18 @@ int wmain(int argc, wchar_t** argv) {
         front->Release();
         stream->Release();
         return Fail(L"StartRawEndpoint", result);
+    }
+
+    ProducerQuantumClock producerClock;
+    result = producerClock.Open(10);
+    if (FAILED(result)) {
+        (void)pump.Stop();
+        stream->Stop();
+        pump.Close();
+        top->Release();
+        front->Release();
+        stream->Release();
+        return Fail(L"OpenProducerQuantumClock", result);
     }
 
     std::atomic<bool> stopConsumer{false};
@@ -300,7 +390,11 @@ int wmain(int argc, wchar_t** argv) {
             break;
         }
         absoluteFrame += kFramesPerQuantum;
-        Sleep(10);
+
+        result = producerClock.Wait();
+        if (FAILED(result)) {
+            break;
+        }
     }
 
     stopConsumer.store(true, std::memory_order_release);
