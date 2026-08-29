@@ -135,6 +135,7 @@ jobs:
             'OmniphonySpatialProbe',
             'OmniphonySpatialProbeCtl',
             'OmniphonySpatialProbeSmoke',
+            'OmniphonySpatialStaticStreamSmoke',
             'OmniphonySpatialObjectStreamSmoke',
             'OmniphonySpatialObjectRealtimeSmoke',
             'OmniphonySpatialRealtimeBridgeSmoke',
@@ -151,15 +152,19 @@ jobs:
           $provider = Join-Path $release 'OmniphonySpatialProbe.dll'
           $control = Join-Path $release 'OmniphonySpatialProbeCtl.exe'
           $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
+          $staticStreamSmoke = Join-Path $release 'OmniphonySpatialStaticStreamSmoke.exe'
           $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
           $objectRealtimeSmoke = Join-Path $release 'OmniphonySpatialObjectRealtimeSmoke.exe'
           $composedRealtimeSmoke = Join-Path $release 'OmniphonySpatialRealtimeBridgeSmoke.exe'
           $closedGate = Join-Path $release 'OmniphonySpatialClosedGateEgressProbe.exe'
-          foreach ($file in @($provider, $control, $smoke, $objectStreamSmoke, $objectRealtimeSmoke, $composedRealtimeSmoke, $closedGate)) {
+          foreach ($file in @($provider, $control, $smoke, $staticStreamSmoke, $objectStreamSmoke, $objectRealtimeSmoke, $composedRealtimeSmoke, $closedGate)) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
               throw "Spatial provider build output is missing: $file"
             }
           }
+
+          & $staticStreamSmoke
+          if ($LASTEXITCODE -ne 0) { throw "Spatial static object COM smoke failed: $LASTEXITCODE" }
 
           & $objectStreamSmoke
           if ($LASTEXITCODE -ne 0) { throw "Spatial dynamic object COM smoke failed: $LASTEXITCODE" }
@@ -289,6 +294,7 @@ jobs:
           $providerDll = Join-Path $spatialRelease 'OmniphonySpatialProbe.dll'
           $providerCtl = Join-Path $spatialRelease 'OmniphonySpatialProbeCtl.exe'
           $providerSmoke = Join-Path $spatialRelease 'OmniphonySpatialProbeSmoke.exe'
+          $staticStreamSmoke = Join-Path $spatialRelease 'OmniphonySpatialStaticStreamSmoke.exe'
           $objectStreamSmoke = Join-Path $spatialRelease 'OmniphonySpatialObjectStreamSmoke.exe'
           $objectRealtimeSmoke = Join-Path $spatialRelease 'OmniphonySpatialObjectRealtimeSmoke.exe'
           $composedRealtimeSmoke = Join-Path $spatialRelease 'OmniphonySpatialRealtimeBridgeSmoke.exe'
@@ -335,6 +341,7 @@ jobs:
             $providerDll,
             $providerCtl,
             $providerSmoke,
+            $staticStreamSmoke,
             $objectStreamSmoke,
             $objectRealtimeSmoke,
             $composedRealtimeSmoke,

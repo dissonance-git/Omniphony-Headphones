@@ -246,13 +246,28 @@ impl ChannelState {
             };
         }
 
-        let step = delta.signum() / ramp_samples;
-        let projected_end = start + step * sample_length as f32;
-        let end = if step > 0.0 {
-            projected_end.min(target)
+        let max_delta = sample_length as f32 / ramp_samples;
+        let boundary_tolerance = max_delta.abs() * (64.0 * f32::EPSILON);
+
+        // Preserve the historical arithmetic when the target lies at or beyond
+        // this callback boundary. That path is already sample-time correct and
+        // keeps the strict speaker/crossover goldens numerically stable.
+        //
+        // Only when the target is genuinely inside this callback do we need the
+        // canonical per-sample rate plus GainSlew::at() clamping. That is the
+        // case that previously stretched the final fraction of a slew across an
+        // oversized callback.
+        let reaches_inside_block = delta.abs() + boundary_tolerance < max_delta;
+        let (step, end) = if reaches_inside_block {
+            (delta.signum() / ramp_samples, target)
         } else {
-            projected_end.max(target)
+            let bounded_delta = delta.clamp(-max_delta, max_delta);
+            (
+                bounded_delta / sample_length as f32,
+                start + bounded_delta,
+            )
         };
+
         self.slewed_gain = end;
         GainSlew { start, step, end }
     }
