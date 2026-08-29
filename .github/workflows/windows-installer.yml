@@ -306,6 +306,7 @@ jobs:
           $spatialToolkit = Join-Path $support 'spatial-provider-dev'
           New-Item -ItemType Directory -Force $spatialToolkit | Out-Null
           $closedGateRunner = Join-Path $spatialSource 'Run-ClosedGateEgress.ps1'
+          $activationCheckRunner = Join-Path $spatialSource 'run-spatial-provider-activation-check.ps1'
           $providerEnable = Join-Path $spatialSource 'Enable-OmniphonySpatialProvider.ps1'
           $providerDisable = Join-Path $spatialSource 'Disable-OmniphonySpatialProvider.ps1'
 
@@ -334,6 +335,7 @@ jobs:
           Copy-Item $providerDisable $support -Force
           Copy-Item $closedGateProbe $support -Force
           Copy-Item $closedGateRunner $support -Force
+          Copy-Item $activationCheckRunner $support -Force
 
           # Explicit development toolkit. Setup never executes these scripts.
           # The directory is a self-contained PackageRoot for immutable staging.
@@ -376,6 +378,7 @@ jobs:
           Write-Host '  Omniphony\support\Disable-OmniphonySpatialProvider.ps1 (provider rollback)'
           Write-Host '  Omniphony\support\OmniphonySpatialClosedGateEgressProbe.exe (manual physical egress diagnostic)'
           Write-Host '  Omniphony\support\Run-ClosedGateEgress.ps1 (installed closed-gate runner)'
+          Write-Host '  Omniphony\support\run-spatial-provider-activation-check.ps1 (register/activate/rollback check; never selects provider)'
           Write-Host '  Omniphony\support\spatial-provider-dev\ (inert staged/preflight/activation toolkit; never auto-run)'
           Write-Host '  no taskbar window; no background host process'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
