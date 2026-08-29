@@ -435,9 +435,12 @@ int RuntimeDisable() {
     return 0;
 }
 
-int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
+int ConfigureRuntime(
+    const wchar_t* endpointArgument,
+    const wchar_t* dllArgument,
+    bool enabled) {
     if (!IsElevated()) {
-        std::wcerr << L"ERROR\truntime-enable requires an elevated Administrator terminal\n";
+        std::wcerr << L"ERROR\truntime configuration requires an elevated Administrator terminal\n";
         return kExitAccess;
     }
     if (!endpointArgument || !*endpointArgument || !dllArgument || !*dllArgument) {
@@ -466,8 +469,9 @@ int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
         return kExitAccess;
     }
 
-    // Fail closed throughout the transaction. The provider only opens when all
-    // fields exist, the DLL exists, and Enabled is exactly 1.
+    // Every write transaction begins closed. RuntimeEnable commits Enabled=1
+    // only after endpoint and DLL identity are complete; RuntimeStageDisabled
+    // intentionally leaves the same canonical state closed.
     result = SetDword(key, L"Enabled", 0);
     if (result == ERROR_SUCCESS) {
         result = SetString(key, L"EndpointId", std::wstring(endpointArgument));
@@ -475,14 +479,12 @@ int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
     if (result == ERROR_SUCCESS) {
         result = SetString(key, L"RealtimeDll", dllPath);
     }
-    if (result == ERROR_SUCCESS) {
+    if (result == ERROR_SUCCESS && enabled) {
         result = SetDword(key, L"Enabled", 1);
     }
     RegCloseKey(key);
 
     if (result != ERROR_SUCCESS) {
-        // Best-effort fail-closed rollback. A malformed partial key cannot
-        // activate because Enabled was written false before any other field.
         HKEY rollback = nullptr;
         if (RegOpenKeyExW(
                 HKEY_LOCAL_MACHINE,
@@ -497,11 +499,21 @@ int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
         return kExitAccess;
     }
 
-    std::wcout << L"SPATIAL_RUNTIME_ENABLED\t1\n";
+    std::wcout << (enabled
+        ? L"SPATIAL_RUNTIME_ENABLED\t1\n"
+        : L"SPATIAL_RUNTIME_STAGED_DISABLED\t1\n");
     std::wcout << L"SPATIAL_RUNTIME_ENDPOINT\t" << endpointArgument << L'\n';
     std::wcout << L"SPATIAL_RUNTIME_REALTIME_DLL\t" << dllPath << L'\n';
     std::wcout << L"SPATIAL_RUNTIME_FAIL_CLOSED\t1\n";
     return 0;
+}
+
+int RuntimeEnable(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
+    return ConfigureRuntime(endpointArgument, dllArgument, true);
+}
+
+int RuntimeStageDisabled(const wchar_t* endpointArgument, const wchar_t* dllArgument) {
+    return ConfigureRuntime(endpointArgument, dllArgument, false);
 }
 
 int UnregisterOwnedKeys() {
@@ -769,6 +781,7 @@ void Usage() {
         << L"  diagnose                         verify registry plus provider COM construction\n"
         << L"  runtime-status                    inspect private provider runtime gate (read-only)\n"
         << L"  runtime-enable <endpoint> <dll>   enable exact endpoint/runtime DLL gate (Administrator)\n"
+        << L"  runtime-stage-disabled <endpoint> <dll> stage exact endpoint/runtime DLL with gate closed (Administrator)\n"
         << L"  runtime-disable                   disable/delete only private runtime gate (Administrator)\n"
         << L"  unregister                       remove only Omniphony registration (Administrator)\n"
         << L"  selection-status <endpoint-id>   print Windows spatial selection state\n"
@@ -812,12 +825,14 @@ int wmain(int argc, wchar_t** argv) {
     if (command == L"runtime-status") {
         return argc == 2 ? RuntimeStatus() : kExitUsage;
     }
-    if (command == L"runtime-enable") {
+    if (command == L"runtime-enable" || command == L"runtime-stage-disabled") {
         if (argc != 4 || !argv[2] || !*argv[2] || !argv[3] || !*argv[3]) {
             Usage();
             return kExitUsage;
         }
-        return RuntimeEnable(argv[2], argv[3]);
+        return command == L"runtime-enable"
+            ? RuntimeEnable(argv[2], argv[3])
+            : RuntimeStageDisabled(argv[2], argv[3]);
     }
     if (command == L"runtime-disable") {
         return argc == 2 ? RuntimeDisable() : kExitUsage;

@@ -55,6 +55,21 @@ function Require-Pattern {
     }
 }
 
+function Get-OutputValue {
+    param(
+        [Parameter(Mandatory = $true)][object]$Result,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $prefix = $Name + [char]9
+    $line = @($Result.output | Where-Object { $_.StartsWith($prefix) } | Select-Object -Last 1)
+    if ($line.Count -ne 1) {
+        throw "$Label did not emit exactly one $Name value."
+    }
+    return [string]$line[0].Substring($prefix.Length)
+}
+
 function Test-PathWithin {
     param(
         [Parameter(Mandatory = $true)][string]$Child,
@@ -142,7 +157,27 @@ if (-not $currentScript.Equals($activationScript, [System.StringComparison]::Ord
 }
 
 $runtimeBefore = Invoke-NativeCaptured -Path $control -Arguments @('runtime-status') -Label 'Initial runtime status'
-Require-Pattern -Result $runtimeBefore -Pattern 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0' -Label 'Initial runtime status'
+$runtimeBeforeText = @($runtimeBefore.output) -join [Environment]::NewLine
+$runtimeKeyWasPresent = $false
+$runtimeEndpointBefore = '<none>'
+$runtimeDllBefore = '<none>'
+
+if ($runtimeBeforeText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0') {
+    $runtimeKeyWasPresent = $false
+}
+elseif ($runtimeBeforeText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=1\s+ENABLED=0\s+READY=0') {
+    $runtimeKeyWasPresent = $true
+    $runtimeEndpointBefore = Get-OutputValue -Result $runtimeBefore -Name 'SPATIAL_RUNTIME_ENDPOINT' -Label 'Initial runtime status'
+    $runtimeDllBefore = Get-OutputValue -Result $runtimeBefore -Name 'SPATIAL_RUNTIME_REALTIME_DLL' -Label 'Initial runtime status'
+    if ([string]::IsNullOrWhiteSpace($runtimeEndpointBefore) -or $runtimeEndpointBefore -eq '<none>' -or
+        [string]::IsNullOrWhiteSpace($runtimeDllBefore) -or $runtimeDllBefore -eq '<none>' -or
+        $runtimeBeforeText -notmatch 'SPATIAL_RUNTIME_REALTIME_DLL_EXISTS\s+1') {
+        throw 'Initial runtime gate exists but is not a canonical restorable disabled configuration.'
+    }
+}
+else {
+    throw 'Initial runtime gate is not closed.'
+}
 
 $registrationBefore = Invoke-NativeCaptured -Path $control -Arguments @('status') -Label 'Initial registration status' -AllowedExitCodes @(3)
 Require-Pattern -Result $registrationBefore -Pattern 'SPATIAL_PROVIDER_STATUS\s+ENCODER=0\s+COM=0' -Label 'Initial registration status'
@@ -212,6 +247,19 @@ finally {
             Write-Warning $_
         }
 
+        if ($runtimeKeyWasPresent) {
+            try {
+                Invoke-NativeCaptured -Path $control -Arguments @(
+                    'runtime-stage-disabled',
+                    $runtimeEndpointBefore,
+                    $runtimeDllBefore
+                ) -Label 'Restore initial disabled runtime configuration' | Out-Null
+            }
+            catch {
+                Write-Warning $_
+            }
+        }
+
         $runtimeAfter = Invoke-NativeCaptured -Path $control -Arguments @('runtime-status') -Label 'Final runtime status'
         $registrationAfter = Invoke-NativeCaptured -Path $control -Arguments @('status') -Label 'Final registration status' -AllowedExitCodes @(3)
         $selectionAfter = Invoke-NativeCaptured -Path $control -Arguments @('selection-status', $endpointId) -Label 'Final selection status'
@@ -219,8 +267,22 @@ finally {
         $runtimeAfterText = @($runtimeAfter.output) -join [Environment]::NewLine
         $registrationAfterText = @($registrationAfter.output) -join [Environment]::NewLine
         $selectionAfterText = @($selectionAfter.output) -join [Environment]::NewLine
+
+        if ($runtimeKeyWasPresent) {
+            $runtimeEndpointAfter = Get-OutputValue -Result $runtimeAfter -Name 'SPATIAL_RUNTIME_ENDPOINT' -Label 'Final runtime status'
+            $runtimeDllAfter = Get-OutputValue -Result $runtimeAfter -Name 'SPATIAL_RUNTIME_REALTIME_DLL' -Label 'Final runtime status'
+            $runtimeRollbackMatches =
+                $runtimeAfterText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=1\s+ENABLED=0\s+READY=0' -and
+                $runtimeEndpointAfter -eq $runtimeEndpointBefore -and
+                $runtimeDllAfter -eq $runtimeDllBefore
+        }
+        else {
+            $runtimeRollbackMatches =
+                $runtimeAfterText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0'
+        }
+
         $cleanupPassed =
-            $runtimeAfterText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0' -and
+            $runtimeRollbackMatches -and
             $registrationAfterText -match 'SPATIAL_PROVIDER_STATUS\s+ENCODER=0\s+COM=0' -and
             $selectionAfterText -match 'OMNIPHONY_DEFAULT\s+0' -and
             $selectionAfterText -match 'OMNIPHONY_ACTIVE\s+0'
@@ -250,6 +312,8 @@ $report = [ordered]@{
     physical_endpoint_id = $endpointId
     provider_registered_temporarily = $true
     runtime_gate_enabled_temporarily = $true
+    runtime_key_present_before = $runtimeKeyWasPresent
+    runtime_disabled_state_restored = $runtimeKeyWasPresent
     public_stream_available = $true
     public_stream_activated = $true
     public_stream_started = $false

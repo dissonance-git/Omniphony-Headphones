@@ -74,6 +74,26 @@ jobs:
           $runtimeText = $runtime -join "`n"
           if ($runtimeText -notmatch 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0') { throw 'clean runner runtime gate is not closed' }
 
+          try {
+            & $ctl runtime-stage-disabled 'omniphony-ci-endpoint' $dll
+            if ($LASTEXITCODE -ne 0) { throw "Disabled runtime staging failed: $LASTEXITCODE" }
+            $stagedRuntime = & $ctl runtime-status
+            if ($LASTEXITCODE -ne 0) { throw "Staged runtime status failed: $LASTEXITCODE" }
+            $stagedRuntime | Write-Host
+            $stagedRuntimeText = $stagedRuntime -join "`n"
+            if ($stagedRuntimeText -notmatch 'SPATIAL_RUNTIME_STATUS\s+KEY=1\s+ENABLED=0\s+READY=0') { throw 'disabled runtime staging did not remain closed' }
+            if ($stagedRuntimeText -notmatch 'SPATIAL_RUNTIME_ENDPOINT\s+omniphony-ci-endpoint') { throw 'disabled runtime staging endpoint drifted' }
+            if ($stagedRuntimeText -notmatch 'SPATIAL_RUNTIME_REALTIME_DLL_EXISTS\s+1') { throw 'disabled runtime staging DLL identity is not readable' }
+          }
+          finally {
+            & $ctl runtime-disable
+            if ($LASTEXITCODE -ne 0) { throw "Runtime staging cleanup failed: $LASTEXITCODE" }
+          }
+          $runtimeClean = & $ctl runtime-status
+          if ($LASTEXITCODE -ne 0) { throw "Post-staging runtime status failed: $LASTEXITCODE" }
+          $runtimeClean | Write-Host
+          if (($runtimeClean -join "`n") -notmatch 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0') { throw 'runtime staging cleanup did not restore key absence' }
+
           $capability = & $smoke $dll
           if ($LASTEXITCODE -ne 0) { throw "ISpatialAudioClient capability smoke failed: $LASTEXITCODE" }
           $capability | Write-Host
