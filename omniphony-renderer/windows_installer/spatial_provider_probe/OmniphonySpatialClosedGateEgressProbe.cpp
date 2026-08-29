@@ -298,8 +298,6 @@ int wmain(int argc, wchar_t** argv) {
                << pump.PeriodFrames() << L"\n";
     std::wcout << L"SPATIAL_CLOSED_GATE_EGRESS_QUEUE_CAPACITY_FRAMES "
                << queue->CapacityFrames() << L"\n";
-    std::wcout << L"SPATIAL_CLOSED_GATE_EGRESS_PRODUCER_TIMER_HIGH_RESOLUTION "
-               << (producerClock.HighResolution() ? 1 : 0) << L"\n";
 
     result = pump.Start();
     if (FAILED(result)) {
@@ -322,6 +320,8 @@ int wmain(int argc, wchar_t** argv) {
         stream->Release();
         return Fail(L"OpenProducerQuantumClock", result);
     }
+    std::wcout << L"SPATIAL_CLOSED_GATE_EGRESS_PRODUCER_TIMER_HIGH_RESOLUTION "
+               << (producerClock.HighResolution() ? 1 : 0) << L"\n";
 
     std::atomic<bool> stopConsumer{false};
     std::atomic<HRESULT> consumerResult{S_OK};
