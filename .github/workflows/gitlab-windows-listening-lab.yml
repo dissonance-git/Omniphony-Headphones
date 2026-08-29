@@ -14,7 +14,8 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     env:
-      GITLAB_REF: e6f61226304c68a5b17658a33be4eef79d4d48d6
+      GITLAB_REF: 7783ba5835e8c03ad82192dc4bdbe06963b53471
+      OMNIPHONY_LISTENING_LAB_TEST_ICON: 1
     steps:
       - name: Install Rust 1.88
         uses: dtolnay/rust-toolchain@1.88.0
@@ -52,6 +53,7 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 "$env:GITHUB_WORKSPACE\dist\OmniphonyListeningLab.exe").Hash.ToLowerInvariant()
           "$hash  OmniphonyListeningLab.exe" | Set-Content "$env:GITHUB_WORKSPACE\dist\OmniphonyListeningLab.sha256" -Encoding ascii
           Write-Host "OMNIPHONY_LISTENING_LAB_BUILD_OK 1"
+          Write-Host "OMNIPHONY_LISTENING_LAB_TEST_ICON 1"
           Write-Host "OMNIPHONY_LISTENING_LAB_GITLAB_SHA $env:GITLAB_REF"
           Write-Host "OMNIPHONY_LISTENING_LAB_SHA256 $hash"
 
