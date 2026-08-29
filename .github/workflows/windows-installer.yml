@@ -17,6 +17,10 @@ on:
       - 'omniphony-renderer/Cargo.toml'
       - 'omniphony-renderer/Cargo.lock'
 
+concurrency:
+  group: omniphony-windows-current
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
