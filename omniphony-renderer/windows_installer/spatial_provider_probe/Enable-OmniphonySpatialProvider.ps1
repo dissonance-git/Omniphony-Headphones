@@ -69,6 +69,22 @@ function Invoke-NativeChecked {
     return [string[]]$lines
 }
 
+function Get-OutputValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Lines,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $prefix = $Name + [char]9
+    $line = $Lines | Where-Object { $_.StartsWith($prefix) } | Select-Object -Last 1
+    if (-not $line) {
+        throw "Spatial selection status did not emit $Name."
+    }
+    return $line.Substring($prefix.Length)
+}
+
 function Write-Receipt([bool]$SelectionVerified) {
     $stateRoot = Split-Path -Parent $ReceiptPath
     if ($stateRoot) {
@@ -89,7 +105,9 @@ function Write-Receipt([bool]$SelectionVerified) {
         FormatGuid = $FormatGuid
         ComClsid = $ComClsid
         SelectionApi = 'Windows.Media.Audio.SpatialAudioDeviceConfiguration'
-        SelectionChangedByScript = $true
+        PreviousDefaultSpatialFormat = $previousDefaultFormat
+        PreviousActiveSpatialFormat = $previousActiveFormat
+        SelectionChangedByScript = (-not $selectionWasOmniphonyDefault)
         SelectionVerified = $SelectionVerified
         WindowsSettingsRequired = $false
         UndocumentedEndpointFormatWrites = $false
@@ -116,6 +134,15 @@ $ProviderDll = (Resolve-Path -LiteralPath $ProviderDll).Path
 $ControlPath = (Resolve-Path -LiteralPath $ControlPath).Path
 $RealtimeDll = (Resolve-Path -LiteralPath $RealtimeDll).Path
 $RestartAudioPath = (Resolve-Path -LiteralPath $RestartAudioPath).Path
+
+# Capture the documented Windows selection state before any provider mutation.
+# This is recovery evidence only. Omniphony does not assume it can programmatically
+# restore a third-party spatial format that it does not own.
+$selectionBefore = Invoke-NativeChecked -Path $ControlPath -Arguments @('selection-status', $endpointId)
+$previousDefaultFormat = Get-OutputValue -Lines $selectionBefore -Name 'DEFAULT_FORMAT'
+$previousActiveFormat = Get-OutputValue -Lines $selectionBefore -Name 'ACTIVE_FORMAT'
+$selectionWasOmniphonyDefault =
+    $previousDefaultFormat.Equals($FormatGuid, [System.StringComparison]::OrdinalIgnoreCase)
 
 $registered = $false
 $selectionCommitted = $false

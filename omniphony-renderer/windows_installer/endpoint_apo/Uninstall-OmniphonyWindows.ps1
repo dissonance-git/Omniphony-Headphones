@@ -37,19 +37,41 @@ function Remove-HklmTree([string]$Path) {
     try { $base.DeleteSubKeyTree($Path, $false) } finally { $base.Dispose() }
 }
 
-# Close and unregister the optional Spatial Sound provider before its installed
-# DLL/control files disappear. Older/interrupted packages may not contain the
-# helper, so the exact Omniphony-owned registry trees are also removed below.
-if (Test-Path -LiteralPath $spatialDisable -PathType Leaf) {
+function Test-HklmTree([string]$Path) {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64)
     try {
-        & $spatialDisable
-    } catch {
-        Write-Warning "Spatial provider disable helper failed; continuing with exact owned-key cleanup: $($_.Exception.Message)"
+        $key = $base.OpenSubKey($Path, $false)
+        if ($null -eq $key) { return $false }
+        $key.Dispose()
+        return $true
+    } finally {
+        $base.Dispose()
     }
 }
-Remove-HklmTree 'SOFTWARE\Omniphony\SpatialProvider'
-Remove-HklmTree "SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder\$spatialFormatGuid"
-Remove-HklmTree "SOFTWARE\Classes\CLSID\$spatialProviderClsid"
+
+# Never delete a Spatial Sound provider that Windows may still reference.
+# The disable helper checks every active endpoint plus the saved Omniphony
+# endpoint before touching the runtime gate or registration.
+$spatialRuntimeKey = 'SOFTWARE\Omniphony\SpatialProvider'
+$spatialEncoderKey = "SOFTWARE\Microsoft\Multimedia\Audio\Spatial\Encoder\$spatialFormatGuid"
+$spatialComKey = "SOFTWARE\Classes\CLSID\$spatialProviderClsid"
+$spatialOwnedStateExists =
+    (Test-HklmTree $spatialRuntimeKey) -or
+    (Test-HklmTree $spatialEncoderKey) -or
+    (Test-HklmTree $spatialComKey)
+
+if ($spatialOwnedStateExists) {
+    if (-not (Test-Path -LiteralPath $spatialDisable -PathType Leaf)) {
+        throw 'Omniphony Spatial Sound state exists but the guarded disable helper is missing. Uninstall stopped before deleting provider registration.'
+    }
+    & $spatialDisable
+}
+
+Remove-HklmTree $spatialRuntimeKey
+Remove-HklmTree $spatialEncoderKey
+Remove-HklmTree $spatialComKey
 
 $endpointId = ''
 if (Test-Path -LiteralPath $endpointBackupPath) {
