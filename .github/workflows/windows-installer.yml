@@ -313,6 +313,7 @@ jobs:
           $activationCheckRunner = Join-Path $spatialSource 'run-spatial-provider-activation-check.ps1'
           $selectionCheckRunner = Join-Path $spatialSource 'run-spatial-provider-selection-check.ps1'
           $selectionCleanupRunner = Join-Path $spatialSource 'run-spatial-provider-selection-cleanup.ps1'
+          $restartAudio = Join-Path $renderer 'windows_installer\endpoint_apo\Restart-OmniphonyAudio.ps1'
           $providerEnable = Join-Path $spatialSource 'Enable-OmniphonySpatialProvider.ps1'
           $providerDisable = Join-Path $spatialSource 'Disable-OmniphonySpatialProvider.ps1'
 
@@ -344,6 +345,7 @@ jobs:
           Copy-Item $activationCheckRunner $support -Force
           Copy-Item $selectionCheckRunner $support -Force
           Copy-Item $selectionCleanupRunner $support -Force
+          Copy-Item $restartAudio $support -Force
 
           # Explicit development toolkit. Setup never executes these scripts.
           # The directory is a self-contained PackageRoot for immutable staging.
@@ -389,6 +391,7 @@ jobs:
           Write-Host '  Omniphony\support\run-spatial-provider-activation-check.ps1 (register/activate/rollback check; never selects provider)'
           Write-Host '  Omniphony\support\run-spatial-provider-selection-check.ps1 (first controlled Windows Spatial Sound selection)'
           Write-Host '  Omniphony\support\run-spatial-provider-selection-cleanup.ps1 (post-Off cleanup and exact baseline restoration)'
+          Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (audio-service refresh used by explicit provider selection)'
           Write-Host '  Omniphony\support\spatial-provider-dev\ (inert staged/preflight/activation toolkit; never auto-run)'
           Write-Host '  no taskbar window; no background host process'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
