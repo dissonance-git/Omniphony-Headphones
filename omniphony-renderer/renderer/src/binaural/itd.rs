@@ -58,32 +58,86 @@ fn finite_source_path_length_m(
     }
 }
 
-/// Per-ear relative delays for a finite point source around a rigid spherical
-/// head, using the finite-distance Woodworth ray geometry.
+fn ray_far_field_path_offset_m(cos_delta: f64, head_radius_m: f64) -> f64 {
+    let cos_delta = cos_delta.clamp(-1.0, 1.0);
+    let delta = cos_delta.acos();
+    if delta <= std::f64::consts::FRAC_PI_2 {
+        -head_radius_m * cos_delta
+    } else {
+        head_radius_m * (delta - std::f64::consts::FRAC_PI_2)
+    }
+}
+
+fn signed_finite_source_delay_seconds(
+    source_m: [f64; 3],
+    head_radius_m: f64,
+) -> Option<f64> {
+    let left_path = finite_source_path_length_m(source_m, head_radius_m, -1.0)?;
+    let right_path = finite_source_path_length_m(source_m, head_radius_m, 1.0)?;
+    let delay = (left_path - right_path) / SPEED_OF_SOUND as f64;
+    delay.is_finite().then_some(delay)
+}
+
+fn signed_ray_far_field_delay_seconds(
+    source_m: [f64; 3],
+    head_radius_m: f64,
+) -> Option<f64> {
+    if !head_radius_m.is_finite()
+        || head_radius_m <= 0.0
+        || !source_m.iter().all(|value| value.is_finite())
+    {
+        return None;
+    }
+    let source_radius_m =
+        (source_m[0] * source_m[0] + source_m[1] * source_m[1] + source_m[2] * source_m[2])
+            .sqrt();
+    if !source_radius_m.is_finite() || source_radius_m < head_radius_m {
+        return None;
+    }
+
+    let left_cos = (-source_m[0] / source_radius_m).clamp(-1.0, 1.0);
+    let right_cos = (source_m[0] / source_radius_m).clamp(-1.0, 1.0);
+    let left_offset = ray_far_field_path_offset_m(left_cos, head_radius_m);
+    let right_offset = ray_far_field_path_offset_m(right_cos, head_radius_m);
+    let delay = (left_offset - right_offset) / SPEED_OF_SOUND as f64;
+    delay.is_finite().then_some(delay)
+}
+
+fn relative_delays_from_signed_seconds(delay_s: f64) -> Option<(f32, f32)> {
+    if !delay_s.is_finite() {
+        return None;
+    }
+    if delay_s >= 0.0 {
+        Some((delay_s as f32, 0.0))
+    } else {
+        Some((0.0, (-delay_s) as f32))
+    }
+}
+
+/// Per-ear relative delays for an authored finite point source.
 ///
-/// Unlike `ear_delays_seconds`, this consumes actual listener-relative metric
-/// XYZ. It therefore captures source-distance dependence of the path to each
-/// ear. Only the interaural path difference is returned: the nearer ear remains
-/// at zero, so source distance does not add blanket transport latency.
+/// The finite rigid-sphere ray model contributes only the *distance-dependent
+/// correction* to Omniphony's established direction-only ITD. This keeps the
+/// existing far-field azimuth/elevation behavior as the exact asymptote while
+/// still adding the extra near-field path-length difference supplied by metric
+/// XYZ. Only interaural delay is returned; no common propagation latency is
+/// introduced.
 ///
 /// Returns `None` for invalid geometry or a source inside the spherical head;
 /// callers can then retain the ordinary direction-only model.
 pub fn ear_delays_seconds_finite_source(
     source_m: [f64; 3],
+    azimuth_rad: f32,
+    elevation_rad: f32,
     head_radius_m: f32,
 ) -> Option<(f32, f32)> {
     let radius = head_radius_m as f64;
-    let left_path = finite_source_path_length_m(source_m, radius, -1.0)?;
-    let right_path = finite_source_path_length_m(source_m, radius, 1.0)?;
-    let delta_s = (left_path - right_path) / SPEED_OF_SOUND as f64;
-    if !delta_s.is_finite() {
-        return None;
-    }
-    if delta_s >= 0.0 {
-        Some((delta_s as f32, 0.0))
-    } else {
-        Some((0.0, (-delta_s) as f32))
-    }
+    let finite = signed_finite_source_delay_seconds(source_m, radius)?;
+    let ray_far = signed_ray_far_field_delay_seconds(source_m, radius)?;
+    let (base_left, base_right) =
+        ear_delays_seconds(azimuth_rad, elevation_rad, head_radius_m);
+    let base = (base_left - base_right) as f64;
+    relative_delays_from_signed_seconds(base + (finite - ray_far))
 }
 
 /// Per-ear delays in seconds for a source at the given azimuth/elevation.
@@ -160,35 +214,47 @@ mod tests {
     }
 
     #[test]
-    fn finite_source_converges_to_plane_wave_woodworth_at_long_range() {
+    fn finite_source_correction_converges_to_current_far_field_in_3d() {
         let radius_m = 1_000.0f64;
-        for az_deg in [0.0f32, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0] {
-            let az = az_deg.to_radians();
-            let source = [
-                radius_m * az.sin() as f64,
-                radius_m * az.cos() as f64,
-                0.0,
-            ];
-            let finite =
-                ear_delays_seconds_finite_source(source, DEFAULT_HEAD_RADIUS_M).unwrap();
-            let plane = ear_delays_seconds(az, 0.0, DEFAULT_HEAD_RADIUS_M);
-            assert!(
-                (finite.0 - plane.0).abs() < 2.0e-8
-                    && (finite.1 - plane.1).abs() < 2.0e-8,
-                "finite source failed to converge at az={az_deg}: finite={finite:?} plane={plane:?}"
-            );
+        for elevation_deg in [0.0f32, 30.0, 60.0] {
+            let elevation = elevation_deg.to_radians();
+            for azimuth_deg in [-150.0f32, -90.0, -30.0, 0.0, 30.0, 90.0, 150.0, 180.0] {
+                let azimuth = azimuth_deg.to_radians();
+                let cos_el = elevation.cos() as f64;
+                let source = [
+                    radius_m * azimuth.sin() as f64 * cos_el,
+                    radius_m * azimuth.cos() as f64 * cos_el,
+                    radius_m * elevation.sin() as f64,
+                ];
+                let finite = ear_delays_seconds_finite_source(
+                    source,
+                    azimuth,
+                    elevation,
+                    DEFAULT_HEAD_RADIUS_M,
+                )
+                .unwrap();
+                let plane =
+                    ear_delays_seconds(azimuth, elevation, DEFAULT_HEAD_RADIUS_M);
+                assert!(
+                    (finite.0 - plane.0).abs() < 2.0e-8
+                        && (finite.1 - plane.1).abs() < 2.0e-8,
+                    "finite correction failed to return to Current at az={azimuth_deg} el={elevation_deg}: finite={finite:?} plane={plane:?}"
+                );
+            }
         }
     }
 
     #[test]
     fn finite_source_increases_lateral_itd_within_reach() {
-        let finite =
-            ear_delays_seconds_finite_source([0.15, 0.0, 0.0], DEFAULT_HEAD_RADIUS_M).unwrap();
-        let plane = ear_delays_seconds(
-            std::f32::consts::FRAC_PI_2,
+        let azimuth = std::f32::consts::FRAC_PI_2;
+        let finite = ear_delays_seconds_finite_source(
+            [0.15, 0.0, 0.0],
+            azimuth,
             0.0,
             DEFAULT_HEAD_RADIUS_M,
-        );
+        )
+        .unwrap();
+        let plane = ear_delays_seconds(azimuth, 0.0, DEFAULT_HEAD_RADIUS_M);
         assert_eq!(
             finite.1, 0.0,
             "right-near source must leave the right ear undelayed"
@@ -201,15 +267,27 @@ mod tests {
 
     #[test]
     fn finite_source_keeps_the_median_plane_symmetric_in_3d() {
-        let (left, right) =
-            ear_delays_seconds_finite_source([0.0, 0.15, 0.20], DEFAULT_HEAD_RADIUS_M).unwrap();
+        let elevation = 0.20f32.atan2(0.15);
+        let (left, right) = ear_delays_seconds_finite_source(
+            [0.0, 0.15, 0.20],
+            0.0,
+            elevation,
+            DEFAULT_HEAD_RADIUS_M,
+        )
+        .unwrap();
         assert!(left.abs() < 1.0e-9 && right.abs() < 1.0e-9);
     }
 
     #[test]
     fn finite_source_rejects_positions_inside_the_head() {
         assert!(
-            ear_delays_seconds_finite_source([0.01, 0.0, 0.0], DEFAULT_HEAD_RADIUS_M).is_none()
+            ear_delays_seconds_finite_source(
+                [0.01, 0.0, 0.0],
+                std::f32::consts::FRAC_PI_2,
+                0.0,
+                DEFAULT_HEAD_RADIUS_M,
+            )
+            .is_none()
         );
     }
 }

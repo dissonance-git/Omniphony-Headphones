@@ -742,10 +742,11 @@ impl BinauralRenderer {
 
             // ITD remains continuous and cheap. Ordinary/inferred playback keeps
             // the direction-only plane-wave Woodworth model. Authored metric
-            // near-field objects can use the stronger finite-point-source ray
-            // geometry because their actual XYZ and radius are source truth.
-            // The finite model returns only the interaural path difference, so it
-            // does not smuggle absolute propagation latency into the direct path.
+            // near-field objects can use the finite-point-source ray correction
+            // because their actual XYZ and radius are source truth. The correction
+            // is anchored to the established direction-only far-field result and
+            // returns only interaural path difference, so it neither replaces
+            // Current at distance nor adds absolute propagation latency.
             let use_near_field_geometry = near_field_parallax
                 && (metric_positions.is_none() || position_is_metric)
                 && dist_m > head_radius_m.max(0.0);
@@ -753,8 +754,13 @@ impl BinauralRenderer {
                 && position_is_metric
                 && dist_m > head_radius_m.max(0.0);
             let (itd_l, itd_r) = if use_metric_finite_itd {
-                itd::ear_delays_seconds_finite_source(source_m, head_radius_m)
-                    .unwrap_or_else(|| itd::ear_delays_seconds(az_rad, el_rad, head_radius_m))
+                itd::ear_delays_seconds_finite_source(
+                    source_m,
+                    az_rad,
+                    el_rad,
+                    head_radius_m,
+                )
+                .unwrap_or_else(|| itd::ear_delays_seconds(az_rad, el_rad, head_radius_m))
             } else {
                 itd::ear_delays_seconds(az_rad, el_rad, head_radius_m)
             };
