@@ -163,6 +163,18 @@ target_compile_definitions(OmniphonySpatialRawOutputPumpSmoke PRIVATE UNICODE _U
 target_compile_options(OmniphonySpatialRawOutputPumpSmoke PRIVATE /W4 /WX /permissive-)
 target_link_libraries(OmniphonySpatialRawOutputPumpSmoke PRIVATE ole32 uuid)
 
+# Real application-side Windows Spatial Audio client probe. Its contract mode is
+# safe for CI; physical mode must only run after Windows has actually selected
+# Omniphony. It obtains ISpatialAudioClient from the endpoint rather than loading
+# the provider DLL directly, then submits one authored TopFrontLeft static object.
+add_executable(OmniphonySpatialStaticObjectClientProbe
+    OmniphonySpatialStaticObjectClientProbe.cpp
+)
+target_compile_features(OmniphonySpatialStaticObjectClientProbe PRIVATE cxx_std_17)
+target_compile_definitions(OmniphonySpatialStaticObjectClientProbe PRIVATE UNICODE _UNICODE)
+target_compile_options(OmniphonySpatialStaticObjectClientProbe PRIVATE /W4 /WX /permissive-)
+target_link_libraries(OmniphonySpatialStaticObjectClientProbe PRIVATE ole32 uuid)
+
 # Manual physical egress diagnostic. CI compiles this target but must never run
 # it because it requires an explicit real endpoint and intentionally produces a
 # short low-level audible test signal. It still does no provider registration or

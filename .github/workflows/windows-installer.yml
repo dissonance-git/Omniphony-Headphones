@@ -146,6 +146,7 @@ jobs:
             'OmniphonySpatialStereoQueueSmoke',
             'OmniphonySpatialRawOutputProbe',
             'OmniphonySpatialRawOutputSinkProbe',
+            'OmniphonySpatialStaticObjectClientProbe',
             'OmniphonySpatialClosedGateEgressProbe'
           )) {
             cmake --build $build --config Release --target $target --parallel
@@ -160,8 +161,9 @@ jobs:
           $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
           $objectRealtimeSmoke = Join-Path $release 'OmniphonySpatialObjectRealtimeSmoke.exe'
           $composedRealtimeSmoke = Join-Path $release 'OmniphonySpatialRealtimeBridgeSmoke.exe'
+          $realStaticClient = Join-Path $release 'OmniphonySpatialStaticObjectClientProbe.exe'
           $closedGate = Join-Path $release 'OmniphonySpatialClosedGateEgressProbe.exe'
-          foreach ($file in @($provider, $control, $smoke, $staticStreamSmoke, $objectStreamSmoke, $objectRealtimeSmoke, $composedRealtimeSmoke, $closedGate)) {
+          foreach ($file in @($provider, $control, $smoke, $staticStreamSmoke, $objectStreamSmoke, $objectRealtimeSmoke, $composedRealtimeSmoke, $realStaticClient, $closedGate)) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
               throw "Spatial provider build output is missing: $file"
             }
@@ -189,7 +191,16 @@ jobs:
           # stream activation while still proving its complete DLL links/loads.
           & $smoke $provider
           if ($LASTEXITCODE -ne 0) { throw "Spatial provider fail-closed COM smoke failed: $LASTEXITCODE" }
+
+          $realStaticContract = & $realStaticClient --contract
+          if ($LASTEXITCODE -ne 0) { throw "Real static-object client contract failed: $LASTEXITCODE" }
+          $realStaticContract | Write-Host
+          if (($realStaticContract -join "`n") -notmatch 'SPATIAL_REAL_STATIC_CLIENT_CONTRACT_OK\s+1') {
+            throw 'Real static-object client contract marker missing'
+          }
+
           Write-Host "SPATIAL_PROVIDER_BUILD_OK dll=$provider static_objects=17 dynamic_objects=16"
+          Write-Host "REAL_STATIC_OBJECT_CLIENT_BUILD_OK file=$realStaticClient"
           Write-Host "CLOSED_GATE_EGRESS_PROBE_BUILD_OK file=$closedGate"
 
       - name: Build physical endpoint control helper
@@ -305,6 +316,7 @@ jobs:
           $queueSmoke = Join-Path $spatialRelease 'OmniphonySpatialStereoQueueSmoke.exe'
           $rawOutputProbe = Join-Path $spatialRelease 'OmniphonySpatialRawOutputProbe.exe'
           $rawOutputSinkProbe = Join-Path $spatialRelease 'OmniphonySpatialRawOutputSinkProbe.exe'
+          $realStaticClient = Join-Path $spatialRelease 'OmniphonySpatialStaticObjectClientProbe.exe'
           $closedGateProbe = Join-Path $spatialRelease 'OmniphonySpatialClosedGateEgressProbe.exe'
           $spatialSource = "$renderer\windows_installer\spatial_provider_probe"
           $spatialToolkit = Join-Path $support 'spatial-provider-dev'
@@ -313,6 +325,7 @@ jobs:
           $activationCheckRunner = Join-Path $spatialSource 'run-spatial-provider-activation-check.ps1'
           $selectionCheckRunner = Join-Path $spatialSource 'run-spatial-provider-selection-check.ps1'
           $selectionCleanupRunner = Join-Path $spatialSource 'run-spatial-provider-selection-cleanup.ps1'
+          $realStaticRunner = Join-Path $spatialSource 'run-real-static-object-check.ps1'
           $restartAudio = Join-Path $renderer 'windows_installer\endpoint_apo\Restart-OmniphonyAudio.ps1'
           $providerEnable = Join-Path $spatialSource 'Enable-OmniphonySpatialProvider.ps1'
           $providerDisable = Join-Path $spatialSource 'Disable-OmniphonySpatialProvider.ps1'
@@ -345,6 +358,8 @@ jobs:
           Copy-Item $activationCheckRunner $support -Force
           Copy-Item $selectionCheckRunner $support -Force
           Copy-Item $selectionCleanupRunner $support -Force
+          Copy-Item $realStaticClient $support -Force
+          Copy-Item $realStaticRunner $support -Force
           Copy-Item $restartAudio $support -Force
 
           # Explicit development toolkit. Setup never executes these scripts.
@@ -391,6 +406,8 @@ jobs:
           Write-Host '  Omniphony\support\run-spatial-provider-activation-check.ps1 (register/activate/rollback check; never selects provider)'
           Write-Host '  Omniphony\support\run-spatial-provider-selection-check.ps1 (first controlled Windows Spatial Sound selection)'
           Write-Host '  Omniphony\support\run-spatial-provider-selection-cleanup.ps1 (post-Off cleanup and exact baseline restoration)'
+          Write-Host '  Omniphony\support\OmniphonySpatialStaticObjectClientProbe.exe (real endpoint ISpatialAudioClient static-object source)'
+          Write-Host '  Omniphony\support\run-real-static-object-check.ps1 (selected-provider TopFrontLeft physical source check)'
           Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (audio-service refresh used by explicit provider selection)'
           Write-Host '  Omniphony\support\spatial-provider-dev\ (inert staged/preflight/activation toolkit; never auto-run)'
           Write-Host '  no taskbar window; no background host process'

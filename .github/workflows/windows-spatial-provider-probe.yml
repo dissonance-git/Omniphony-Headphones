@@ -45,12 +45,14 @@ jobs:
           $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
           $staticStreamSmoke = Join-Path $release 'OmniphonySpatialStaticStreamSmoke.exe'
           $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
+          $realStaticClient = Join-Path $release 'OmniphonySpatialStaticObjectClientProbe.exe'
           $snapshotScript = "$env:GITHUB_WORKSPACE\omniphony-renderer\windows_installer\spatial_provider_probe\CaptureSpatialProviderState.ps1"
           if (-not (Test-Path $ctl)) { throw "Missing probe control executable: $ctl" }
           if (-not (Test-Path $dll)) { throw "Missing probe COM DLL: $dll" }
           if (-not (Test-Path $smoke)) { throw "Missing probe capability smoke: $smoke" }
           if (-not (Test-Path $staticStreamSmoke)) { throw "Missing static stream lifecycle smoke: $staticStreamSmoke" }
           if (-not (Test-Path $objectStreamSmoke)) { throw "Missing dynamic object stream lifecycle smoke: $objectStreamSmoke" }
+          if (-not (Test-Path $realStaticClient)) { throw "Missing real static-object client probe: $realStaticClient" }
           if (-not (Test-Path $snapshotScript)) { throw "Missing spatial selection snapshot script: $snapshotScript" }
 
           $contract = & $ctl contract
@@ -106,6 +108,16 @@ jobs:
           if ($capText -notmatch 'SPATIAL_PROVIDER_MAX_DYNAMIC_OBJECTS\s+16') { throw 'dynamic-capacity boundary drifted' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_STREAM_AVAILABLE\s+0') { throw 'stream boundary drifted' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_CAPABILITY_SMOKE_OK\s+1') { throw 'capability smoke marker missing' }
+
+          $realStaticContract = & $realStaticClient --contract
+          if ($LASTEXITCODE -ne 0) { throw "Real static-object client contract failed: $LASTEXITCODE" }
+          $realStaticContract | Write-Host
+          $realStaticText = $realStaticContract -join "`n"
+          if ($realStaticText -notmatch 'SPATIAL_REAL_STATIC_CLIENT_CONTRACT_OK\s+1') { throw 'real static client contract marker missing' }
+          if ($realStaticText -notmatch 'SPATIAL_REAL_STATIC_CLIENT_ROUTE\s+IMMDEVICE_ISPATIALAUDIOCLIENT') { throw 'real static client endpoint route drifted' }
+          if ($realStaticText -notmatch 'SPATIAL_REAL_STATIC_CLIENT_ROLE\s+TOP_FRONT_LEFT') { throw 'real static client first role drifted' }
+          if ($realStaticText -notmatch 'SPATIAL_REAL_STATIC_CLIENT_FORMAT\s+FLOAT32_48000_MONO') { throw 'real static client format drifted' }
+          if ($realStaticText -notmatch 'SPATIAL_REAL_STATIC_CLIENT_REQUIRES_SELECTED_PROVIDER\s+1') { throw 'real static client selection boundary drifted' }
 
           # Keep the original static-only stream contract executable for ABI/
           # lifecycle compatibility while the live provider advances to the
