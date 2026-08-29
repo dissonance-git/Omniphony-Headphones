@@ -232,13 +232,34 @@ The latter still needs a first-class spherical/extended direct-render representa
 
 Host callback boundaries are transport artifacts, not acoustic events.
 
-The same continuous signal should not produce a different room merely because one backend calls the renderer with 40 samples and another with 1024.
+The same continuous signal should not produce different acoustic or control trajectories merely because one backend calls the renderer with 40 samples and another with 1024.
 
-The FDN therefore carries its modulation scheduler across `process_block` boundaries.
+### Late-room state
 
-Its modulation target horizon is measured in processed samples rather than “once per caller block.”
+The FDN carries its modulation scheduler across `process_block` boundaries. Its modulation target horizon is measured in processed samples rather than “once per caller block.”
 
 A regression test renders the same signal with several block partitions and requires identical output.
+
+### Metadata and mute gain
+
+`ChannelState::slew_gain` is the single authority for metadata/mute slew state and rate. It advances at a constant sample rate, not a per-callback rate, and exposes the block's start/rate/end segment. If the target is reached partway through a callback, the remainder of that callback holds the target instead of dilating the final gain change to the block boundary.
+
+The direct binaural handoff carries that derived segment into the headphone renderer; it does not create a second gain state machine. A production-boundary regression uses the transparent direct/LFE headphone route to render one continuous fade under radically different callback partitions, including a callback that straddles the exact slew endpoint, and requires the same sample trajectory.
+
+### Authored source motion
+
+Authored metric objects reuse the canonical `ChannelRampState`; the binaural path does not own a second motion state machine.
+
+For a timed position update, the spatial renderer projects the same ramp to the source-time boundary reached by the current processing pass and forwards both that metric endpoint and the number of authored interpolation samples consumed. The binaural stage then uses that duration for its distance/direction transition:
+
+- near-field interaural level cues follow the half-open authored span and preserve equal power;
+- ITD delay targets use the authored motion duration rather than callback duration;
+- air-absorption and late-send targets follow the same radial span;
+- HRIR changes crossfade toward the same-pass endpoint, with the existing bounded HRIR-length cap preserving realtime cost;
+- a zero-length authored interpolation remains an explicit jump;
+- no source-position update leaves ordinary head-motion smoothing behavior unchanged.
+
+This removes the former one-callback lag in the direct authored-object path while keeping callback partitioning a transport concern. The exact high-resolution HRTF interpolation strategy may evolve, but it must continue consuming this same source-time trajectory rather than inventing another motion clock.
 
 ### Zero predelay
 
@@ -280,35 +301,7 @@ Diffuse low-frequency energy and coherent groove/foundation evidence must stay d
 
 ---
 
-## 12. Current missing binaural bridges
-
-### Sample-accurate gain trajectory
-
-The inherited `ChannelState` can generate sample-accurate gain ramps, but the current binaural handoff still effectively applies too much state at block granularity.
-
-Fix requirement:
-
-```text
-one authoritative ChannelState gain trajectory
-→ consumed per sample by binaural path
-```
-
-Do not create a second independent binaural gain state machine.
-
-### Source-time position trajectory
-
-Authored metric objects reuse the canonical `ChannelRampState`; the binaural path does not own a second motion state machine.
-
-For a timed position update, the spatial renderer projects the same ramp to the source-time boundary reached by the current processing pass and forwards both that metric endpoint and the number of authored interpolation samples consumed. The binaural stage then uses that duration for its distance/direction transition:
-
-- near-field interaural level cues follow the half-open authored span and preserve equal power;
-- ITD delay targets use the authored motion duration rather than callback duration;
-- air-absorption and late-send targets follow the same radial span;
-- HRIR changes crossfade toward the same-pass endpoint, with the existing bounded HRIR-length cap preserving realtime cost;
-- a zero-length authored interpolation remains an explicit jump;
-- no source-position update leaves ordinary head-motion smoothing behavior unchanged.
-
-This removes the former one-callback lag in the direct authored-object path while keeping callback partitioning a transport concern. The exact high-resolution HRTF interpolation strategy may evolve, but it must continue consuming this same source-time trajectory rather than inventing another motion clock.
+## 12. Remaining binaural bridges
 
 ### Broad-source extent
 

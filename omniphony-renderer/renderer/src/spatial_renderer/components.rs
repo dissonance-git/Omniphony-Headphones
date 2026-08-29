@@ -159,6 +159,46 @@ pub(super) struct ChannelState {
     pub(super) interp_prev_gains: Vec<Gains>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct GainSlew {
+    start: f32,
+    step: f32,
+    end: f32,
+}
+
+impl GainSlew {
+    #[inline]
+    pub(super) fn start(self) -> f32 {
+        self.start
+    }
+
+    #[inline]
+    pub(super) fn step(self) -> f32 {
+        self.step
+    }
+
+    #[inline]
+    pub(super) fn end(self) -> f32 {
+        self.end
+    }
+
+    /// Gain at one sample inside this block. The constant slew rate is clipped
+    /// only after the target boundary is reached, so a callback that straddles
+    /// the end of the ramp holds the target instead of stretching the remaining
+    /// change across the rest of that callback.
+    #[inline]
+    pub(super) fn at(self, sample_idx: usize) -> f32 {
+        let value = self.start + self.step * sample_idx as f32;
+        if self.step > 0.0 {
+            value.min(self.end)
+        } else if self.step < 0.0 {
+            value.max(self.end)
+        } else {
+            self.end
+        }
+    }
+}
+
 impl ChannelState {
     pub(super) fn reset_runtime_state(&mut self) {
         self.initialized = false;
@@ -168,29 +208,53 @@ impl ChannelState {
         self.interp_prev_gains.clear();
     }
 
-    /// Advance the gain slew by one block toward `target`; returns the
-    /// block's `(start, per_sample_step)` so mix loops can interpolate
-    /// `start + step * sample_idx`.
+    /// Advance the gain slew by one block toward `target`.
+    ///
+    /// The returned segment keeps one constant full-scale slew rate independent
+    /// of callback size. If the target is reached partway through the block,
+    /// `GainSlew::at` clamps the remaining samples to that target rather than
+    /// dilating the final fraction of the fade to the callback boundary.
     pub(super) fn slew_gain(
         &mut self,
         target: f32,
         sample_length: usize,
         ramp_samples: f32,
-    ) -> (f32, f32) {
+    ) -> GainSlew {
         let start = self.slewed_gain;
-        let max_step = if ramp_samples > 0.0 {
-            sample_length as f32 / ramp_samples
+        if sample_length == 0 {
+            return GainSlew {
+                start,
+                step: 0.0,
+                end: start,
+            };
+        }
+        if ramp_samples <= 0.0 || !ramp_samples.is_finite() {
+            self.slewed_gain = target;
+            return GainSlew {
+                start: target,
+                step: 0.0,
+                end: target,
+            };
+        }
+
+        let delta = target - start;
+        if delta == 0.0 {
+            return GainSlew {
+                start,
+                step: 0.0,
+                end: start,
+            };
+        }
+
+        let step = delta.signum() / ramp_samples;
+        let projected_end = start + step * sample_length as f32;
+        let end = if step > 0.0 {
+            projected_end.min(target)
         } else {
-            f32::INFINITY
+            projected_end.max(target)
         };
-        let delta = (target - start).clamp(-max_step, max_step);
-        self.slewed_gain = start + delta;
-        let step = if sample_length > 0 {
-            delta / sample_length as f32
-        } else {
-            0.0
-        };
-        (start, step)
+        self.slewed_gain = end;
+        GainSlew { start, step, end }
     }
 }
 

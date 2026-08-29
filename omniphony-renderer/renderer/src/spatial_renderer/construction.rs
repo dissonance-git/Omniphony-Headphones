@@ -510,6 +510,8 @@ impl SpatialRenderer {
             cascade_spectral_compensation: false,
             binaural_pos_buf: Vec::new(),
             binaural_gain_buf: Vec::new(),
+            binaural_gain_start_buf: Vec::new(),
+            binaural_gain_step_buf: Vec::new(),
             binaural_direct_buf: Vec::new(),
             binaural_motion_buf: Vec::new(),
         })

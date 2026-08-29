@@ -337,11 +337,10 @@ pub struct BinauralRenderer {
     /// Per-input-channel DSP state, indexed directly by channel (sparse tail is
     /// fine; reset when the channel count shrinks).
     channels: Vec<Option<ChannelDsp>>,
-    /// Metadata/mute gain at the sample boundary immediately after the previous
-    /// callback, per input channel. `SpatialRenderer::slew_gain` remains the one
-    /// authority for the slew rate; this state merely reconstructs the linear
-    /// segment between successive boundary values so callback size cannot turn
-    /// the audible gain trajectory into a staircase.
+    /// Fallback metadata/mute boundary for standalone BinauralRenderer callers.
+    /// The production SpatialRenderer path supplies the canonical ChannelState
+    /// start/rate sidecar directly; this boundary remains synchronized to the
+    /// block end so simpler callers can still request boundary interpolation.
     channel_gain_boundary: Vec<f32>,
     /// Reusable HRIR scratch so `at()` writes in place (no per-channel alloc).
     hrir_scratch: HrirPair,
@@ -624,10 +623,47 @@ impl BinauralRenderer {
         metric_motion_frames: Option<&[Option<u32>]>,
         out: &mut [f32],
     ) {
+        self.render_frame_with_metric_motion_and_gain_slew(
+            input_pcm,
+            input_channel_count,
+            sample_length,
+            params,
+            chan_pos,
+            chan_gain,
+            chan_direct,
+            metric_positions,
+            metric_motion_frames,
+            None,
+            None,
+            out,
+        );
+    }
+
+    /// Internal direct-binaural path with an optional exact ChannelState gain
+    /// segment. The sidecar carries derived start/rate values only; ChannelState
+    /// remains the sole owner of slew rate and end-state advancement.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_frame_with_metric_motion_and_gain_slew(
+        &mut self,
+        input_pcm: &[f32],
+        input_channel_count: usize,
+        sample_length: usize,
+        params: &BinauralFrameParams,
+        chan_pos: &[[f64; 3]],
+        chan_gain: &[f32],
+        chan_direct: &[bool],
+        metric_positions: Option<&[bool]>,
+        metric_motion_frames: Option<&[Option<u32>]>,
+        gain_starts: Option<&[f32]>,
+        gain_steps: Option<&[f32]>,
+        out: &mut [f32],
+    ) {
         debug_assert!(metric_positions.map_or(true, |metric| metric.len() == input_channel_count));
         debug_assert!(
             metric_motion_frames.map_or(true, |motion| motion.len() == input_channel_count)
         );
+        debug_assert!(gain_starts.map_or(true, |values| values.len() == input_channel_count));
+        debug_assert!(gain_steps.map_or(true, |values| values.len() == input_channel_count));
         let BinauralFrameParams {
             head_pose,
             unit_scale_m,
@@ -663,9 +699,16 @@ impl BinauralRenderer {
 
         for c in 0..input_channel_count {
             let gain_end = chan_gain.get(c).copied().unwrap_or(0.0);
-            let gain_start = self.channel_gain_boundary[c];
+            let boundary_start = self.channel_gain_boundary[c];
             self.channel_gain_boundary[c] = gain_end;
-            let gain_step = (gain_end - gain_start) / sample_length as f32;
+            let gain_start = gain_starts
+                .and_then(|values| values.get(c))
+                .copied()
+                .unwrap_or(boundary_start);
+            let gain_step = gain_steps
+                .and_then(|values| values.get(c))
+                .copied()
+                .unwrap_or_else(|| (gain_end - gain_start) / sample_length as f32);
             if gain_start == 0.0 && gain_end == 0.0 {
                 // Keep an existing reflection bank fading out so a muted
                 // channel does not freeze its taps at full gain.
@@ -691,7 +734,14 @@ impl BinauralRenderer {
                     dsp.refl = None;
                 }
                 for s in 0..sample_length {
-                    let gain = gain_start + gain_step * s as f32;
+                    let gain_unclamped = gain_start + gain_step * s as f32;
+                    let gain = if gain_step > 0.0 {
+                        gain_unclamped.min(gain_end)
+                    } else if gain_step < 0.0 {
+                        gain_unclamped.max(gain_end)
+                    } else {
+                        gain_end
+                    };
                     let v = input_pcm[s * input_channel_count + c]
                         * gain
                         * std::f32::consts::FRAC_1_SQRT_2;
@@ -940,10 +990,17 @@ impl BinauralRenderer {
             let cue_ramp_frames = authored_motion_frames.unwrap_or(0);
             for s in 0..sample_length {
                 // Reconstruct the exact linear gain segment between the previous
-                // and current sample-boundary values supplied by SpatialRenderer.
-                // This is the same `start + step * sample_idx` convention as the
-                // speaker path, so callback shape cannot quantize metadata gain.
-                let gain = gain_start + gain_step * s as f32;
+                // and the exact start/rate/end segment supplied by SpatialRenderer.
+                // The target clamp matches the speaker path, so a callback crossing
+                // the end of the slew cannot stretch that final gain fraction.
+                let gain_unclamped = gain_start + gain_step * s as f32;
+                let gain = if gain_step > 0.0 {
+                    gain_unclamped.min(gain_end)
+                } else if gain_step < 0.0 {
+                    gain_unclamped.max(gain_end)
+                } else {
+                    gain_end
+                };
                 // `raw` carries the object/metadata gain only; the direct path
                 // adds its distance gain, the reflection taps theirs. The air
                 // low-pass applies to the propagated wave, so it feeds the

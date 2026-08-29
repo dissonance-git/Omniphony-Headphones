@@ -210,10 +210,11 @@ impl SpeakerRenderStage {
             } else {
                 10.0_f32.powf(gain_db as f32 / 20.0)
             };
-            // Slewed per-sample gain factor (includes the mute 0/1 factor):
-            // factor(s) = gain_start + gain_step * s.
+            // Slewed per-sample gain factor (includes the mute 0/1 factor).
+            // ChannelState owns the constant sample-time rate and the exact
+            // within-block target clamp.
             let ramp_samples = self.sample_rate as f32 * GAIN_SLEW_SECS;
-            let (gain_start, gain_step) =
+            let gain_slew =
                 state.slew_gain(gain_linear * obj_gain, sample_length, ramp_samples);
 
             // A channel is directly routed when its routing entry is
@@ -248,7 +249,7 @@ impl SpeakerRenderStage {
                 // used for objects, but with a one-hot routing table.
                 for sample_idx in 0..sample_length {
                     let sample = input_pcm[sample_idx * input_channel_count + input_channel_idx]
-                        * (gain_start + gain_step * sample_idx as f32);
+                        * gain_slew.at(sample_idx);
                     let out_base = sample_idx * self.num_speakers;
                     for (speaker_idx, &gain) in self.bed_routing_gains_buf.iter().enumerate() {
                         output[out_base + speaker_idx] += sample * gain;
@@ -356,7 +357,7 @@ impl SpeakerRenderStage {
                                 &mut self.crossover_band_scratch,
                                 |sample_idx| {
                                     input_pcm[sample_idx * input_channel_count + input_channel_idx]
-                                        * (gain_start + gain_step * sample_idx as f32)
+                                        * gain_slew.at(sample_idx)
                                 },
                             );
                             crossover_elapsed += started_at.elapsed();
@@ -375,7 +376,7 @@ impl SpeakerRenderStage {
                             for sample_idx in 0..sample_length {
                                 let raw = input_pcm
                                     [sample_idx * input_channel_count + input_channel_idx]
-                                    * (gain_start + gain_step * sample_idx as f32);
+                                    * gain_slew.at(sample_idx);
                                 let split = split_bands(
                                     raw,
                                     &self.crossover_filter_bank,
@@ -417,7 +418,7 @@ impl SpeakerRenderStage {
                                 &mut self.crossover_band_scratch,
                                 |sample_idx| {
                                     input_pcm[sample_idx * input_channel_count + input_channel_idx]
-                                        * (gain_start + gain_step * sample_idx as f32)
+                                        * gain_slew.at(sample_idx)
                                 },
                             );
                             crossover_elapsed += started_at.elapsed();
@@ -436,7 +437,7 @@ impl SpeakerRenderStage {
                             for sample_idx in 0..sample_length {
                                 let raw = input_pcm
                                     [sample_idx * input_channel_count + input_channel_idx]
-                                    * (gain_start + gain_step * sample_idx as f32);
+                                    * gain_slew.at(sample_idx);
                                 let split = split_bands(
                                     raw,
                                     &self.crossover_filter_bank,
@@ -468,7 +469,7 @@ impl SpeakerRenderStage {
                                 &mut self.crossover_band_scratch,
                                 |sample_idx| {
                                     input_pcm[sample_idx * input_channel_count + input_channel_idx]
-                                        * (gain_start + gain_step * sample_idx as f32)
+                                        * gain_slew.at(sample_idx)
                                 },
                             );
                             crossover_elapsed += started_at.elapsed();
@@ -542,7 +543,7 @@ impl SpeakerRenderStage {
                                 }
                                 let raw = input_pcm
                                     [sample_idx * input_channel_count + input_channel_idx]
-                                    * (gain_start + gain_step * sample_idx as f32);
+                                    * gain_slew.at(sample_idx);
                                 let split = split_bands(
                                     raw,
                                     &self.crossover_filter_bank,
@@ -603,7 +604,7 @@ impl SpeakerRenderStage {
                                 &mut self.crossover_band_scratch,
                                 |sample_idx| {
                                     input_pcm[sample_idx * input_channel_count + input_channel_idx]
-                                        * (gain_start + gain_step * sample_idx as f32)
+                                        * gain_slew.at(sample_idx)
                                 },
                             );
                             crossover_elapsed += started_at.elapsed();
@@ -640,7 +641,7 @@ impl SpeakerRenderStage {
                                 }
                                 let raw = input_pcm
                                     [sample_idx * input_channel_count + input_channel_idx]
-                                    * (gain_start + gain_step * sample_idx as f32);
+                                    * gain_slew.at(sample_idx);
                                 let split = split_bands(
                                     raw,
                                     &self.crossover_filter_bank,
