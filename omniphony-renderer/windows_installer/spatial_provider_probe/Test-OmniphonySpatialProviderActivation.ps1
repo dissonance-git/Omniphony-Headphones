@@ -183,31 +183,52 @@ try {
     $activationPassed = $true
 }
 finally {
+    # Re-read selection before touching the runtime gate or registration. The
+    # test never selects Omniphony itself, but an external Settings/user race
+    # must not let cleanup unregister a provider Windows has begun referencing.
+    $selectionSafeForCleanup = $false
     try {
-        Invoke-NativeCaptured -Path $control -Arguments @('runtime-disable') -Label 'Disable runtime gate after activation test' | Out-Null
+        $selectionBeforeCleanup = Invoke-NativeCaptured -Path $control -Arguments @('selection-status', $endpointId) -Label 'Selection status before activation-test cleanup'
+        $selectionBeforeCleanupText = @($selectionBeforeCleanup.output) -join [Environment]::NewLine
+        $selectionSafeForCleanup =
+            $selectionBeforeCleanupText -match 'OMNIPHONY_DEFAULT\s+0' -and
+            $selectionBeforeCleanupText -match 'OMNIPHONY_ACTIVE\s+0'
     }
     catch {
-        Write-Warning $_
-    }
-    try {
-        Invoke-NativeCaptured -Path $control -Arguments @('unregister') -Label 'Unregister provider after activation test' | Out-Null
-    }
-    catch {
-        Write-Warning $_
+        Write-Warning "Could not prove a clean selection state before activation-test cleanup. Provider registration is being preserved: $_"
     }
 
-    $runtimeAfter = Invoke-NativeCaptured -Path $control -Arguments @('runtime-status') -Label 'Final runtime status'
-    $registrationAfter = Invoke-NativeCaptured -Path $control -Arguments @('status') -Label 'Final registration status' -AllowedExitCodes @(3)
-    $selectionAfter = Invoke-NativeCaptured -Path $control -Arguments @('selection-status', $endpointId) -Label 'Final selection status'
+    if ($selectionSafeForCleanup) {
+        try {
+            Invoke-NativeCaptured -Path $control -Arguments @('runtime-disable') -Label 'Disable runtime gate after activation test' | Out-Null
+        }
+        catch {
+            Write-Warning $_
+        }
+        try {
+            Invoke-NativeCaptured -Path $control -Arguments @('unregister') -Label 'Unregister provider after activation test' | Out-Null
+        }
+        catch {
+            Write-Warning $_
+        }
 
-    $runtimeAfterText = @($runtimeAfter.output) -join [Environment]::NewLine
-    $registrationAfterText = @($registrationAfter.output) -join [Environment]::NewLine
-    $selectionAfterText = @($selectionAfter.output) -join [Environment]::NewLine
-    $cleanupPassed =
-        $runtimeAfterText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0' -and
-        $registrationAfterText -match 'SPATIAL_PROVIDER_STATUS\s+ENCODER=0\s+COM=0' -and
-        $selectionAfterText -match 'OMNIPHONY_DEFAULT\s+0' -and
-        $selectionAfterText -match 'OMNIPHONY_ACTIVE\s+0'
+        $runtimeAfter = Invoke-NativeCaptured -Path $control -Arguments @('runtime-status') -Label 'Final runtime status'
+        $registrationAfter = Invoke-NativeCaptured -Path $control -Arguments @('status') -Label 'Final registration status' -AllowedExitCodes @(3)
+        $selectionAfter = Invoke-NativeCaptured -Path $control -Arguments @('selection-status', $endpointId) -Label 'Final selection status'
+
+        $runtimeAfterText = @($runtimeAfter.output) -join [Environment]::NewLine
+        $registrationAfterText = @($registrationAfter.output) -join [Environment]::NewLine
+        $selectionAfterText = @($selectionAfter.output) -join [Environment]::NewLine
+        $cleanupPassed =
+            $runtimeAfterText -match 'SPATIAL_RUNTIME_STATUS\s+KEY=0\s+ENABLED=0\s+READY=0' -and
+            $registrationAfterText -match 'SPATIAL_PROVIDER_STATUS\s+ENCODER=0\s+COM=0' -and
+            $selectionAfterText -match 'OMNIPHONY_DEFAULT\s+0' -and
+            $selectionAfterText -match 'OMNIPHONY_ACTIVE\s+0'
+    }
+    else {
+        Write-Warning 'Activation-test cleanup was intentionally skipped because selection safety could not be proven. Use the guarded installed disable helper after switching Spatial Sound away from Omniphony.'
+        $cleanupPassed = $false
+    }
 
     Write-StateSnapshot -CaptureScript $capture -ControlPath $control -Destination $afterSnapshot
 }
