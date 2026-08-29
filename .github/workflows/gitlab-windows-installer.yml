@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  GITLAB_REF: d8814c631b788fc1cd3081704e5553eb6126721f
+  GITLAB_REF: 647fb6c1a3543d416c5dabb3e5eb94e3d87f8d6f
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -46,6 +46,19 @@ jobs:
           Set-Location "$env:GITHUB_WORKSPACE\omniphony"
           Write-Host "Omniphony for Windows source=$(git rev-parse HEAD)"
           git status --short
+
+      - name: Parse installed tray with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $path = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\endpoint_apo\OmniphonyTray.ps1"
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Host $_.Message }
+            throw "OmniphonyTray.ps1 has Windows PowerShell 5.1 parse errors"
+          }
+          Write-Host "OMNIPHONY_TRAY_PS51_PARSE_OK 1"
 
       - name: Install pinned Rust toolchain
         shell: pwsh
