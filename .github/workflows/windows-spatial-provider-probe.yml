@@ -98,6 +98,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISpatialAudioClient capability smoke failed: $LASTEXITCODE" }
           $capability | Write-Host
           $capText = $capability -join "`n"
+          if ($capText -notmatch 'SPATIAL_PROVIDER_SMOKE_COM_APARTMENT_OK\s+1') { throw 'COM apartment initialization marker missing' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_COM_OK\s+1') { throw 'COM capability marker missing' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_INTERFACE\s+ISpatialAudioClient') { throw 'ISpatialAudioClient marker missing' }
           if ($capText -notmatch 'SPATIAL_PROVIDER_STATIC_8_1_4_4_OK\s+1') { throw '8.1.4.4 static capability marker missing' }

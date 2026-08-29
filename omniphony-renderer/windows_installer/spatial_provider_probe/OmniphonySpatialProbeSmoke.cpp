@@ -41,6 +41,20 @@ constexpr AudioObjectType kExpectedStaticMask = static_cast<AudioObjectType>(
 
 using DllGetClassObjectFn = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, LPVOID*);
 
+class CoInit final {
+public:
+    CoInit() noexcept : hr_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {}
+    ~CoInit() {
+        if (SUCCEEDED(hr_)) {
+            CoUninitialize();
+        }
+    }
+    HRESULT Result() const noexcept { return hr_; }
+
+private:
+    HRESULT hr_ = E_FAIL;
+};
+
 int Fail(const wchar_t* stage, HRESULT hr) {
     std::wcerr << L"SPATIAL_PROVIDER_SMOKE_FAIL stage=" << stage
                << L" hr=0x" << std::hex << std::uppercase
@@ -67,6 +81,15 @@ int wmain(int argc, wchar_t** argv) {
         std::wcerr
             << L"usage: OmniphonySpatialProbeSmoke <OmniphonySpatialProbe.dll> [--expect-runtime]\n";
         return 2;
+    }
+
+    // This executable manually loads the in-process provider and invokes its
+    // class factory, bypassing normal COM activation. The caller thread must
+    // therefore establish the COM apartment that Windows would ordinarily
+    // establish before invoking an in-process COM server.
+    CoInit co;
+    if (FAILED(co.Result()) && co.Result() != RPC_E_CHANGED_MODE) {
+        return Fail(L"CoInitializeEx", co.Result());
     }
 
     HMODULE module = LoadLibraryW(argv[1]);
@@ -286,6 +309,7 @@ int wmain(int argc, wchar_t** argv) {
     spatial->Release();
     FreeLibrary(module);
 
+    std::wcout << L"SPATIAL_PROVIDER_SMOKE_COM_APARTMENT_OK 1\n";
     std::wcout << L"SPATIAL_PROVIDER_COM_OK 1\n";
     std::wcout << L"SPATIAL_PROVIDER_INTERFACE ISpatialAudioClient\n";
     std::wcout << L"SPATIAL_PROVIDER_STATIC_8_1_4_4_OK 1\n";
