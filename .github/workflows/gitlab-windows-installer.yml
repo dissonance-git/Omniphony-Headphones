@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  GITLAB_REF: a62ec743857e75dd3925d4d7b808528f3838ebde
+  GITLAB_REF: 082f6ced1d7b9db46eedb396c83e477f6df6070d
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
