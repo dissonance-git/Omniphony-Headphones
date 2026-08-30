@@ -14,14 +14,14 @@ permissions:
   contents: read
 
 env:
-  GITLAB_REF: 5a7c74208687bdba21a6161941539687ff70da85
+  GITLAB_REF: c4b1eb2aa2a43fc4821969431c9a9b6d2c919c96
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
   build-installer:
-    name: Build Windows 11 x64 tray-only installer
+    name: Build Windows 11 x64 Omniphony installer
     runs-on: windows-2022
     timeout-minutes: 60
 
@@ -47,19 +47,6 @@ jobs:
           Write-Host "Omniphony for Windows source=$(git rev-parse HEAD)"
           git status --short
 
-      - name: Parse installed tray with Windows PowerShell 5.1
-        shell: powershell
-        run: |
-          $path = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\endpoint_apo\OmniphonyTray.ps1"
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -ne 0) {
-            $errors | ForEach-Object { Write-Host $_.Message }
-            throw "OmniphonyTray.ps1 has Windows PowerShell 5.1 parse errors"
-          }
-          Write-Host "OMNIPHONY_TRAY_PS51_PARSE_OK 1"
-
       - name: Install pinned Rust toolchain
         shell: pwsh
         run: |
@@ -68,6 +55,29 @@ jobs:
           rustup override set $env:RUST_TOOLCHAIN
           rustc --version --verbose
           cargo --version
+
+      - name: Build Omniphony app
+        shell: pwsh
+        run: |
+          $manifest = "$env:GITHUB_WORKSPACE\omniphony\omniphony-app\src-tauri\Cargo.toml"
+          $target = Join-Path $env:RUNNER_TEMP "omniphony-app-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $env:CARGO_TARGET_DIR = $target
+
+          cargo +$env:RUST_TOOLCHAIN fmt --manifest-path $manifest -- --check
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app rustfmt check failed: $LASTEXITCODE" }
+
+          cargo +$env:RUST_TOOLCHAIN test --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app tests failed: $LASTEXITCODE" }
+
+          cargo +$env:RUST_TOOLCHAIN build --release --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app release build failed: $LASTEXITCODE" }
+
+          $app = Join-Path $target 'release\omniphony-app.exe'
+          if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
+            throw "Omniphony app executable was not produced: $app"
+          }
+          "OMNIPHONY_APP_EXE=$app" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "OMNIPHONY_APP_BUILD_OK file=$app"
 
       - name: Test full Current renderer contracts
         shell: pwsh
@@ -295,13 +305,14 @@ jobs:
             }
           }
 
-      - name: Assemble tray-only installer payload
+      - name: Assemble Omniphony installer payload
         shell: pwsh
         run: |
           $payload = "$env:GITHUB_WORKSPACE\payload"
           $runtime = Join-Path $payload 'runtime'
           $support = Join-Path $payload 'support'
-          New-Item -ItemType Directory -Force $runtime, $support | Out-Null
+          $app = Join-Path $payload 'app'
+          New-Item -ItemType Directory -Force $runtime, $support, $app | Out-Null
 
           $release = "$env:GITHUB_WORKSPACE\build\apo\Release"
           $renderer = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
@@ -341,6 +352,11 @@ jobs:
           Copy-Item "$release\OmniphonyRealtimeSmoke.exe" $runtime -Force
           Copy-Item "$release\OmniphonyMixProbe.exe" $runtime -Force
           Copy-Item $endpointCtl $runtime -Force
+
+          if (-not $env:OMNIPHONY_APP_EXE -or -not (Test-Path -LiteralPath $env:OMNIPHONY_APP_EXE -PathType Leaf)) {
+            throw "Omniphony app build output is missing: $env:OMNIPHONY_APP_EXE"
+          }
+          Copy-Item $env:OMNIPHONY_APP_EXE (Join-Path $app 'Omniphony.exe') -Force
 
           Copy-Item "$renderer\windows_installer\endpoint_apo\Install-OmniphonyAPO.ps1" $support -Force
           Copy-Item "$renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyAPO.ps1" $support -Force
@@ -388,10 +404,10 @@ jobs:
           Copy-Item "$env:GITHUB_WORKSPACE\omniphony\LICENSE" "$payload\LICENSE" -Force
 
           Write-Host 'Installed product target:'
+          Write-Host '  Omniphony\Omniphony.exe (product UI supervisor; never in the audio callback)'
           Write-Host '  Omniphony\APO\OmniphonyAPO.dll (rollback floor)'
           Write-Host '  Omniphony\APO\OmniphonyStreamAPO.dll (native-surround SFX candidate)'
           Write-Host '  Omniphony\APO\omniphony_realtime.dll'
-          Write-Host '  Omniphony\support\OmniphonyTray.ps1'
           Write-Host '  Omniphony\support\OmniphonySpatialProbe.exe (read-only capability probe)'
           Write-Host '  Omniphony\support\OmniphonySpatialProviderProbe.exe (read-only provider/COM probe)'
           Write-Host '  Omniphony\support\OmniphonySpatialProbe.dll (opt-in static + dynamic Spatial Sound provider)'
@@ -405,7 +421,7 @@ jobs:
           Write-Host '  Omniphony\support\run-spatial-provider-selection-cleanup.ps1 (post-Off cleanup and exact baseline restoration)'
           Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (audio-service refresh used by explicit provider selection)'
           Write-Host '  Omniphony\support\spatial-provider-dev\ (inert staged/preflight/activation toolkit; never auto-run)'
-          Write-Host '  no taskbar window; no background host process'
+          Write-Host '  Omniphony.exe owns the visible window and minimal tray; DSP remains headless in the APO/runtime'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
 
       - name: Install Inno Setup
