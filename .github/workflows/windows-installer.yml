@@ -29,7 +29,7 @@ env:
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  GITLAB_REF: b703ccd6344fdb4c0f8586efae53d85ee07825b5
+  GITLAB_REF: f0e3f7a2225a1793a84ae947dbe8a3e82b864db3
 
 jobs:
   build-installer:
