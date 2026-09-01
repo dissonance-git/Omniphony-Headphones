@@ -1,0 +1,179 @@
+name: Omniphony virtual spatial compiler
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/windows-virtual-endpoint.yml'
+      - 'omniphony-renderer/windows_installer/virtual_endpoint/**'
+      - 'omniphony-renderer/windows_host/**'
+      - 'omniphony-renderer/realtime_ffi/**'
+
+concurrency:
+  group: omniphony-virtual-endpoint
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: 1.88.0
+  UPSTREAM_REF: bb34fba15faf569a6ae9bdea360bc1cf4821354e
+  GITLAB_REF: 191ec8571ae8530f1d51936599f156e88f3572cb
+
+jobs:
+  build-windows11-x64:
+    name: Build Windows 11 x64 virtual endpoint
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Clone exact GitLab Omniphony source
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none https://gitlab.com/dissonance-git/Omniphony-Headphones.git "$env:GITHUB_WORKSPACE\omniphony"
+          if ($LASTEXITCODE -ne 0) { throw "GitLab clone failed: $LASTEXITCODE" }
+          Set-Location "$env:GITHUB_WORKSPACE\omniphony"
+          git checkout --detach $env:GITLAB_REF
+          if ($LASTEXITCODE -ne 0) { throw "GitLab checkout failed: $LASTEXITCODE" }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:GITLAB_REF) { throw "GitLab exact-source mismatch: expected=$env:GITLAB_REF actual=$actual" }
+          Write-Host "GITLAB_EXACT_SOURCE_OK $actual"
+
+      - name: Clone pinned virtual-audio bootstrap
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none https://github.com/VirtualDrivers/Virtual-Audio-Driver.git "$env:GITHUB_WORKSPACE\endpoint-upstream"
+          if ($LASTEXITCODE -ne 0) { throw "Virtual-audio upstream clone failed: $LASTEXITCODE" }
+          Set-Location "$env:GITHUB_WORKSPACE\endpoint-upstream"
+          git checkout --detach $env:UPSTREAM_REF
+          if ($LASTEXITCODE -ne 0) { throw "Pinned upstream checkout failed: $LASTEXITCODE" }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:UPSTREAM_REF) { throw "Pinned upstream mismatch: $actual" }
+          Write-Host "VIRTUAL_ENDPOINT_UPSTREAM_OK $actual"
+
+      - name: Prepare Omniphony 7.1.4 endpoint source
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\virtual_endpoint\prepare-virtual-endpoint.ps1" -SourceRoot "$env:GITHUB_WORKSPACE\endpoint-upstream"
+
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: |
+          choco install windowsdriverkit11 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "WDK installation failed: $LASTEXITCODE" }
+
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "Rust toolchain install failed: $LASTEXITCODE" }
+
+      - name: Test and build virtual compiler bridge
+        shell: pwsh
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
+          cargo +$env:RUST_TOOLCHAIN test -p realtime_ffi host_wrapper_accepts_windows_seven_one_four
+          if ($LASTEXITCODE -ne 0) { throw "Native-bed host wrapper test failed: $LASTEXITCODE" }
+          cargo +$env:RUST_TOOLCHAIN build --release -p windows_host --bin omniphony_virtual_bridge
+          if ($LASTEXITCODE -ne 0) { throw "Virtual bridge build failed: $LASTEXITCODE" }
+          $bridge = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\target\release\omniphony_virtual_bridge.exe"
+          if (-not (Test-Path $bridge)) { throw "Virtual bridge was not produced: $bridge" }
+          & $bridge --contract
+          if ($LASTEXITCODE -ne 0) { throw "Virtual bridge contract probe failed: $LASTEXITCODE" }
+
+      - name: Build virtual endpoint driver
+        shell: pwsh
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\endpoint-upstream"
+          msbuild 'VirtualAudioDriver.sln' /m /p:Configuration=Release /p:Platform=x64 /p:RunCodeAnalysis=false /p:InfVerif_Enable=false /p:UseInfVerifierEx=false
+          if ($LASTEXITCODE -ne 0) { throw "Virtual endpoint build failed: $LASTEXITCODE" }
+
+      - name: Validate INF with standalone WDK InfVerif
+        shell: pwsh
+        run: |
+          $package = "$env:GITHUB_WORKSPACE\endpoint-upstream\x64\Release\package"
+          $inf = Get-ChildItem $package -Filter '*.inf' -File | Select-Object -First 1
+          if (-not $inf) { throw 'Virtual endpoint build produced no INF' }
+          $kitsRoot = 'C:\Program Files (x86)\Windows Kits\10'
+          $infverif = Get-ChildItem "$kitsRoot\Tools" -Recurse -Filter 'InfVerif.exe' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\InfVerif\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $infverif) {
+            $infverif = Get-ChildItem "$kitsRoot\bin" -Recurse -Filter 'InfVerif.exe' -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\InfVerif\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+          }
+          if (-not $infverif) { throw 'Standalone x64 InfVerif.exe not found' }
+          & $infverif.FullName /w /v $inf.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Standalone InfVerif /w failed: $LASTEXITCODE" }
+
+      - name: Verify endpoint package contract
+        shell: pwsh
+        run: |
+          $package = "$env:GITHUB_WORKSPACE\endpoint-upstream\x64\Release\package"
+          $inf = Get-ChildItem $package -Filter '*.inf' -File | Select-Object -First 1
+          $sys = Get-ChildItem $package -Filter '*.sys' -File | Select-Object -First 1
+          $cat = Get-ChildItem $package -Filter '*.cat' -File | Select-Object -First 1
+          if (-not $inf -or -not $sys -or -not $cat) { throw 'Driver package is missing INF/CAT/SYS' }
+          $text = Get-Content -Raw $inf.FullName
+          if ($text -notmatch 'ROOT\\OmniphonySpatialCompiler') { throw 'Built INF has wrong hardware ID' }
+          if ($text -notmatch 'Omniphony Spatial Compiler') { throw 'Built INF has wrong friendly name' }
+          if ($text -match '(?m)^AddInterface=.*WaveMicArray1') { throw 'Built INF still exposes a microphone' }
+          Write-Host 'VIRTUAL_ENDPOINT_PACKAGE_CONTRACT_OK 1'
+
+      - name: Build endpoint control helper
+        shell: pwsh
+        run: |
+          $project = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\OmniphonyEndpointCtl.vcxproj"
+          msbuild $project /m /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "Endpoint helper build failed: $LASTEXITCODE" }
+
+      - name: Assemble development bundle
+        shell: pwsh
+        run: |
+          $dist = "$env:GITHUB_WORKSPACE\dist\OmniphonyVirtualEndpoint"
+          $package = "$env:GITHUB_WORKSPACE\endpoint-upstream\x64\Release\package"
+          $release = "$env:GITHUB_WORKSPACE\endpoint-upstream\x64\Release"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item "$package\*" $dist -Recurse -Force
+          $cert = Join-Path $release 'package.cer'
+          if (Test-Path $cert) { Copy-Item $cert "$dist\OmniphonyVirtualEndpoint-Development.cer" -Force }
+          Copy-Item "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\target\release\omniphony_virtual_bridge.exe" $dist -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\build\endpoint_ctl\OmniphonyEndpointCtl.exe" $dist -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\virtual_endpoint\virtual-endpoint.ps1" $dist -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\virtual_endpoint\README.md" $dist -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\endpoint-upstream\LICENSE" "$dist\UPSTREAM-LICENSE.txt" -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\endpoint-upstream\THIRD_PARTY_NOTICES.md" "$dist\THIRD_PARTY_NOTICES.md" -Force
+          Push-Location $dist
+          .\virtual-endpoint.ps1 -Action Validate
+          if ($LASTEXITCODE -ne 0) { throw "Virtual endpoint installer validation failed: $LASTEXITCODE" }
+          Pop-Location
+          @"
+          Omniphony Spatial Compiler development build
+          Windows endpoint: 7.1.4 / 12ch / float32 / 48 kHz
+          Channel mask: 0x0002D63F
+          Hardware ID: ROOT\OmniphonySpatialCompiler
+          User-mode bridge output: RAW stereo / float32 / 48 kHz
+          Upstream revision: $env:UPSTREAM_REF
+          This package is development/test signed, not production Microsoft-signed.
+          It does not change Secure Boot, BitLocker, BCD, or test-signing policy.
+          "@ | Set-Content -Encoding utf8 "$dist\BUILD-METADATA.txt"
+          Compress-Archive -Path "$dist\*" -DestinationPath "$env:GITHUB_WORKSPACE\dist\OmniphonyVirtualEndpoint.zip" -Force
+          $hash = (Get-FileHash -Algorithm SHA256 "$env:GITHUB_WORKSPACE\dist\OmniphonyVirtualEndpoint.zip").Hash.ToLowerInvariant()
+          Write-Host "OMNIPHONY_VIRTUAL_ENDPOINT_ZIP_SHA256 $hash"
+
+      - name: Upload virtual endpoint development bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: omniphony-virtual-endpoint
+          path: dist/OmniphonyVirtualEndpoint.zip
+          if-no-files-found: error
+          retention-days: 14
