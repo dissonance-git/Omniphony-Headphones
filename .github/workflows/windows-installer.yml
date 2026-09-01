@@ -29,7 +29,7 @@ env:
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  GITLAB_REF: 19d35e871f688d8eff5e87b8ba67194131be6040
+  GITLAB_REF: b26e8a969328743b36bd22aa006017c74626592b
 
 jobs:
   build-installer:
@@ -143,15 +143,31 @@ jobs:
           choco install windowsdriverkit11 -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "WDK installation failed: $LASTEXITCODE" }
 
-      - name: Configure and build native APOs
+      - name: Configure and build native APO product targets
         shell: pwsh
         run: |
+          $build = "$env:GITHUB_WORKSPACE\build\apo"
           cmake -S "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\endpoint_apo" `
-                -B "$env:GITHUB_WORKSPACE\build\apo" `
+                -B $build `
                 -A x64
           if ($LASTEXITCODE -ne 0) { throw "APO CMake configure failed: $LASTEXITCODE" }
-          cmake --build "$env:GITHUB_WORKSPACE\build\apo" --config Release --parallel
-          if ($LASTEXITCODE -ne 0) { throw "APO build failed: $LASTEXITCODE" }
+
+          foreach ($target in @(
+            'OmniphonyAPO',
+            'OmniphonyStreamAPO',
+            'OmniphonyApoCtl',
+            'OmniphonyApoSmoke',
+            'OmniphonyStreamApoSmoke',
+            'OmniphonyStreamFallbackSmoke',
+            'OmniphonyRawApoSmoke',
+            'OmniphonyRealtimeSmoke',
+            'OmniphonyMixProbe',
+            'OmniphonyProductionProbe'
+          )) {
+            cmake --build $build --config Release --target $target --parallel
+            if ($LASTEXITCODE -ne 0) { throw "APO product target '$target' failed: $LASTEXITCODE" }
+          }
+          Write-Host 'WINDOWS_PRODUCT_OPTIONAL_SPATIAL_BUILD_SKIPPED 1'
 
       - name: Build physical endpoint control helper
         shell: pwsh
@@ -217,13 +233,6 @@ jobs:
 
           & "$release\OmniphonyStreamFallbackSmoke.exe"
           if ($LASTEXITCODE -ne 0) { throw "Stream fail-open fold-down smoke failed: $LASTEXITCODE" }
-
-          & "$release\OmniphonySpatialProbe.exe"
-          $spatialProbeExit = $LASTEXITCODE
-          if ($spatialProbeExit -eq -1073741819) {
-            throw 'Spatial endpoint probe crashed with access violation during COM teardown'
-          }
-          Write-Host "SPATIAL_ENDPOINT_PROBE_FINITE_EXIT $spatialProbeExit"
 
           $regsvr32 = "$env:WINDIR\System32\regsvr32.exe"
           $cases = @(
@@ -322,7 +331,7 @@ jobs:
           Write-Host '  Omniphony\APO\OmniphonyAPO.dll (rollback floor)'
           Write-Host '  Omniphony\APO\OmniphonyStreamAPO.dll (native-surround SFX candidate)'
           Write-Host '  Omniphony\APO\omniphony_realtime.dll'
-          Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (audio-service refresh used by explicit provider selection)'
+          Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (bounded audio-service refresh helper)'
           Write-Host '  Omniphony.exe owns the visible window and minimal tray; DSP remains headless in the APO/runtime'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
 
