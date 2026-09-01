@@ -29,7 +29,7 @@ env:
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  GITLAB_REF: e32b271e5991524c9ab633fdba3c76ba20e52dbe
+  GITLAB_REF: 19d35e871f688d8eff5e87b8ba67194131be6040
 
 jobs:
   build-installer:
@@ -279,8 +279,6 @@ jobs:
           Copy-Item "$renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyAPO.ps1" $support -Force
           Copy-Item "$release\OmniphonyApoCtl.exe" $support -Force
           Copy-Item "$release\OmniphonyMixProbe.exe" $support -Force
-          Copy-Item "$release\OmniphonySpatialProbe.exe" $support -Force
-          Copy-Item "$release\OmniphonySpatialProviderProbe.exe" $support -Force
 
           # Product releases must not carry the retired PowerShell tray or let
           # the Tauri app consume its stop marker. The installer owns migration.
@@ -298,6 +296,8 @@ jobs:
           # Native Spatial Sound provider experiments are built and distributed only
           # through their dedicated research workflows.
           $forbiddenSpatialProductArtifacts = @(
+            'OmniphonySpatialProbe.exe',
+            'OmniphonySpatialProviderProbe.exe',
             'OmniphonySpatialProbe.dll',
             'OmniphonySpatialProbeCtl.exe',
             'Enable-OmniphonySpatialProvider.ps1',
@@ -322,8 +322,6 @@ jobs:
           Write-Host '  Omniphony\APO\OmniphonyAPO.dll (rollback floor)'
           Write-Host '  Omniphony\APO\OmniphonyStreamAPO.dll (native-surround SFX candidate)'
           Write-Host '  Omniphony\APO\omniphony_realtime.dll'
-          Write-Host '  Omniphony\support\OmniphonySpatialProbe.exe (read-only capability probe)'
-          Write-Host '  Omniphony\support\OmniphonySpatialProviderProbe.exe (read-only provider/COM probe)'
           Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (audio-service refresh used by explicit provider selection)'
           Write-Host '  Omniphony.exe owns the visible window and minimal tray; DSP remains headless in the APO/runtime'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
