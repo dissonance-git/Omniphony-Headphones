@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/windows-installer.yml'
+      - 'omniphony-app/**'
       - 'layouts/system-h-derived-22.0-upper60-grid10.yaml'
       - 'omniphony-renderer/.cargo/**'
       - 'omniphony-renderer/windows_installer/**'
@@ -28,24 +29,26 @@ env:
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  GITLAB_REF: e32b271e5991524c9ab633fdba3c76ba20e52dbe
 
 jobs:
   build-installer:
-    name: Build Windows 11 x64 tray-only installer
+    name: Build Windows 11 x64 Omniphony installer
     runs-on: windows-2022
     timeout-minutes: 60
 
     steps:
-      - name: Checkout Omniphony fork
-        uses: actions/checkout@v4
-        with:
-          path: omniphony
-
-      - name: Record source revision
+      - name: Clone exact GitLab Omniphony source
         shell: pwsh
         run: |
+          git clone --filter=blob:none https://gitlab.com/dissonance-git/Omniphony-Headphones.git "$env:GITHUB_WORKSPACE\omniphony"
+          if ($LASTEXITCODE -ne 0) { throw "GitLab clone failed: $LASTEXITCODE" }
           Set-Location "$env:GITHUB_WORKSPACE\omniphony"
-          Write-Host "Omniphony for Windows source=$(git rev-parse HEAD)"
+          git checkout --detach $env:GITLAB_REF
+          if ($LASTEXITCODE -ne 0) { throw "GitLab checkout failed: $LASTEXITCODE" }
+          $actual = git rev-parse HEAD
+          if ($actual -ne $env:GITLAB_REF) { throw "GitLab exact-source mismatch: expected=$env:GITLAB_REF actual=$actual" }
+          Write-Host "GITLAB_EXACT_SOURCE_OK $actual"
           git status --short
 
       - name: Install pinned Rust toolchain
@@ -56,6 +59,29 @@ jobs:
           rustup override set $env:RUST_TOOLCHAIN
           rustc --version --verbose
           cargo --version
+
+      - name: Build Omniphony app
+        shell: pwsh
+        run: |
+          $manifest = "$env:GITHUB_WORKSPACE\omniphony\omniphony-app\src-tauri\Cargo.toml"
+          $target = Join-Path $env:RUNNER_TEMP "omniphony-app-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $env:CARGO_TARGET_DIR = $target
+
+          cargo +$env:RUST_TOOLCHAIN fmt --manifest-path $manifest -- --check
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app rustfmt check failed: $LASTEXITCODE" }
+
+          cargo +$env:RUST_TOOLCHAIN test --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app tests failed: $LASTEXITCODE" }
+
+          cargo +$env:RUST_TOOLCHAIN build --release --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app release build failed: $LASTEXITCODE" }
+
+          $app = Join-Path $target 'release\omniphony-app.exe'
+          if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
+            throw "Omniphony app executable was not produced: $app"
+          }
+          "OMNIPHONY_APP_EXE=$app" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "OMNIPHONY_APP_BUILD_OK file=$app"
 
       - name: Test full Current renderer contracts
         shell: pwsh
@@ -90,7 +116,7 @@ jobs:
             $target = Join-Path $env:RUNNER_TEMP "omniphony-release-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$attempt"
             $env:CARGO_TARGET_DIR = $target
             Write-Host "REALTIME_RELEASE_BUILD attempt=$attempt target=$target"
-            cargo build --release -p realtime_ffi
+            cargo build --release -p realtime_ffi --lib
             $cargoExit = $LASTEXITCODE
             $realtime = Join-Path $target 'release\omniphony_realtime.dll'
             if ($cargoExit -eq 0 -and (Test-Path $realtime)) {
@@ -126,82 +152,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "APO CMake configure failed: $LASTEXITCODE" }
           cmake --build "$env:GITHUB_WORKSPACE\build\apo" --config Release --parallel
           if ($LASTEXITCODE -ne 0) { throw "APO build failed: $LASTEXITCODE" }
-
-      - name: Build spatial provider and diagnostics
-        shell: pwsh
-        run: |
-          $source = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\spatial_provider_probe"
-          $build = "$env:GITHUB_WORKSPACE\build\spatial-provider"
-          cmake -S $source -B $build -A x64
-          if ($LASTEXITCODE -ne 0) { throw "Spatial provider CMake configure failed: $LASTEXITCODE" }
-
-          foreach ($target in @(
-            'OmniphonySpatialProbe',
-            'OmniphonySpatialProbeCtl',
-            'OmniphonySpatialProbeSmoke',
-            'OmniphonySpatialStaticStreamSmoke',
-            'OmniphonySpatialObjectStreamSmoke',
-            'OmniphonySpatialObjectRealtimeSmoke',
-            'OmniphonySpatialRealtimeBridgeSmoke',
-            'OmniphonySpatialStereoQueueSmoke',
-            'OmniphonySpatialRawOutputProbe',
-            'OmniphonySpatialRawOutputSinkProbe',
-            'OmniphonySpatialStaticObjectClientProbe',
-            'OmniphonySpatialClosedGateEgressProbe'
-          )) {
-            cmake --build $build --config Release --target $target --parallel
-            if ($LASTEXITCODE -ne 0) { throw "Spatial provider target '$target' failed: $LASTEXITCODE" }
-          }
-
-          $release = Join-Path $build 'Release'
-          $provider = Join-Path $release 'OmniphonySpatialProbe.dll'
-          $control = Join-Path $release 'OmniphonySpatialProbeCtl.exe'
-          $smoke = Join-Path $release 'OmniphonySpatialProbeSmoke.exe'
-          $staticStreamSmoke = Join-Path $release 'OmniphonySpatialStaticStreamSmoke.exe'
-          $objectStreamSmoke = Join-Path $release 'OmniphonySpatialObjectStreamSmoke.exe'
-          $objectRealtimeSmoke = Join-Path $release 'OmniphonySpatialObjectRealtimeSmoke.exe'
-          $composedRealtimeSmoke = Join-Path $release 'OmniphonySpatialRealtimeBridgeSmoke.exe'
-          $realStaticClient = Join-Path $release 'OmniphonySpatialStaticObjectClientProbe.exe'
-          $closedGate = Join-Path $release 'OmniphonySpatialClosedGateEgressProbe.exe'
-          foreach ($file in @($provider, $control, $smoke, $staticStreamSmoke, $objectStreamSmoke, $objectRealtimeSmoke, $composedRealtimeSmoke, $realStaticClient, $closedGate)) {
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-              throw "Spatial provider build output is missing: $file"
-            }
-          }
-
-          & $staticStreamSmoke
-          if ($LASTEXITCODE -ne 0) { throw "Spatial static object COM smoke failed: $LASTEXITCODE" }
-
-          & $objectStreamSmoke
-          if ($LASTEXITCODE -ne 0) { throw "Spatial dynamic object COM smoke failed: $LASTEXITCODE" }
-
-          & $objectRealtimeSmoke $env:OMNIPHONY_REALTIME_DLL
-          if ($LASTEXITCODE -ne 0) { throw "Spatial object realtime ABI 0.7 smoke failed: $LASTEXITCODE" }
-
-          $composedOutput = & $composedRealtimeSmoke $env:OMNIPHONY_REALTIME_DLL
-          if ($LASTEXITCODE -ne 0) { throw "Spatial composed static/dynamic realtime smoke failed: $LASTEXITCODE" }
-          $composedOutput | Write-Host
-          $composedText = $composedOutput -join "`n"
-          if ($composedText -notmatch 'SPATIAL_COM_TO_CURRENT_OK\s+1') { throw 'static COM-to-Current marker missing' }
-          if ($composedText -notmatch 'SPATIAL_DYNAMIC_COM_TO_CURRENT_OK\s+1') { throw 'dynamic COM-to-Current marker missing' }
-          if ($composedText -notmatch 'SPATIAL_DYNAMIC_COM_TO_STEREO_QUEUE_OK\s+1') { throw 'dynamic COM-to-queue marker missing' }
-
-          # CI deliberately has no HKLM\SOFTWARE\Omniphony\SpatialProvider gate.
-          # The provider must therefore expose capabilities but reject public
-          # stream activation while still proving its complete DLL links/loads.
-          & $smoke $provider
-          if ($LASTEXITCODE -ne 0) { throw "Spatial provider fail-closed COM smoke failed: $LASTEXITCODE" }
-
-          $realStaticContract = & $realStaticClient --contract
-          if ($LASTEXITCODE -ne 0) { throw "Real static-object client contract failed: $LASTEXITCODE" }
-          $realStaticContract | Write-Host
-          if (($realStaticContract -join "`n") -notmatch 'SPATIAL_REAL_STATIC_CLIENT_CONTRACT_OK\s+1') {
-            throw 'Real static-object client contract marker missing'
-          }
-
-          Write-Host "SPATIAL_PROVIDER_BUILD_OK dll=$provider static_objects=17 dynamic_objects=16"
-          Write-Host "REAL_STATIC_OBJECT_CLIENT_BUILD_OK file=$realStaticClient"
-          Write-Host "CLOSED_GATE_EGRESS_PROBE_BUILD_OK file=$closedGate"
 
       - name: Build physical endpoint control helper
         shell: pwsh
@@ -294,41 +244,18 @@ jobs:
             }
           }
 
-      - name: Assemble tray-only installer payload
+      - name: Assemble Omniphony installer payload
         shell: pwsh
         run: |
           $payload = "$env:GITHUB_WORKSPACE\payload"
           $runtime = Join-Path $payload 'runtime'
           $support = Join-Path $payload 'support'
-          New-Item -ItemType Directory -Force $runtime, $support | Out-Null
+          $app = Join-Path $payload 'app'
+          New-Item -ItemType Directory -Force $runtime, $support, $app | Out-Null
 
           $release = "$env:GITHUB_WORKSPACE\build\apo\Release"
           $renderer = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
           $endpointCtl = "$renderer\windows_installer\build\endpoint_ctl\OmniphonyEndpointCtl.exe"
-          $spatialRelease = "$env:GITHUB_WORKSPACE\build\spatial-provider\Release"
-          $providerDll = Join-Path $spatialRelease 'OmniphonySpatialProbe.dll'
-          $providerCtl = Join-Path $spatialRelease 'OmniphonySpatialProbeCtl.exe'
-          $providerSmoke = Join-Path $spatialRelease 'OmniphonySpatialProbeSmoke.exe'
-          $staticStreamSmoke = Join-Path $spatialRelease 'OmniphonySpatialStaticStreamSmoke.exe'
-          $objectStreamSmoke = Join-Path $spatialRelease 'OmniphonySpatialObjectStreamSmoke.exe'
-          $objectRealtimeSmoke = Join-Path $spatialRelease 'OmniphonySpatialObjectRealtimeSmoke.exe'
-          $composedRealtimeSmoke = Join-Path $spatialRelease 'OmniphonySpatialRealtimeBridgeSmoke.exe'
-          $queueSmoke = Join-Path $spatialRelease 'OmniphonySpatialStereoQueueSmoke.exe'
-          $rawOutputProbe = Join-Path $spatialRelease 'OmniphonySpatialRawOutputProbe.exe'
-          $rawOutputSinkProbe = Join-Path $spatialRelease 'OmniphonySpatialRawOutputSinkProbe.exe'
-          $realStaticClient = Join-Path $spatialRelease 'OmniphonySpatialStaticObjectClientProbe.exe'
-          $closedGateProbe = Join-Path $spatialRelease 'OmniphonySpatialClosedGateEgressProbe.exe'
-          $spatialSource = "$renderer\windows_installer\spatial_provider_probe"
-          $spatialToolkit = Join-Path $support 'spatial-provider-dev'
-          New-Item -ItemType Directory -Force $spatialToolkit | Out-Null
-          $closedGateRunner = Join-Path $spatialSource 'Run-ClosedGateEgress.ps1'
-          $activationCheckRunner = Join-Path $spatialSource 'run-spatial-provider-activation-check.ps1'
-          $selectionCheckRunner = Join-Path $spatialSource 'run-spatial-provider-selection-check.ps1'
-          $selectionCleanupRunner = Join-Path $spatialSource 'run-spatial-provider-selection-cleanup.ps1'
-          $realStaticRunner = Join-Path $spatialSource 'run-real-static-object-check.ps1'
-          $restartAudio = Join-Path $renderer 'windows_installer\endpoint_apo\Restart-OmniphonyAudio.ps1'
-          $providerEnable = Join-Path $spatialSource 'Enable-OmniphonySpatialProvider.ps1'
-          $providerDisable = Join-Path $spatialSource 'Disable-OmniphonySpatialProvider.ps1'
 
           # Both APO binaries ship during native-surround bring-up. The endpoint
           # APO is the proven rollback floor; the stream APO is activated only by
@@ -343,74 +270,62 @@ jobs:
           Copy-Item "$release\OmniphonyMixProbe.exe" $runtime -Force
           Copy-Item $endpointCtl $runtime -Force
 
+          if (-not $env:OMNIPHONY_APP_EXE -or -not (Test-Path -LiteralPath $env:OMNIPHONY_APP_EXE -PathType Leaf)) {
+            throw "Omniphony app build output is missing: $env:OMNIPHONY_APP_EXE"
+          }
+          Copy-Item $env:OMNIPHONY_APP_EXE (Join-Path $app 'Omniphony.exe') -Force
+
           Copy-Item "$renderer\windows_installer\endpoint_apo\Install-OmniphonyAPO.ps1" $support -Force
           Copy-Item "$renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyAPO.ps1" $support -Force
           Copy-Item "$release\OmniphonyApoCtl.exe" $support -Force
           Copy-Item "$release\OmniphonyMixProbe.exe" $support -Force
           Copy-Item "$release\OmniphonySpatialProbe.exe" $support -Force
           Copy-Item "$release\OmniphonySpatialProviderProbe.exe" $support -Force
-          Copy-Item $providerDll $support -Force
-          Copy-Item $providerCtl $support -Force
-          Copy-Item $providerEnable $support -Force
-          Copy-Item $providerDisable $support -Force
-          Copy-Item $closedGateProbe $support -Force
-          Copy-Item $closedGateRunner $support -Force
-          Copy-Item $activationCheckRunner $support -Force
-          Copy-Item $selectionCheckRunner $support -Force
-          Copy-Item $selectionCleanupRunner $support -Force
-          Copy-Item $realStaticClient $support -Force
-          Copy-Item $realStaticRunner $support -Force
-          Copy-Item $restartAudio $support -Force
 
-          # Explicit development toolkit. Setup never executes these scripts.
-          # The directory is a self-contained PackageRoot for immutable staging.
-          foreach ($file in @(
-            $providerDll,
-            $providerCtl,
-            $providerSmoke,
-            $staticStreamSmoke,
-            $objectStreamSmoke,
-            $objectRealtimeSmoke,
-            $composedRealtimeSmoke,
-            $queueSmoke,
-            $rawOutputProbe,
-            $rawOutputSinkProbe,
-            $env:OMNIPHONY_REALTIME_DLL
-          )) {
-            Copy-Item $file $spatialToolkit -Force
+          # Product releases must not carry the retired PowerShell tray or let
+          # the Tauri app consume its stop marker. The installer owns migration.
+          $legacyTray = Join-Path $support 'OmniphonyTray.ps1'
+          if (Test-Path -LiteralPath $legacyTray) {
+            throw "Legacy PowerShell tray leaked into the product payload: $legacyTray"
           }
-          foreach ($name in @(
-            'CaptureSpatialProviderState.ps1',
-            'Stage-OmniphonySpatialProvider.ps1',
-            'Preflight-OmniphonySpatialProvider.ps1',
-            'Test-OmniphonySpatialProviderActivation.ps1'
-          )) {
-            Copy-Item (Join-Path $spatialSource $name) $spatialToolkit -Force
+          $appRust = Get-ChildItem "$env:GITHUB_WORKSPACE\omniphony\omniphony-app\src-tauri\src" -Filter '*.rs' -File
+          $legacyAppRefs = $appRust | Select-String -Pattern 'clear_legacy_tray_stop|OmniphonyTray\.ps1'
+          if ($legacyAppRefs) {
+            throw "Omniphony app still references the retired tray migration: $($legacyAppRefs.Line -join ' | ')"
           }
-          Copy-Item $endpointCtl $support -Force
+
+          # The rolling product installer must stay on the supported APO/realtime path.
+          # Native Spatial Sound provider experiments are built and distributed only
+          # through their dedicated research workflows.
+          $forbiddenSpatialProductArtifacts = @(
+            'OmniphonySpatialProbe.dll',
+            'OmniphonySpatialProbeCtl.exe',
+            'Enable-OmniphonySpatialProvider.ps1',
+            'Disable-OmniphonySpatialProvider.ps1',
+            'run-spatial-provider-activation-check.ps1',
+            'run-spatial-provider-selection-check.ps1',
+            'run-spatial-provider-selection-cleanup.ps1',
+            'spatial-provider-dev'
+          )
+          foreach ($name in $forbiddenSpatialProductArtifacts) {
+            $candidate = Join-Path $support $name
+            if (Test-Path -LiteralPath $candidate) {
+              throw "Experimental Spatial Sound provider artifact leaked into product payload: $candidate"
+            }
+          }
+          Write-Host 'WINDOWS_PRODUCT_SPATIAL_PROVIDER_TOOLKIT_ABSENT 1'
+
           Copy-Item "$env:GITHUB_WORKSPACE\omniphony\LICENSE" "$payload\LICENSE" -Force
 
           Write-Host 'Installed product target:'
+          Write-Host '  Omniphony\Omniphony.exe (product UI supervisor; never in the audio callback)'
           Write-Host '  Omniphony\APO\OmniphonyAPO.dll (rollback floor)'
           Write-Host '  Omniphony\APO\OmniphonyStreamAPO.dll (native-surround SFX candidate)'
           Write-Host '  Omniphony\APO\omniphony_realtime.dll'
-          Write-Host '  Omniphony\support\OmniphonyTray.ps1'
           Write-Host '  Omniphony\support\OmniphonySpatialProbe.exe (read-only capability probe)'
           Write-Host '  Omniphony\support\OmniphonySpatialProviderProbe.exe (read-only provider/COM probe)'
-          Write-Host '  Omniphony\support\OmniphonySpatialProbe.dll (opt-in static + dynamic Spatial Sound provider)'
-          Write-Host '  Omniphony\support\OmniphonySpatialProbeCtl.exe (provider registration control)'
-          Write-Host '  Omniphony\support\Enable-OmniphonySpatialProvider.ps1 (explicit provider gate)'
-          Write-Host '  Omniphony\support\Disable-OmniphonySpatialProvider.ps1 (provider rollback)'
-          Write-Host '  Omniphony\support\OmniphonySpatialClosedGateEgressProbe.exe (manual physical egress diagnostic)'
-          Write-Host '  Omniphony\support\Run-ClosedGateEgress.ps1 (installed closed-gate runner)'
-          Write-Host '  Omniphony\support\run-spatial-provider-activation-check.ps1 (register/activate/rollback check; never selects provider)'
-          Write-Host '  Omniphony\support\run-spatial-provider-selection-check.ps1 (first controlled Windows Spatial Sound selection)'
-          Write-Host '  Omniphony\support\run-spatial-provider-selection-cleanup.ps1 (post-Off cleanup and exact baseline restoration)'
-          Write-Host '  Omniphony\support\OmniphonySpatialStaticObjectClientProbe.exe (real endpoint ISpatialAudioClient static-object source)'
-          Write-Host '  Omniphony\support\run-real-static-object-check.ps1 (selected-provider TopFrontLeft physical source check)'
           Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (audio-service refresh used by explicit provider selection)'
-          Write-Host '  Omniphony\support\spatial-provider-dev\ (inert staged/preflight/activation toolkit; never auto-run)'
-          Write-Host '  no taskbar window; no background host process'
+          Write-Host '  Omniphony.exe owns the visible window and minimal tray; DSP remains headless in the APO/runtime'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
 
       - name: Install Inno Setup
@@ -454,7 +369,7 @@ jobs:
           $repo = $env:GITHUB_REPOSITORY
           $sha = $env:GITHUB_SHA
           $asset = 'dist/OmniphonySetup.exe'
-          $notes = "Rolling Omniphony for Windows tray-only installer.`n`nBuilt from $sha after the protected Current renderer, stereo APO, native-surround stream smoke, static/dynamic Spatial Sound object and ABI 0.7 reset smokes, and fail-closed provider COM checks. The Spatial Sound provider is shipped as an inert development toolkit and is not auto-selected by setup."
+          $notes = "Rolling Omniphony for Windows installer with the Omniphony desktop control app.`n`nBuilt from $sha after the protected Current renderer, app tests/build, realtime ABI/liveness validation, stereo APO, native-surround Stream SFX smoke, endpoint-format checks, and installer payload boundary validation. Experimental Windows Spatial Sound provider tooling is intentionally excluded from the product installer."
 
           gh release view windows-current --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
