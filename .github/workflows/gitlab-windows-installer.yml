@@ -47,6 +47,37 @@ jobs:
           Write-Host "Omniphony for Windows source=$(git rev-parse HEAD)"
           git status --short
 
+      - name: Parse spatial provider PowerShell controls
+        shell: pwsh
+        run: |
+          $spatial = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\spatial_provider_probe"
+          $endpoint = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\endpoint_apo"
+          $scripts = @(
+            (Join-Path $endpoint 'Restart-OmniphonyAudio.ps1'),
+            (Join-Path $spatial 'Enable-OmniphonySpatialProvider.ps1'),
+            (Join-Path $spatial 'Disable-OmniphonySpatialProvider.ps1'),
+            (Join-Path $spatial 'run-spatial-provider-activation-check.ps1'),
+            (Join-Path $spatial 'run-spatial-provider-selection-check.ps1'),
+            (Join-Path $spatial 'run-spatial-provider-selection-cleanup.ps1')
+          )
+          foreach ($script in $scripts) {
+            if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
+              throw "Provider control script missing: $script"
+            }
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $script,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error "$script : $($_.Message)" }
+              throw "PowerShell parser rejected provider control script: $script"
+            }
+          }
+          Write-Host "SPATIAL_PROVIDER_POWERSHELL_PARSE_OK count=$($scripts.Count)"
+
       - name: Install pinned Rust toolchain
         shell: pwsh
         run: |
