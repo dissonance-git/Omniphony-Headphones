@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  GITLAB_REF: ceb0a4e198a5d302cc456c2d3d86eb752f336fc1
+  GITLAB_REF: a9c601c28645a2eb28eab9b19bc905f81548aaf7
 
 jobs:
   build-companion:
