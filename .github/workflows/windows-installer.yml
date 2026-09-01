@@ -29,7 +29,7 @@ env:
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  GITLAB_REF: 24b7f20ded931d425e211f52f3b62673f7c3ee41
+  GITLAB_REF: d4431cece8cc9a26835274295b30de705acd372e
 
 jobs:
   build-installer:
@@ -288,6 +288,7 @@ jobs:
           Copy-Item "$renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyAPO.ps1" $support -Force
           Copy-Item "$release\OmniphonyApoCtl.exe" $support -Force
           Copy-Item "$release\OmniphonyMixProbe.exe" $support -Force
+          Copy-Item $endpointCtl $support -Force
 
           # Product releases must not carry the retired PowerShell tray or let
           # the Tauri app consume its stop marker. The installer owns migration.
@@ -331,6 +332,7 @@ jobs:
           Write-Host '  Omniphony\APO\OmniphonyAPO.dll (rollback floor)'
           Write-Host '  Omniphony\APO\OmniphonyStreamAPO.dll (native-surround SFX candidate)'
           Write-Host '  Omniphony\APO\omniphony_realtime.dll'
+          Write-Host '  Omniphony\support\OmniphonyEndpointCtl.exe (default-endpoint identity and installer control helper)'
           Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (bounded audio-service refresh helper)'
           Write-Host '  Omniphony.exe owns the visible window and minimal tray; DSP remains headless in the APO/runtime'
           Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
