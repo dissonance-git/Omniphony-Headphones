@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 env:
-  GITLAB_REF: d8ffad4c94c1488c4e7fa168691fab4cb22b3d8b
+  GITLAB_REF: c6b0ed30e2b781101f4f76f18063763aa4e7100c
   RUST_TOOLCHAIN: 1.88.0
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
