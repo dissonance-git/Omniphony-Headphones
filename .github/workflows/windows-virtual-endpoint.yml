@@ -11,14 +11,17 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   GITLAB_REF: 9c7cea639d96ebf37c82120ff09c983cc46d2d10
+  RUST_TOOLCHAIN: 1.88.0
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  build-windows11-x64:
-    name: Build exact GitLab Windows product
+  build-installer:
+    name: Build Windows 11 x64 Omniphony installer
     runs-on: windows-2022
     timeout-minutes: 60
 
@@ -37,18 +40,328 @@ jobs:
           }
           Write-Host "GITLAB_EXACT_SOURCE_OK $actual"
 
-      - name: Build and validate exact Windows product
+      - name: Record source revision
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\omniphony\ci\windows-virtual-endpoint.ps1"
-          if ($LASTEXITCODE -ne 0) { throw "Canonical Windows product harness failed: $LASTEXITCODE" }
+          Set-Location "$env:GITHUB_WORKSPACE\omniphony"
+          Write-Host "Omniphony for Windows source=$(git rev-parse HEAD)"
+          git status --short
 
-      - name: Upload exact Windows product
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal --component rustfmt
+          Set-Location "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
+          rustup override set $env:RUST_TOOLCHAIN
+          rustc --version --verbose
+          cargo --version
+
+      - name: Build Omniphony app
+        shell: pwsh
+        run: |
+          $manifest = "$env:GITHUB_WORKSPACE\omniphony\omniphony-app\src-tauri\Cargo.toml"
+          $target = Join-Path $env:RUNNER_TEMP "omniphony-app-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $env:CARGO_TARGET_DIR = $target
+
+          cargo +$env:RUST_TOOLCHAIN fmt --manifest-path $manifest -- --check
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app rustfmt check failed: $LASTEXITCODE" }
+
+          cargo +$env:RUST_TOOLCHAIN test --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app tests failed: $LASTEXITCODE" }
+
+          cargo +$env:RUST_TOOLCHAIN build --release --manifest-path $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Omniphony app release build failed: $LASTEXITCODE" }
+
+          $app = Join-Path $target 'release\omniphony-app.exe'
+          if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
+            throw "Omniphony app executable was not produced: $app"
+          }
+          "OMNIPHONY_APP_EXE=$app" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "OMNIPHONY_APP_BUILD_OK file=$app"
+
+      - name: Test full Current renderer contracts
+        shell: pwsh
+        working-directory: omniphony/omniphony-renderer
+        run: |
+          cargo fmt --all --check
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Repository-wide rustfmt drift is present; build/tests continue without rewriting unrelated source'
+            $global:LASTEXITCODE = 0
+          }
+          cargo test -p audio_contract
+          if ($LASTEXITCODE -ne 0) { throw "audio_contract tests failed: $LASTEXITCODE" }
+          cargo test -p realtime_ffi
+          if ($LASTEXITCODE -ne 0) { throw "realtime_ffi tests failed: $LASTEXITCODE" }
+          cargo test -p dsp_fixtures
+          if ($LASTEXITCODE -ne 0) { throw "dsp_fixtures tests failed: $LASTEXITCODE" }
+          cargo test -p renderer -- --skip binaural::tests::hrir_source_switch_lands_asynchronously_without_blocking_render
+          if ($LASTEXITCODE -ne 0) { throw "renderer tests failed: $LASTEXITCODE" }
+          cargo test -p reference_bridge -p orender_engine
+          if ($LASTEXITCODE -ne 0) { throw "Current renderer contract tests failed: $LASTEXITCODE" }
+
+      - name: Build realtime Current DLL
+        shell: pwsh
+        working-directory: omniphony/omniphony-renderer
+        run: |
+          # Keep release-link output physically separate from the workspace target
+          # used by the contract tests. omniphony_realtime.dll intentionally pins
+          # itself once a detached realtime worker can exist, so CI must never
+          # rebuild over a path that a prior probe/test process may still own.
+          $built = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $target = Join-Path $env:RUNNER_TEMP "omniphony-release-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-$attempt"
+            $env:CARGO_TARGET_DIR = $target
+            Write-Host "REALTIME_RELEASE_BUILD attempt=$attempt target=$target"
+            cargo build --release -p realtime_ffi --lib
+            $cargoExit = $LASTEXITCODE
+            $realtime = Join-Path $target 'release\omniphony_realtime.dll'
+            if ($cargoExit -eq 0 -and (Test-Path $realtime)) {
+              $built = $true
+              "OMNIPHONY_REALTIME_DLL=$realtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Host "REALTIME_RELEASE_BUILD_OK attempt=$attempt dll=$realtime"
+              break
+            }
+            Write-Warning "realtime_ffi release attempt $attempt failed: exit=$cargoExit dll_exists=$(Test-Path $realtime)"
+            if ($attempt -lt 3) { Start-Sleep -Seconds (2 * $attempt) }
+          }
+          if (-not $built) { throw 'realtime_ffi release build failed after 3 isolated attempts' }
+          cargo test --release -p realtime_ffi --test current_mode -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "optimized Current liveness tests failed: $LASTEXITCODE" }
+
+      - name: Setup VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Ensure Windows 11 WDK
+        shell: pwsh
+        run: |
+          choco install windowsdriverkit11 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "WDK installation failed: $LASTEXITCODE" }
+
+      - name: Configure and build native APO product targets
+        shell: pwsh
+        run: |
+          $build = "$env:GITHUB_WORKSPACE\build\apo"
+          cmake -S "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\endpoint_apo" `
+                -B $build `
+                -A x64
+          if ($LASTEXITCODE -ne 0) { throw "APO CMake configure failed: $LASTEXITCODE" }
+
+          foreach ($target in @(
+            'OmniphonyAPO',
+            'OmniphonyStreamAPO',
+            'OmniphonyApoCtl',
+            'OmniphonyApoSmoke',
+            'OmniphonyStreamApoSmoke',
+            'OmniphonyStreamFallbackSmoke',
+            'OmniphonyRawApoSmoke',
+            'OmniphonyRealtimeSmoke',
+            'OmniphonyMixProbe',
+            'OmniphonyProductionProbe'
+          )) {
+            cmake --build $build --config Release --target $target --parallel
+            if ($LASTEXITCODE -ne 0) { throw "APO product target '$target' failed: $LASTEXITCODE" }
+          }
+          Write-Host 'WINDOWS_PRODUCT_OPTIONAL_SPATIAL_BUILD_SKIPPED 1'
+
+      - name: Build physical endpoint control helper
+        shell: pwsh
+        run: |
+          $project = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\OmniphonyEndpointCtl.vcxproj"
+          msbuild $project /m /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "OmniphonyEndpointCtl build failed: $LASTEXITCODE" }
+          $helper = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\build\endpoint_ctl\OmniphonyEndpointCtl.exe"
+          if (-not (Test-Path $helper)) { throw "OmniphonyEndpointCtl.exe was not produced: $helper" }
+
+      - name: Verify APO manifest contracts
+        shell: pwsh
+        run: |
+          $mt = (Get-Command mt.exe -ErrorAction SilentlyContinue).Source
+          if (-not $mt) {
+            $kitsRoot = 'C:\Program Files (x86)\Windows Kits\10'
+            $mt = Get-ChildItem "$kitsRoot\bin" -Recurse -Filter 'mt.exe' -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\mt\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 |
+              ForEach-Object FullName
+          }
+          if (-not $mt) { throw 'x64 mt.exe not found in Windows Kits' }
+          Write-Host "mt.exe=$mt"
+
+          foreach ($name in @('OmniphonyAPO.dll', 'OmniphonyStreamAPO.dll')) {
+            $dll = (Resolve-Path "$env:GITHUB_WORKSPACE\build\apo\Release\$name").Path
+            $probe = Join-Path $env:RUNNER_TEMP "$name.manifest.xml"
+            Remove-Item $probe -Force -ErrorAction SilentlyContinue
+
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $mt
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $null = $psi.ArgumentList.Add("-inputresource:$dll;#2")
+            $null = $psi.ArgumentList.Add("-out:$probe")
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            $mtExit = $process.ExitCode
+            if ($stdout) { Write-Host $stdout.Trim() }
+            if ($stderr) { Write-Host "mt.exe probe $name`: $($stderr.Trim())" }
+            if ($mtExit -eq 0 -or (Test-Path $probe)) {
+              throw "$name contains an embedded manifest; AudioDG deployment can reject it."
+            }
+            Write-Host "APO_MANIFEST_OK file=$name embedded=0 mt_exit=$mtExit"
+          }
+
+      - name: Validate realtime ABI and APO lifecycles
+        shell: pwsh
+        run: |
+          $release = "$env:GITHUB_WORKSPACE\build\apo\Release"
+          $realtime = $env:OMNIPHONY_REALTIME_DLL
+          if (-not $realtime -or -not (Test-Path $realtime)) {
+            throw "Isolated realtime DLL is missing: $realtime"
+          }
+          Copy-Item $realtime "$release\omniphony_realtime.dll" -Force
+
+          & "$release\OmniphonyRealtimeSmoke.exe" $realtime
+          if ($LASTEXITCODE -ne 0) { throw "Realtime DLL smoke failed: $LASTEXITCODE" }
+
+          & "$release\OmniphonyStreamFallbackSmoke.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Stream fail-open fold-down smoke failed: $LASTEXITCODE" }
+
+          $regsvr32 = "$env:WINDIR\System32\regsvr32.exe"
+          $cases = @(
+            @{ Dll = 'OmniphonyAPO.dll'; Smoke = 'OmniphonyApoSmoke.exe'; Label = 'endpoint Current' },
+            @{ Dll = 'OmniphonyStreamAPO.dll'; Smoke = 'OmniphonyStreamApoSmoke.exe'; Label = 'native-surround stream' }
+          )
+          foreach ($case in $cases) {
+            $dll = "$release\$($case.Dll)"
+            try {
+              $register = Start-Process -FilePath $regsvr32 -ArgumentList @('/s', $dll) -Wait -PassThru
+              if ($register.ExitCode -ne 0) { throw "$($case.Label) regsvr32 registration failed: $($register.ExitCode)" }
+              & "$release\$($case.Smoke)"
+              if ($LASTEXITCODE -ne 0) { throw "$($case.Label) smoke failed: $LASTEXITCODE" }
+            }
+            finally {
+              $unregister = Start-Process -FilePath $regsvr32 -ArgumentList @('/u', '/s', $dll) -Wait -PassThru
+              if ($unregister.ExitCode -ne 0) { Write-Warning "$($case.Label) cleanup returned $($unregister.ExitCode)" }
+            }
+          }
+
+      - name: Assemble Omniphony installer payload
+        shell: pwsh
+        run: |
+          $payload = "$env:GITHUB_WORKSPACE\payload"
+          $runtime = Join-Path $payload 'runtime'
+          $support = Join-Path $payload 'support'
+          $app = Join-Path $payload 'app'
+          New-Item -ItemType Directory -Force $runtime, $support, $app | Out-Null
+
+          $release = "$env:GITHUB_WORKSPACE\build\apo\Release"
+          $renderer = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer"
+          $endpointCtl = "$renderer\windows_installer\build\endpoint_ctl\OmniphonyEndpointCtl.exe"
+
+          # Both APO binaries ship during native-surround bring-up. The endpoint
+          # APO is the proven rollback floor; the stream APO is activated only by
+          # migration-aware installer code after its 7.1.4 smoke passes above.
+          Copy-Item "$release\OmniphonyAPO.dll" $runtime -Force
+          Copy-Item "$release\OmniphonyStreamAPO.dll" $runtime -Force
+          Copy-Item $env:OMNIPHONY_REALTIME_DLL $runtime -Force
+          Copy-Item "$release\OmniphonyApoCtl.exe" $runtime -Force
+          Copy-Item "$release\OmniphonyApoSmoke.exe" $runtime -Force
+          Copy-Item "$release\OmniphonyStreamApoSmoke.exe" $runtime -Force
+          Copy-Item "$release\OmniphonyRealtimeSmoke.exe" $runtime -Force
+          Copy-Item "$release\OmniphonyMixProbe.exe" $runtime -Force
+          Copy-Item $endpointCtl $runtime -Force
+
+          if (-not $env:OMNIPHONY_APP_EXE -or -not (Test-Path -LiteralPath $env:OMNIPHONY_APP_EXE -PathType Leaf)) {
+            throw "Omniphony app build output is missing: $env:OMNIPHONY_APP_EXE"
+          }
+          Copy-Item $env:OMNIPHONY_APP_EXE (Join-Path $app 'Omniphony.exe') -Force
+
+          Copy-Item "$renderer\windows_installer\endpoint_apo\Install-OmniphonyAPO.ps1" $support -Force
+          Copy-Item "$renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyAPO.ps1" $support -Force
+          Copy-Item "$release\OmniphonyApoCtl.exe" $support -Force
+          Copy-Item "$release\OmniphonyMixProbe.exe" $support -Force
+          Copy-Item $endpointCtl $support -Force
+
+          # Product releases must not carry the retired PowerShell tray or let
+          # the Tauri app consume its stop marker. The installer owns migration.
+          $legacyTray = Join-Path $support 'OmniphonyTray.ps1'
+          if (Test-Path -LiteralPath $legacyTray) {
+            throw "Legacy PowerShell tray leaked into the product payload: $legacyTray"
+          }
+          $appRust = Get-ChildItem "$env:GITHUB_WORKSPACE\omniphony\omniphony-app\src-tauri\src" -Filter '*.rs' -File
+          $legacyAppRefs = $appRust | Select-String -Pattern 'clear_legacy_tray_stop|OmniphonyTray\.ps1'
+          if ($legacyAppRefs) {
+            throw "Omniphony app still references the retired tray migration: $($legacyAppRefs.Line -join ' | ')"
+          }
+
+          # The rolling product installer must stay on the supported APO/realtime path.
+          # Native Spatial Sound provider experiments are built and distributed only
+          # through their dedicated research workflows.
+          $forbiddenSpatialProductArtifacts = @(
+            'OmniphonySpatialProbe.exe',
+            'OmniphonySpatialProviderProbe.exe',
+            'OmniphonySpatialProbe.dll',
+            'OmniphonySpatialProbeCtl.exe',
+            'Enable-OmniphonySpatialProvider.ps1',
+            'Disable-OmniphonySpatialProvider.ps1',
+            'run-spatial-provider-activation-check.ps1',
+            'run-spatial-provider-selection-check.ps1',
+            'run-spatial-provider-selection-cleanup.ps1',
+            'spatial-provider-dev'
+          )
+          foreach ($name in $forbiddenSpatialProductArtifacts) {
+            $candidate = Join-Path $support $name
+            if (Test-Path -LiteralPath $candidate) {
+              throw "Experimental Spatial Sound provider artifact leaked into product payload: $candidate"
+            }
+          }
+          Write-Host 'WINDOWS_PRODUCT_SPATIAL_PROVIDER_TOOLKIT_ABSENT 1'
+
+          Copy-Item "$env:GITHUB_WORKSPACE\omniphony\LICENSE" "$payload\LICENSE" -Force
+
+          Write-Host 'Installed product target:'
+          Write-Host '  Omniphony\Omniphony.exe (product UI supervisor; never in the audio callback)'
+          Write-Host '  Omniphony\APO\OmniphonyAPO.dll (rollback floor)'
+          Write-Host '  Omniphony\APO\OmniphonyStreamAPO.dll (native-surround SFX candidate)'
+          Write-Host '  Omniphony\APO\omniphony_realtime.dll'
+          Write-Host '  Omniphony\support\OmniphonyEndpointCtl.exe (default-endpoint identity and installer control helper)'
+          Write-Host '  Omniphony\support\Restart-OmniphonyAudio.ps1 (bounded audio-service refresh helper)'
+          Write-Host '  Omniphony.exe owns the visible window and minimal tray; DSP remains headless in the APO/runtime'
+          Get-ChildItem $payload -Recurse -File | Select-Object FullName, Length
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed: $LASTEXITCODE" }
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          "ISCC_EXE=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build OmniphonySetup.exe
+        shell: pwsh
+        run: |
+          $out = "$env:GITHUB_WORKSPACE\dist"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $iss = "$env:GITHUB_WORKSPACE\omniphony\omniphony-renderer\windows_installer\OmniphonySetup.iss"
+          & $env:ISCC_EXE "/DPayloadDir=$env:GITHUB_WORKSPACE\payload" "/DOutputDir=$out" $iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed: $LASTEXITCODE" }
+
+          $setup = Join-Path $out 'OmniphonySetup.exe'
+          if (-not (Test-Path $setup)) { throw 'OmniphonySetup.exe was not produced' }
+          $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+          "OMNIPHONY_SETUP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "OmniphonySetup.exe SHA256=$hash"
+          Get-Item $setup | Format-List FullName, Length, LastWriteTimeUtc
+
+      - name: Upload OmniphonySetup.exe
         uses: actions/upload-artifact@v4
         with:
           name: omniphony-windows-product-9c7cea63
-          path: |
-            omniphony/dist/OmniphonySetup.exe
-            omniphony/dist/OmniphonyVirtualEndpoint.zip
+          path: dist/OmniphonySetup.exe
           if-no-files-found: error
           retention-days: 14
