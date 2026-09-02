@@ -47,6 +47,36 @@ jobs:
           Write-Host "Omniphony for Windows source=$(git rev-parse HEAD)"
           git status --short
 
+      - name: Preflight installer contract before compilation
+        shell: pwsh
+        run: |
+          $root = "$env:GITHUB_WORKSPACE\omniphony"
+          $scripts = @(
+            "$root\omniphony-renderer\windows_installer\endpoint_apo\Install-OmniphonyWindows.ps1",
+            "$root\omniphony-renderer\windows_installer\endpoint_apo\Install-OmniphonyAPO.ps1",
+            "$root\omniphony-renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyWindows.ps1",
+            "$root\omniphony-renderer\windows_installer\endpoint_apo\Uninstall-OmniphonyAPO.ps1",
+            "$root\omniphony-renderer\windows_installer\endpoint_apo\Restart-OmniphonyAudio.ps1"
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) {
+              throw "PowerShell parse failure in $script : $($errors -join ' | ')"
+            }
+          }
+
+          $issPath = "$root\omniphony-renderer\windows_installer\OmniphonySetup.iss"
+          $iss = Get-Content -LiteralPath $issPath -Raw
+          foreach ($required in @('{#PayloadDir}\runtime\*', '{#PayloadDir}\app\Omniphony.exe', '{#PayloadDir}\support\*')) {
+            if (-not $iss.Contains($required)) { throw "Installer payload contract missing $required" }
+          }
+          foreach ($retired in @('virtual-endpoint', 'SteamStreamingSpeakers', 'OmniphonyVirtualEndpoint')) {
+            if ($iss -match [regex]::Escape($retired)) { throw "Retired transport leaked into product installer: $retired" }
+          }
+          Write-Host 'WINDOWS_INSTALLER_PREFLIGHT_OK 1'
+
       - name: Install pinned Rust toolchain
         shell: pwsh
         run: |
