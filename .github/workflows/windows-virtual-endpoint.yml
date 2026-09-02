@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  GITLAB_REF: c35ecb79700324325badead85590437b27d65b55
+  GITLAB_REF: cdb76bb121cb879bbb4d30e44af21bebcaa188ea
 
 jobs:
   build-windows11-x64:
@@ -46,7 +46,7 @@ jobs:
       - name: Upload exact Windows product
         uses: actions/upload-artifact@v4
         with:
-          name: omniphony-windows-product-c35ecb79
+          name: omniphony-windows-product-cdb76bb1
           path: |
             omniphony/dist/OmniphonySetup.exe
             omniphony/dist/OmniphonyVirtualEndpoint.zip
