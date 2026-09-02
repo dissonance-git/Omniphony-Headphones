@@ -19,7 +19,7 @@ permissions:
 env:
   RUST_TOOLCHAIN: 1.88.0
   UPSTREAM_REF: bb34fba15faf569a6ae9bdea360bc1cf4821354e
-  GITLAB_REF: 191ec8571ae8530f1d51936599f156e88f3572cb
+  GITLAB_REF: 244ce49a44de7c8400ddccca813c98a58dca0986
 
 jobs:
   build-windows11-x64:
